@@ -48,7 +48,7 @@ def initialization_training_epoch(log_likelihoods, losses):
     loss_optimizer.zero_grad()
     data = torch.stack(X_train)
     loss, negLogLikelihood, latent_factors, cluster_attn, firing_attn, smoothness_budget_constrained \
-        = loss_function(data, tau_beta=args.tau_beta, tau_s=args.tau_s, tau_f=args.tau_f, mode='initialize_output')
+        = loss_function(data, tau_beta=args.tau_beta, tau_s=args.tau_s, mode='initialize_output')
     log_likelihoods.append(-negLogLikelihood.item())
     losses.append(-loss.item())
     if args.clip > 0:

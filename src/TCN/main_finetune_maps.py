@@ -77,7 +77,7 @@ def initialization_training_epoch(log_likelihoods, losses):
         loss_optimizer.zero_grad()
         latent_coeffs, cluster_attn, firing_attn = model(binned)
         loss, negLogLikelihood, latent_factors, smoothness_budget_constrained = (
-            loss_function(binned, latent_coeffs, cluster_attn, firing_attn, args.tau_beta, args.tau_s, args.tau_f))
+            loss_function(binned, latent_coeffs, cluster_attn, firing_attn, args.tau_beta, args.tau_s))
         log_likelihoods.append(-negLogLikelihood.item())
         losses.append(-loss.item())
         if args.clip > 0:
@@ -98,7 +98,7 @@ def initialization_evaluation(data, log_likelihoods, losses):
         if args.cuda: data = data.cuda()
         latent_coeffs, cluster_attn, firing_attn = model(data)
         loss, negLogLikelihood, latent_factors, smoothness_budget_constrained = (
-            loss_function(data, latent_coeffs, cluster_attn, firing_attn, args.tau_beta, args.tau_s, args.tau_f))
+            loss_function(data, latent_coeffs, cluster_attn, firing_attn, args.tau_beta, args.tau_s))
     log_likelihoods.append(-negLogLikelihood.item())
     losses.append(-loss.item())
     return log_likelihoods, losses, latent_factors, cluster_attn, firing_attn

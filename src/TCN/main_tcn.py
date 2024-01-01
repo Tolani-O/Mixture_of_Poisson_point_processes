@@ -90,8 +90,8 @@ if not args.train:
 
 print(f'folder_name: {folder_name}')
 output_dir = os.path.join(output_dir, folder_name,
-                          f'{args.stage}_tauBeta{args.tau_beta}_tauS{args.tau_s}_tauF{args.tau_f}_'
-                          f'_batchSize{args.batch_size}_lr{args.lr}_iters{args.num_epochs}_notes-{args.notes}')
+                          f'{args.stage}_tauBeta{args.tau_beta}_tauS{args.tau_s}_batchSize{args.batch_size}'
+                          f'_lr{args.lr}_iters{args.num_epochs}_notes-{args.notes}')
 
 if not args.load:
     if not os.path.exists(output_dir):

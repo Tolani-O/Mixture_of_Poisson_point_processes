@@ -31,7 +31,6 @@ def get_parser():
     parser.add_argument('--tau_psi', type=int, default=1, help='Value for tau_psi')
     parser.add_argument('--tau_beta', type=int, default=100, help='Value for tau_beta')
     parser.add_argument('--tau_s', type=int, default=10, help='Value for tau_s')
-    parser.add_argument('--tau_f', type=int, default=10, help='Value for tau_f')
     parser.add_argument('--num_epochs', type=int, default=1500, help='Number of training epochs')
     parser.add_argument('--notes', type=str, default='empty', help='Run notes')
     parser.add_argument('--K', type=int, default=50, help='Number of neurons')

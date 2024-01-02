@@ -28,6 +28,7 @@ def get_parser():
     parser.add_argument('--init_load_subfolder_map', type=str, default='', help='Which subfolder to load map from')
     parser.add_argument('--init_load_subfolder_finetune', type=str, default='', help='Which subfolder to load finetune from')
     parser.add_argument('--train', type=int, default=0, help='')
+    parser.add_argument('--reset_checkpoint', type=int, default=0, help='')
     parser.add_argument('--tau_psi', type=int, default=1, help='Value for tau_psi')
     parser.add_argument('--tau_beta', type=int, default=100, help='Value for tau_beta')
     parser.add_argument('--tau_s', type=int, default=10, help='Value for tau_s')
@@ -142,6 +143,20 @@ def load_model_checkpoint(model_type, output_dir, folder_name, sub_folder_name, 
         print(f'No {model_type}_{load_epoch}.pth file found in {load_dir}')
         model = None
     return model
+
+
+def reset_metric_checkpoint(output_dir, folder_name, sub_folder_name, metric_files, start_epoch):
+    metrics_dir = os.path.join(output_dir, folder_name, sub_folder_name)
+    for metric_file in metric_files:
+        path = os.path.join(metrics_dir, f'{metric_file}.json')
+        with open(path, 'rb') as file:
+            file_contents = json.load(file)
+        if len(file_contents) > start_epoch:
+            # Keep only the first num_keep_entries
+            file_contents = file_contents[:start_epoch]
+        # Write the modified data back to the file
+        with open(path, 'w') as file:
+            json.dump(file_contents, file, indent=4)
 
 
 def create_relevant_files(output_dir, args, data_seed):

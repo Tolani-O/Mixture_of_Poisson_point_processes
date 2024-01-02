@@ -1,7 +1,8 @@
+import os
 import time
 import torch
 from src.TCN.general_functions import plot_outputs, write_log_and_model, write_losses, plot_losses, \
-    load_model_checkpoint
+    load_model_checkpoint, reset_metric_checkpoint
 from src.TCN.tcn import NegLogLikelihood, TemporalConvNet
 
 
@@ -28,19 +29,38 @@ def define_global_vars(global_vars):
 
 def init_finetune_models(global_vars):
     define_global_vars(global_vars)
+    global model, loss_function
     folder_name = args.init_load_folder
-    if args.stage == 'finetune':
-        sub_folder_name = args.init_load_subfolder_outputs
-        loss_function = load_model_checkpoint('loss', output_dir, folder_name, sub_folder_name, args.init_loss_load_epoch)
-        sub_folder_name = args.init_load_subfolder_map
-        model = load_model_checkpoint('model', output_dir, folder_name, sub_folder_name, args.init_map_load_epoch)
-        start_epoch = 0
     if args.load:
         # This says to load a continue checkpoint for model from 'finetune'
         sub_folder_name = args.init_load_subfolder_finetune
         model = load_model_checkpoint('model', output_dir, folder_name, sub_folder_name, args.init_map_load_epoch)
         loss_function = load_model_checkpoint('loss', output_dir, folder_name, sub_folder_name, args.init_loss_load_epoch)
         start_epoch = args.init_map_load_epoch
+        if args.reset_checkpoint:
+            metric_files = ['log_likelihoods_test', 'losses_test', 'log_likelihoods_train', 'losses_train']
+            reset_metric_checkpoint(output_dir, folder_name, sub_folder_name, metric_files, start_epoch)
+            _, _, latent_factors_train, cluster_attn_train, firing_attn_train = initialization_evaluation(X_train, [], [])
+            _, _, latent_factors_test, cluster_attn_test, firing_attn_test = initialization_evaluation(X_test, [], [])
+            plot_dir = os.path.join(output_dir, folder_name, sub_folder_name)
+            latent_factors = latent_factors_train.detach().numpy()
+            cluster_attn = cluster_attn_train.detach().numpy()
+            firing_attn = firing_attn_train.detach().numpy()
+            plot_outputs(latent_factors, cluster_attn, firing_attn, data_train.intensity, stim_time, plot_dir, 'Train', start_epoch)
+            latent_factors = latent_factors_test.detach().numpy()
+            cluster_attn = cluster_attn_test.detach().numpy()
+            firing_attn = firing_attn_test.detach().numpy()
+            plot_outputs(latent_factors, cluster_attn, firing_attn, data_train.intensity, stim_time, plot_dir, 'Test', start_epoch)
+            plot_losses(data_train.likelihood(), plot_dir, 'Train', 'Likelihood', 20)
+            plot_losses(0, plot_dir, 'Train', 'Loss', 20)
+            plot_losses(data_test.likelihood(), plot_dir, 'Test', 'Likelihood', 20)
+            plot_losses(0, plot_dir, 'Test', 'Loss', 20)
+    elif args.stage == 'finetune':
+        sub_folder_name = args.init_load_subfolder_outputs
+        loss_function = load_model_checkpoint('loss', output_dir, folder_name, sub_folder_name, args.init_loss_load_epoch)
+        sub_folder_name = args.init_load_subfolder_map
+        model = load_model_checkpoint('model', output_dir, folder_name, sub_folder_name, args.init_map_load_epoch)
+        start_epoch = 0
     elif args.stage == 'endtoend':
         dt = torch.round(torch.tensor(stim_time[1] - stim_time[0]) * 1000) / 1000
         loss_function = NegLogLikelihood(state_size, len(X_train), Bspline_matrix, Delta2TDelta2, dt)

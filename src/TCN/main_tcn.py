@@ -75,6 +75,8 @@ output_dir = os.path.join(os.getcwd(), 'outputs')
 if args.stage == 'initialize_output':
     model, loss_function, start_epoch, folder_name = init_initialize_output_models(globals())
 else:
+    if args.batch_size == 'All':
+        args.batch_size = len(X_train)
     # Instantiate the dataset and dataloader
     dataset = CustomDataset(X_train)
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)

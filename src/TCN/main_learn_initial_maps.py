@@ -1,8 +1,9 @@
+import os
 import time
 import torch
 import torch.nn.functional as F
 from src.TCN.general_functions import write_log_and_model, plot_outputs, write_losses, plot_losses, \
-    load_model_checkpoint
+    load_model_checkpoint, reset_metric_checkpoint
 from src.TCN.tcn import TemporalConvNet
 
 
@@ -37,6 +38,22 @@ def init_initialize_map_models(global_vars):
         sub_folder_name = args.init_load_subfolder_map
         model = load_model_checkpoint('model', output_dir, folder_name, sub_folder_name, args.init_map_load_epoch)
         start_epoch = args.init_map_load_epoch
+        if args.reset_checkpoint:
+            metric_files = ['losses_test', 'losses_train']
+            reset_metric_checkpoint(output_dir, folder_name, sub_folder_name, metric_files, start_epoch)
+            _, cluster_attn_train, firing_attn_train = initialization_evaluation(X_train, [])
+            _, cluster_attn_test, firing_attn_test = initialization_evaluation(X_test, [])
+            plot_dir = os.path.join(output_dir, folder_name, sub_folder_name)
+            latent_coeffs = F.softplus(loss_function.state.detach())
+            latent_factors = torch.matmul(latent_coeffs, Bspline_matrix).numpy()
+            cluster_attn = cluster_attn_train.detach().numpy()
+            firing_attn = firing_attn_train.detach().numpy()
+            plot_outputs(latent_factors, cluster_attn, firing_attn, data_train.intensity, stim_time, plot_dir, 'Train', start_epoch)
+            cluster_attn = cluster_attn_test.detach().numpy()
+            firing_attn = firing_attn_test.detach().numpy()
+            plot_outputs(latent_factors, cluster_attn, firing_attn, data_train.intensity, stim_time, plot_dir, 'Test', start_epoch)
+            plot_losses(0, plot_dir, 'Train', 'Loss', 20)
+            plot_losses(0, plot_dir, 'Test', 'Loss', 20)
     else:
         if isinstance(args.param_seed, int):
             torch.manual_seed(args.param_seed)

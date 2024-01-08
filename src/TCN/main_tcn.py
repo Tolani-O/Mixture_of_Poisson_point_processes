@@ -101,7 +101,10 @@ if not args.load:
         plot_spikes(binned, output_dir)
         plot_intensity_and_latents(data_train.time, data_train.latent_factors, data_train.intensity, output_dir)
         plot_latent_coupling(data_train.latent_coupling, output_dir)
-        create_relevant_files(output_dir, args, args.data_seed)
+        output_str = (
+            f"True likelihood Training: {true_likelihood_train},\n"
+            f"True likelihood Test: {true_likelihood_test}")
+        create_relevant_files(output_dir, args, output_str)
 
 if torch.cuda.is_available():
     if not args.cuda:

@@ -159,9 +159,9 @@ def reset_metric_checkpoint(output_dir, folder_name, sub_folder_name, metric_fil
             json.dump(file_contents, file, indent=4)
 
 
-def create_relevant_files(output_dir, args, data_seed):
-    with open(os.path.join(output_dir, 'log.txt'), 'w'):
-        pass
+def create_relevant_files(output_dir, args, output_str):
+    with open(os.path.join(output_dir, 'log.txt'), 'w') as file:
+        file.write(output_str)
 
     with open(os.path.join(output_dir, 'log_likelihoods_batch.json'), 'w+b') as file:
         file.write(b'[]')
@@ -185,7 +185,7 @@ def create_relevant_files(output_dir, args, data_seed):
                    f"--K {args.K} --R {args.R} --L {args.L} --intensity_mltply {args.intensity_mltply} "
                    f"--intensity_bias {args.intensity_bias} --tau_beta {args.tau_beta} --tau_s {args.tau_s} "
                    f"--num_epochs {args.num_epochs} --notes {args.notes} "
-                   f"--data_seed {data_seed} --param_seed {args.param_seed} --load_and_train 1")
+                   f"--data_seed {args.data_seed} --param_seed {args.param_seed} --load_and_train 1")
     with open(os.path.join(output_dir, 'command.txt'), 'w') as file:
         file.write(command_str)
 

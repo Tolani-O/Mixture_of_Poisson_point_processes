@@ -103,7 +103,7 @@ if not args.load:
         plot_latent_coupling(data_train.latent_coupling, output_dir)
         output_str = (
             f"True likelihood Training: {true_likelihood_train},\n"
-            f"True likelihood Test: {true_likelihood_test}")
+            f"True likelihood Test: {true_likelihood_test}\n")
         create_relevant_files(output_dir, args, output_str)
 
 if torch.cuda.is_available():

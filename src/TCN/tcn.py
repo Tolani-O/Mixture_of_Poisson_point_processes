@@ -83,10 +83,11 @@ class NegLogLikelihood(nn.Module):
 
     def likelihood_term(self, spike_trains, latent_factors, cluster_attn, firing_attn):
         # Compute the loss
-        weighted_firing = cluster_attn * firing_attn
-        intensity_functions = torch.matmul(weighted_firing, latent_factors).unsqueeze(2)
-        intensity_functions_repeated = intensity_functions.repeat_interleave(spike_trains.shape[2], dim=2)
-        negLogLikelihood = -torch.sum(torch.log(intensity_functions_repeated) * spike_trains - intensity_functions * self.del_t)
+        num_trials = spike_trains.shape[2]
+        log_intensity_functions = (firing_attn + torch.matmul(cluster_attn, latent_factors)).unsqueeze(2)
+        log_intensity_functions_repeated = log_intensity_functions.repeat_interleave(num_trials, dim=2)
+        intensity_functions = torch.exp(log_intensity_functions)
+        negLogLikelihood = -torch.sum(log_intensity_functions_repeated * spike_trains - intensity_functions * self.del_t)
         return negLogLikelihood
 
     def penalty_term(self, latent_factors, tau_beta, tau_s):
@@ -100,11 +101,12 @@ class NegLogLikelihood(nn.Module):
         tau_beta = torch.tensor(tau_beta)
         tau_s = torch.tensor(tau_s)
         if mode=='initialize_output':
-            latent_coeffs = F.softplus(self.state)
-            latent_factors = torch.matmul(latent_coeffs, self.Bspline_matrix)
+            latent_coeffs = self.state
+            log_latent_factors = torch.matmul(latent_coeffs, self.Bspline_matrix)
+            latent_factors = torch.exp(log_latent_factors)
             cluster_attn = F.softmax(self.cluster_attn, dim=-1)
-            firing_attn = F.softplus(self.firing_attn)
-            negLogLikelihood = self.likelihood_term(spike_trains, latent_factors, cluster_attn, firing_attn)
+            firing_attn = self.firing_attn
+            negLogLikelihood = self.likelihood_term(spike_trains, log_latent_factors, cluster_attn, firing_attn)
             penalty, smoothness_budget_constrained = self.penalty_term(latent_factors, tau_beta, tau_s)
             loss = negLogLikelihood + penalty
             return loss, negLogLikelihood, latent_factors, cluster_attn, firing_attn, smoothness_budget_constrained

@@ -47,7 +47,7 @@ def initialization_training_epoch(log_likelihoods, losses):
     loss_function.train()
     loss_optimizer.zero_grad()
     data = torch.stack(X_train)
-    loss, negLogLikelihood, latent_factors, cluster_attn, firing_attn, smoothness_budget_constrained \
+    loss, negLogLikelihood, log_latent_factors, cluster_attn, firing_attn, smoothness_budget_constrained \
         = loss_function(data, tau_beta=args.tau_beta, tau_s=args.tau_s, mode='initialize_output')
     log_likelihoods.append(-negLogLikelihood.item())
     losses.append(-loss.item())
@@ -57,7 +57,7 @@ def initialization_training_epoch(log_likelihoods, losses):
     loss.backward()
     # Update the parameters for both the model and the loss_function
     loss_optimizer.step()
-    return log_likelihoods, losses, latent_factors, cluster_attn, firing_attn, smoothness_budget_constrained
+    return log_likelihoods, losses, log_latent_factors, cluster_attn, firing_attn, smoothness_budget_constrained
 
 
 def learn_initial_outputs(global_vars):
@@ -68,7 +68,7 @@ def learn_initial_outputs(global_vars):
     losses_train = []
     start_time = time.time()  # Record the start time of the epoch
     for epoch in range(start_epoch, start_epoch + args.num_epochs):
-        log_likelihoods_train, losses_train, latent_factors, cluster_attn, firing_attn, smoothness_budget_constrained\
+        log_likelihoods_train, losses_train, log_latent_factors, cluster_attn, firing_attn, smoothness_budget_constrained\
             = initialization_training_epoch(log_likelihoods_train, losses_train)
         if epoch % args.log_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             end_time = time.time()  # Record the end time of the epoch
@@ -82,10 +82,10 @@ def learn_initial_outputs(global_vars):
                 f"Loss train: {cur_loss_train:.5f}, Log Likelihood train: {cur_log_likelihood_train:.5f},\n"
                 f"lr: {args.lr:.5f}, smoothness_budget: {smoothness_budget_constrained.T}\n")
             write_log_and_model(output_str, output_dir, epoch, loss_function=loss_function)
-            latent_factors = latent_factors.detach().numpy()
+            log_latent_factors = log_latent_factors.detach().numpy()
             cluster_attn = cluster_attn.detach().numpy()
             firing_attn = firing_attn.detach().numpy()
-            plot_outputs(latent_factors, cluster_attn, firing_attn, data_train.intensity, stim_time, output_dir, 'Train', epoch)
+            plot_outputs(log_latent_factors, cluster_attn, firing_attn, data_train.intensity, stim_time, output_dir, 'Train', epoch)
             is_empty = start_epoch == 0 and epoch == 0
             write_losses(log_likelihoods_train, 'Train', 'Likelihood', output_dir, is_empty)
             write_losses(losses_train, 'Train', 'Loss', output_dir, is_empty)

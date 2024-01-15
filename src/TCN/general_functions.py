@@ -202,7 +202,7 @@ def write_log_and_model(output_str, output_dir, epoch, model=None, loss_function
         torch.save(loss_function, os.path.join(models_path, f'loss_{epoch}.pth'))
 
 
-def plot_outputs(latent_factors, cluster_attn, firing_attn, true_intensity, stim_time, output_dir, folder, epoch, batch=10):
+def plot_outputs(log_latent_factors, cluster_attn, firing_attn, true_intensity, stim_time, output_dir, folder, epoch, batch=10):
 
     output_dir = os.path.join(output_dir, folder)
     if not os.path.exists(output_dir):
@@ -215,17 +215,16 @@ def plot_outputs(latent_factors, cluster_attn, firing_attn, true_intensity, stim
     plt.savefig(os.path.join(output_dir, f'cluster_attn_{epoch}.png'))
 
     plt.figure(figsize=(5,height))
-    sns.heatmap(firing_attn, annot=True, fmt=".2f", annot_kws={"color": "blue"})
+    sns.heatmap(np.exp(firing_attn), annot=True, fmt=".2f", annot_kws={"color": "blue"})
     plt.title('Heatmap of firing_attn')
     plt.savefig(os.path.join(output_dir, f'firing_attn_{epoch}.png'))
 
-    L, T = latent_factors.shape
+    L, T = log_latent_factors.shape
     K = cluster_attn.shape[0]
     if K < batch:
         batch = cluster_attn.shape[0]
 
-    weighted_firing = cluster_attn * firing_attn
-    learned_intensity = weighted_firing @ latent_factors
+    learned_intensity = np.exp(firing_attn + cluster_attn @ log_latent_factors)
     avg_lambda_intensities = np.mean(learned_intensity, axis=0)
 
     plt.figure()
@@ -233,6 +232,7 @@ def plot_outputs(latent_factors, cluster_attn, firing_attn, true_intensity, stim
     plt.ylim(bottom=0)
     plt.savefig(os.path.join(output_dir, 'main_AvgLambdaIntensities.png'))
 
+    latent_factors = np.exp(log_latent_factors)
     plt.figure()
     for i in range(L):
         plt.plot(stim_time, latent_factors[i, :], label=f'Factor [{i}, :]')

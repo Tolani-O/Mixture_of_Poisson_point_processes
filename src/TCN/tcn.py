@@ -90,7 +90,8 @@ class NegLogLikelihood(nn.Module):
         negLogLikelihood = -torch.sum(log_intensity_functions_repeated * spike_trains - intensity_functions * self.del_t)
         return negLogLikelihood
 
-    def penalty_term(self, latent_factors, tau_beta, tau_s):
+    def penalty_term(self, log_latent_factors, tau_beta, tau_s):
+        latent_factors = torch.exp(log_latent_factors)
         smoothness_budget_constrained = F.softmax(self.smoothness_budget, dim=0)
         beta_s2_penalty = tau_beta * (smoothness_budget_constrained.t() @ torch.sum((latent_factors @ self.Delta2TDelta2) * latent_factors, axis=1)).squeeze()
         smoothness_budget_penalty = tau_s * torch.sum(self.smoothness_budget ** 2)
@@ -103,13 +104,12 @@ class NegLogLikelihood(nn.Module):
         if mode=='initialize_output':
             latent_coeffs = self.state
             log_latent_factors = torch.matmul(latent_coeffs, self.Bspline_matrix)
-            latent_factors = torch.exp(log_latent_factors)
             cluster_attn = F.softmax(self.cluster_attn, dim=-1)
             firing_attn = self.firing_attn
             negLogLikelihood = self.likelihood_term(spike_trains, log_latent_factors, cluster_attn, firing_attn)
-            penalty, smoothness_budget_constrained = self.penalty_term(latent_factors, tau_beta, tau_s)
+            penalty, smoothness_budget_constrained = self.penalty_term(log_latent_factors, tau_beta, tau_s)
             loss = negLogLikelihood + penalty
-            return loss, negLogLikelihood, latent_factors, cluster_attn, firing_attn, smoothness_budget_constrained
+            return loss, negLogLikelihood, log_latent_factors, cluster_attn, firing_attn, smoothness_budget_constrained
         elif mode=='initialize_map':
             if idx is None:
                 idx = torch.arange(cluster_attn.size(0))

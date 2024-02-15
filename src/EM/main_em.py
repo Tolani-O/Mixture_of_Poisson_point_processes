@@ -29,16 +29,16 @@ def main(K, R, L, intensity_mltply, intensity_bias, tau_psi, tau_beta, tau_s, be
     binned, stim_time = data.sample_data()
     Y = binned  # K x T
     degree = 3
-    joint_factor_indices = [0]
+    joint_factor_indices = [0,1]
     trial_condition_design = np.zeros((R, 5))
     trial_condition_design[:, 0] = 1
     model = SpikeTrainModel(Y, stim_time, joint_factor_indices, trial_condition_design)
     model = model.initialize_for_time_warping(L, degree)
     # model.compute_loss()
     # model.beta_gradients()
-    model.update_beta_factors()
-
-
+    # model.update_beta(10)
+    # model.peaktime_gradients()
+    model.update_peaktimes(10)
 
 
 

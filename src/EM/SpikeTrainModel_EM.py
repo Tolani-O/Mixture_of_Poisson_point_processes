@@ -3,7 +3,7 @@ import multiprocessing as mp
 from src.psplines_gradient_method.general_functions import create_second_diff_matrix
 from scipy.interpolate import BSpline
 from scipy.sparse import csr_array, vstack, hstack
-from scipy.special import psi
+from scipy.special import psi, softmax
 from scipy.optimize import root
 
 
@@ -14,10 +14,13 @@ class SpikeTrainModel:
         self.theta = None  # 1 x L
         self.pi = None  # 1 x L
         self.beta = None  # L x P
-        self.sigma = None  # 1 x 1
+        self.sigma2 = None  # 1 x 1
         self.mu = None  # 1 x C
         self.S = None  # 1 x R
         self.d2 = None  # 1 x L
+
+        self.beta_minus = None  # L x P
+        self.S_minus = None  # 1 x R
 
         # parameters
         self.Y = Y  # K x R x T
@@ -45,6 +48,8 @@ class SpikeTrainModel:
         self.deltatSumExpN_vector = None
         self.trial_warped_factors = None
         self.trial_warped_splines = None
+        self.WxY_matrix = None
+        self.WxA_matrix = None
 
 
     def initialize_for_time_warping(self, L, degree=3):
@@ -82,7 +87,7 @@ class SpikeTrainModel:
         self.alpha = np.random.rand(L)
         self.theta = np.random.rand(L)
         self.pi = np.random.rand(L)
-        self.sigma = np.random.rand(1)
+        self.sigma2 = np.random.rand(1)
         self.mu = np.random.rand(C)
         self.compute_posterior_terms()
 
@@ -109,18 +114,18 @@ class SpikeTrainModel:
     def warped_time(self, avg_peak_time, trial_peak_time):
         time = self.time
         warped_time = np.zeros_like(time)
+        l = time[self.left_landmark]
+        r = time[self.right_landmark]
+        p = avg_peak_time
+        s = trial_peak_time
+        s_new = p + s
+        if s_new < l:
+            s_new = l
+        elif s_new > r:
+            s_new = r
+        s_new = 0.45  # TODO: remove this
         for i in range(len(time)):
             t = time[i]
-            l = time[self.left_landmark]
-            r = time[self.right_landmark]
-            p = avg_peak_time
-            s = trial_peak_time
-            s_new = p + s
-            if s_new < l:
-                s_new = l
-            elif s_new > r:
-                s_new = r
-            s_new = 0.45 # TODO: remove this
             if t < l:
                 warped_time[i] = t
             elif t < s_new:
@@ -134,24 +139,22 @@ class SpikeTrainModel:
     def warped_latent_factors_trial(self, gamma, avg_peak_time, trial_peak_time): # warped factors for trial r
         warped_time = self.warped_time(avg_peak_time, trial_peak_time)
         warped_splines = BSpline.design_matrix(warped_time, self.knots, self.degree).transpose()
-        warped_factors = gamma @ warped_splines
-        # splines = BSpline(self.knots, beta.T, self.degree)
-        # warped_factors2 = splines(warped_time)
-        return warped_splines, warped_factors
+        warped_factor = gamma @ warped_splines
+        return warped_splines, warped_factor
 
     def warped_latent_factors(self):
         splines = self.B
-        factors = self.beta @ splines
         beta = self.beta[self.joint_factors_indices]
+        factors = np.exp(beta) @ splines
         trial_warped_factors = []
         trial_warped_splines = []
-        for i in self.joint_factors_indices:
-            ave_peak_time = np.max(factors[i, self.left_landmark:self.right_landmark])
+        for i in range(factors.shape[0]):
+            avg_peak_time = self.time[np.argmax(factors[i, self.left_landmark:self.right_landmark])]
             trial_factors = []
             trial_splines = []
             for trial_peak_time in self.S:
-                warped_splines, warped_factors = self.warped_latent_factors_trial(np.exp(beta), ave_peak_time, trial_peak_time)
-                trial_factors.append(warped_factors)
+                warped_splines, warped_factor = self.warped_latent_factors_trial(np.exp(beta[i,:]), avg_peak_time, trial_peak_time)
+                trial_factors.append(warped_factor)
                 trial_splines.append(warped_splines)
             trial_warped_factors.append(np.vstack(trial_factors))
             trial_warped_splines.append(trial_splines)
@@ -173,17 +176,21 @@ class SpikeTrainModel:
         # Compute Y_k_sum for all k in  one go
         Y_k_sum = np.sum(self.Y, axis=(1, 2))
         Y_k_sum_reshape = Y_k_sum.reshape((1, -1))
-        alpha_pow_Y_theta_pow_alpha_pi_matrix = (np.power(alpha, Y_k_sum_reshape) *
-                                                 np.power(self.theta, self.alpha)[:, np.newaxis] *
-                                                 self.pi[:, np.newaxis])
+        # alpha_pow_Y_theta_pow_alpha_pi_matrix = (np.power(alpha, Y_k_sum_reshape) *
+        #                                          np.power(self.theta, self.alpha)[:, np.newaxis] *
+        #                                          self.pi[:, np.newaxis])
         # Compute alpha_plus_Y_matrix for all k, l in one go
         alpha_plus_Y_matrix = self.alpha[:, np.newaxis] + Y_k_sum
         # Compute deltatSumExpN_vector for all k, l in one go
         deltatSumExpN_vector = self.dt * np.sum(np.exp(trial_warped_factors), axis=(1, 2)) + self.theta
         deltatSumExpN_plus_theta_vector = deltatSumExpN_vector + self.theta
 
-        w_matrix = (np.exp(YxN_matrix) * alpha_pow_Y_theta_pow_alpha_pi_matrix) / deltatSumExpN_plus_theta_vector[:, np.newaxis] ** alpha_plus_Y_matrix
-        w_matrix = w_matrix / np.sum(w_matrix, axis=1)[:, np.newaxis]
+        w_matrix = (YxN_matrix - alpha_plus_Y_matrix * np.log(deltatSumExpN_plus_theta_vector[:, np.newaxis]) +
+            self.alpha[:, np.newaxis] * np.log(self.theta[:, np.newaxis]) + np.dot(alpha, Y_k_sum_reshape) +
+            np.log(self.pi[:, np.newaxis])) # K x L
+        w_matrix = softmax(w_matrix, axis=0)
+        # w_matrix2 = (np.exp(YxN_matrix) * alpha_pow_Y_theta_pow_alpha_pi_matrix) / deltatSumExpN_plus_theta_vector[:, np.newaxis] ** alpha_plus_Y_matrix
+        # w_matrix2 = w_matrix / np.sum(w_matrix, axis=1)[:, np.newaxis]
         A_matrix = (alpha_plus_Y_matrix / deltatSumExpN_plus_theta_vector[:, np.newaxis])
         B_matrix = psi(alpha_plus_Y_matrix) - np.log(deltatSumExpN_plus_theta_vector[:, np.newaxis])  # K x L
         self.w_matrix = w_matrix
@@ -193,166 +200,145 @@ class SpikeTrainModel:
         self.deltatSumExpN_vector = deltatSumExpN_vector
         self.trial_warped_factors = trial_warped_factors
         self.trial_warped_splines = trial_warped_splines
+        self.WxY_matrix = np.einsum('lk,krt->lrt', self.w_matrix, self.Y)
+        self.WxA_matrix = np.sum(self.w_matrix * self.a_matrix, axis=1)[:, np.newaxis, np.newaxis]
 
     def compute_loss(self):
 
         LK = self.w_matrix * (self.YxN_matrix - self.a_matrix*(self.deltatSumExpN_vector[:, np.newaxis] + self.theta[:, np.newaxis]) -
                               np.log(self.alpha[:, np.newaxis]) + self.alpha[:, np.newaxis]*(np.log(self.theta[:, np.newaxis]) + self.b_matrix) +
                               np.log(self.pi[:, np.newaxis]))
-        LR = -(1/2)*np.log(2*np.pi*self.sigma**2) - (1/2)*((self.S - self.C @ self.mu)/self.sigma)**2
+        LR = -(1/2) * np.log(2 * np.pi * self.sigma2) - (1 / 2) * ((self.S - self.C @ self.mu) / np.sqrt(self.sigma2)) ** 2
         L = np.sum(LK) + np.sum(LR)
         return L
 
     def beta_gradients(self):
 
         # some of these matrices are three dimensional
-        WxY_matrix = np.einsum('lk,krt->lrt', self.w_matrix, self.Y)
-        deltatExpN_times_WxA_matrix = self.dt * np.exp(self.trial_warped_factors) * np.sum(self.w_matrix * self.a_matrix, axis=1)[:, np.newaxis, np.newaxis]
-        factor_gradient_term = WxY_matrix - deltatExpN_times_WxA_matrix
-        L, R, T = factor_gradient_term.shape
+        deltatExpN_times_WxA_matrix = self.dt * np.exp(self.trial_warped_factors) * self.WxA_matrix
+        gradient_term = self.WxY_matrix - deltatExpN_times_WxA_matrix
+        L, R, T = gradient_term.shape
         P = self.beta.shape[1]
         beta_gradients = np.zeros((L, P))
         for l in range(L):
             factor_gradient_intermediate = np.zeros((P, R))
             for r in range(R):
-                factor_gradient_intermediate[:,r,np.newaxis] = self.trial_warped_splines[l][r] @ factor_gradient_term[l, r, :, np.newaxis]
+                factor_gradient_intermediate[:,r,np.newaxis] = self.trial_warped_splines[l][r] @ gradient_term[l, r, :, np.newaxis]
             beta_gradients[l,:] = np.sum(factor_gradient_intermediate, axis=1)
         beta_gradients = np.exp(self.beta) * beta_gradients
         return beta_gradients
 
-    def update_beta_factors(self):
-
-        # smooth_gamma
-        ct = 0
-        learning_rate = gamma_factor
-        beta_gradients = self.beta_gradients()
-        dlogL_dgamma =
-        while ct < max_iters:
-            beta_plus = self.beta + learning_rate * beta_gradients
-
-            # set up variables to compute loss
-            maxes = [np.max(self.chi[k][:, np.newaxis] + self.c[k][:, np.newaxis] + gamma_plus) for k in range(K)]
-            sum_exps_chi = [np.sum(np.exp(self.chi[k] - maxes[k])) for k in range(K)]
-            sum_exps_chi_plus_gamma_B = [
-                np.sum(np.exp(self.chi[k][:, np.newaxis] + self.c[k][:, np.newaxis] + gamma_plus - maxes[k]),
-                       axis=0)[np.newaxis, :] @ b for k, b in enumerate(B_sparse)]
-            log_likelihood = np.sum(
-                np.vstack([(np.log(sum_exps_chi_plus_gamma_B[k]) - np.log(sum_exps_chi[k])) * self.Y[k] -
-                           (1 / sum_exps_chi[k] * sum_exps_chi_plus_gamma_B[k]) * self.dt for k in range(K)]))
-            max_gamma = np.max(gamma_plus)
-            beta_minus_max = np.exp(gamma_plus - max_gamma)
-            beta_s2_penalty = - tau_beta * np.exp(2 * max_gamma) * (
-                    s2_norm.T @ np.sum((beta_minus_max @ self.BDelta2TDelta2BT) * beta_minus_max,
-                                       axis=1)).squeeze()
-            loss_next = log_likelihood + psi_penalty + kappa_penalty + beta_s2_penalty + d2_penalty
-            # Armijo condition, using Frobenius norm for matrices, but for maximization
-            if loss_next >= loss + alpha * learning_rate * np.linalg.norm(dlogL_dgamma, ord='fro') ** 2:
-                break
-            learning_rate *= gamma_factor
-            ct += 1
-
-        if ct < max_iters:
-            ct_gamma = ct
-            smooth_gamma = learning_rate
-            loss = loss_next
-            self.gamma = gamma_plus
-            log_likelihood_cache = log_likelihood
-        else:
-            ct_gamma = np.inf
-            smooth_gamma = 0
-        loss_gamma = loss
-
-        # set up variables to compute loss in next round
-        maxes = [np.max(self.chi[k][:, np.newaxis] + self.c[k][:, np.newaxis] + self.gamma) for k in range(K)]
-        sum_exps_chi = [np.sum(np.exp(self.chi[k] - maxes[k])) for k in range(K)]
-        sum_exps_chi_plus_gamma_B = [
-            np.sum(np.exp(self.chi[k][:, np.newaxis] + self.c[k][:, np.newaxis] + self.gamma - maxes[k]), axis=0)[
-            np.newaxis, :] @ b for k, b in enumerate(B_sparse)]
-        log_likelihood = np.sum(
-            np.vstack([(np.log(sum_exps_chi_plus_gamma_B[k]) - np.log(sum_exps_chi[k])) * self.Y[k] -
-                       (1 / sum_exps_chi[k] * sum_exps_chi_plus_gamma_B[k]) * self.dt for k in range(K)]))
-        max_gamma = np.max(self.gamma)
-        beta_minus_max = np.exp(self.gamma - max_gamma)
-
-
-
-
-
-
-
-
-
-
-
-
-        # TODO: convert the factor_gradient matrix into a vector before returning, as we need to use a vector
-        # TODO: for the root finding
-        result = root(self.beta_gradients, self.beta)
-        if not result.success:
-            raise ValueError("Root finding did not converge")
-        return result.x
-
-
-
-    def compute_likelihood_terms(self):
-        trial_warped_factors = self.warped_latent_factors()
+    def update_factor_terms(self):
+        trial_warped_splines, trial_warped_factors = self.warped_latent_factors()
         # Compute YxN_matrix for all k, l in one go
-        YxN_matrix = np.einsum('krt,lrt->kl', self.Y, trial_warped_factors)
-        # Compute deltatSumExpN_plus_theta_vector for all k, l in one go
-        deltatSumExpN_plus_theta_vector = self.dt * np.sum(np.exp(trial_warped_factors), axis=(1, 2)) + self.theta
-        return YxN_matrix, deltatSumExpN_plus_theta_vector
+        self.YxN_matrix = np.einsum('krt,lrt->kl', self.Y, trial_warped_factors).T
+        self.deltatSumExpN_vector = self.dt * np.sum(np.exp(trial_warped_factors), axis=(1, 2))
+        self.trial_warped_factors = trial_warped_factors
+        self.trial_warped_splines = trial_warped_splines
 
-    def trial_peaktime_gradient(self, avg_peak_time, trial_peak_time):
+    def update_beta(self, loss, factor=1e-2, alpha=0.1, max_iters=4):
+
+        ct = 0
+        learning_rate = 1
+        beta_gradients = self.beta_gradients()
+        self.beta_minus = np.copy(self.beta)
+        loss_next = loss
+        while ct < max_iters:
+            self.beta = self.beta_minus + learning_rate * beta_gradients
+            self.update_factor_terms()
+            loss_next = self.compute_loss()
+            # Armijo condition, using Frobenius norm for matrices, but for maximization
+            if loss_next >= loss + alpha * learning_rate * np.linalg.norm(beta_gradients, ord='fro') ** 2:
+                break
+            learning_rate *= factor
+            ct += 1
+        if ct < max_iters:
+            loss = loss_next
+        else:
+            ct = np.inf
+            self.beta = self.beta_minus
+        self.update_factor_terms()
+        return loss, ct
+
+    def trial_peaktime_gradient_for_timewarp(self, avg_peak_time, trial_peak_time):
         time = self.time
         warped_time_gradient = np.zeros_like(time)
+        l = time[self.left_landmark]
+        r = time[self.right_landmark]
+        p = avg_peak_time
+        s = trial_peak_time
+        s_new = p + s
+        if s_new < l:
+            s_new = l
+        elif s_new > r:
+            s_new = r
+        s_new = 0.45  # TODO: remove this
         for i in range(len(time)):
             t = time[i]
-            l = self.left_landmark
-            r = self.right_landmark
-            p = avg_peak_time
-            s = trial_peak_time
             if t < l:
                 warped_time_gradient[i] = 0
-            elif t < p + s:
-                warped_time_gradient[i] = ((t-l)*(l-p))/(p+s-l)**2
+            elif t < s_new:
+                warped_time_gradient[i] = ((t-l)*(l-p))/(s_new-l)**2
             elif t < r:
-                warped_time_gradient[i] = ((t-r)*(r-p))/(r-p-s)**2
+                warped_time_gradient[i] = ((t-r)*(r-p))/(r-s_new)**2
             else:
                 warped_time_gradient[i] = 0
         return warped_time_gradient
 
-    def bspline_gradients(self, beta):
-        time = self.time
-        spl = BSpline(self.knots, beta, 3)
-        spl_deriv = spl.derivative()
-        latent = spl(time)
-        avg_peak_time = np.max(latent[self.left_landmark:self.right_landmark]) # TODO: where max not max
-        latent_trials = []
-        latent_trials_deriv = []
-        for trial_peak_time in self.S:
-            warped_time = self.warped_time(avg_peak_time, trial_peak_time)
-            latent_trials.append(spl(warped_time))
-            latent_deriv = spl_deriv(warped_time) * self.trial_peaktime_gradient(avg_peak_time, trial_peak_time)
-            latent_trials_deriv.append(latent_deriv)
-        return latent_trials, latent_trials_deriv # R x T
+    def NDeriv_times_PhiDeriv_gradients(self):
+        splines = self.B
+        beta = self.beta[self.joint_factors_indices]
+        factors = np.exp(beta) @ splines
+        splines = BSpline(self.knots, beta.T, self.degree)
+        splines_derivatives = splines.derivative()
+        WarpedFactorsDerivs_x_WarpedTimesDerivs = []
+        for i in range(factors.shape[0]):
+            avg_peak_time = self.time[np.argmax(factors[i, self.left_landmark:self.right_landmark])]
+            trial_factor_derivs = []
+            for trial_peak_time in self.S:
+                warped_time = self.warped_time(avg_peak_time, trial_peak_time)
+                trial_deriv = splines_derivatives(warped_time)[np.newaxis,:,i] * self.trial_peaktime_gradient_for_timewarp(avg_peak_time, trial_peak_time)[np.newaxis,:]
+                trial_factor_derivs.append(trial_deriv)
+            WarpedFactorsDerivs_x_WarpedTimesDerivs.append(np.vstack(trial_factor_derivs))
+        WarpedFactorsDerivs_x_WarpedTimesDerivs = np.stack(WarpedFactorsDerivs_x_WarpedTimesDerivs)
+        return WarpedFactorsDerivs_x_WarpedTimesDerivs # L_joint x R x T
 
-    def peaktime_gradients(self, S):
-        beta = self.beta[self.joint_factors_indices] #TODO: need to make sure this still works with multiple areas
-        latent_trials, latent_trials_deriv = self.peaktime_gradients(beta) #TODO: be sure to pass one beta in here
+    def peaktime_gradients(self):
 
-        # Y * latent_deriv_trials multiplying each Y_k by the trial gradients, so it is K x R x T
-        # TODO this is wrong because we should not be summing across trials, but the gist is there
-        trial_gradients = np.sum(w_matrix[:,l] * (Y * latent_trials_deriv - (alpha_plus_Y_matrix/deltaSumN_plus_theta_matrix)*
-               self.dt*np.exp(latent_trials)*latent_trials_deriv)) - (1/self.sigma**2)*np.sum(S - self.C @ self.mu)
-        return trial_gradients
+        # some of these matrices are three dimensional
+        deltatExpN_times_WxA_matrix = self.dt * np.exp(self.trial_warped_factors) * self.WxA_matrix
+        gradient_term = self.WxY_matrix[self.joint_factors_indices,:,:] - deltatExpN_times_WxA_matrix[self.joint_factors_indices,:,:]
+        L, R, T = gradient_term.shape
+        WarpedFactorsDerivs_x_WarpedTimesDerivs = self.NDeriv_times_PhiDeriv_gradients()
+        sum_k_term = np.sum(gradient_term * WarpedFactorsDerivs_x_WarpedTimesDerivs, axis=(0, 2))[np.newaxis,:]
+        sum_r_term = (1/self.sigma2)*np.sum(self.S - self.C @ self.mu)
+        S_gradients = sum_k_term - sum_r_term
+        return S_gradients[0,:]
 
-    def update_peaktimes(self):
-        # find root of this function
-        S = self.S
-        result = root(self.peaktime_gradients, s)
-        if not result.success:
-            raise ValueError("Root finding did not converge")
-        return result.x
+
+    def update_peaktimes(self, loss, factor=1e-2, alpha=0.1, max_iters=4):
+
+        ct = 0
+        learning_rate = 1
+        S_gradients = self.peaktime_gradients()
+        self.S_minus = np.copy(self.S)
+        loss_next = loss
+        while ct < max_iters:
+            self.S = self.S_minus + learning_rate * S_gradients
+            self.update_factor_terms()
+            loss_next = self.compute_loss()
+            # Armijo condition, using Frobenius norm for matrices, but for maximization
+            if loss_next >= loss + alpha * learning_rate * np.sum(S_gradients * S_gradients):
+                break
+            learning_rate *= factor
+            ct += 1
+        if ct < max_iters:
+            loss = loss_next
+        else:
+            ct = np.inf
+            self.beta = self.beta_minus
+        self.update_factor_terms()
+        return loss, ct
 
     def alpha_gradient(self, alpha):
         (trial_warped_factors, YxN_matrix, alpha_pow_Y_theta_pow_alpha_pi_matrix, alpha_plus_Y_matrix,
@@ -384,8 +370,8 @@ class SpikeTrainModel:
         self.pi = sum_k_w_matrix / w_matrix.shape[0]
         # update mu
         self.mu = np.sum(self.S @ self.C) / np.sum(self.C, axis=0)
-        # update sigma
-        self.sigma = np.sqrt(np.sum((self.S - self.C @ self.mu) ** 2) / self.C.shape[0])
+        # update sigma2
+        self.sigma2 = np.sum((self.S - self.C @ self.mu) ** 2) / self.C.shape[0]
 
     def log_obj_with_backtracking_line_search_and_time_warping(self, tau_psi, tau_beta, tau_s, beta_first=1,
                                                                time_warping=False,

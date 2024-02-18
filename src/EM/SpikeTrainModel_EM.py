@@ -8,38 +8,41 @@ from scipy.optimize import root
 
 
 class SpikeTrainModel:
-    def __init__(self, Y, time, joint_factor_indices, trial_condition_design):
+    def __init__(self, Y, time, trial_condition_design):
         # variables
-        self.alpha = None  # 1 x L
-        self.theta = None  # 1 x L
-        self.pi = None  # 1 x L
-        self.beta = None  # L x P
-        self.sigma2 = None  # 1 x 1
-        self.mu = None  # 1 x C
-        self.S = None  # 1 x R
+        self.alpha = None  # A x L
+        self.theta = None  # A x L
+        self.pi = None  # A x L
+        self.beta = None  # AL x P
+        self.Sigma = None  # 2AL x 2AL, we are DEFINITELY going to constrain this to be a sparse matrix
+        self.mu = None  # 2AL x C
+        self.trial_peak_times = None  # R x 2AL
         self.d2 = None  # 1 x L
 
         self.beta_minus = None  # L x P
         self.S_minus = None  # 1 x R
 
         # parameters
-        self.Y = Y  # K x R x T
+        self.Y = Y  # A x K x R x T
         self.time = time
         self.trials = self.Y.shape[1]
         self.dt = round(self.time[1] - self.time[0], 3)
         self.alpha_prime_multiply = None
         self.alpha_prime_add = None
         self.U_ones = None
-        self.V = None
+        self.B = None
         self.knots = None
-        self.knots_1 = None
         self.BDelta1TDelta1BT = None
         self.Delta2BT = None
         self.Omega_psi_B = None
         self.degree = None
-        self.left_landmark = None
-        self.right_landmark = None
-        self.joint_factors_indices = joint_factor_indices  # 1 x L
+        self.left_landmark1 = None
+        self.mid_landmark1 = None
+        self.right_landmark1 = None
+        self.left_landmark2 = None
+        self.mid_landmark2 = None
+        self.right_landmark2 = None
+        self.joint_factors_indices = None  # 1 x A
         self.C = trial_condition_design # R x C
         self.w_matrix = None
         self.a_matrix = None
@@ -52,21 +55,23 @@ class SpikeTrainModel:
         self.WxA_matrix = None
 
 
-    def initialize_for_time_warping(self, L, degree=3):
+    def initialize_for_time_warping(self, L, joint_factor_indices, degree=3):
 
         # parameters
-        K = self.Y.shape[0]
-        T = self.time.shape[0]
+        A, K, R, T = self.Y.shape
         P = T + 2
         Q = P  # will be equal to P now
         R, C = self.C.shape
         self.degree = 3
         self.knots = np.concatenate([np.repeat(self.time[0], degree), self.time, np.repeat(self.time[-1], degree)])
         self.knots[-1] = self.knots[-1] + self.dt
-        self.knots_1 = (1 / (self.knots[degree:(P + degree)] - self.knots[0:P]))[:, np.newaxis]
-        self.knots_1[0, 0] = 0
-        self.left_landmark = 20
-        self.right_landmark = 80
+        self.left_landmark1 = 20
+        self.mid_landmark1 = 45
+        self.right_landmark1 = 80
+        self.left_landmark2 = 120
+        self.mid_landmark2 = 200
+        self.right_landmark2 = 280
+        self.joint_factors_indices = joint_factor_indices  # 1 x A
 
 
         # time warping b-spline matrix. Coefficients would be from psi
@@ -82,13 +87,13 @@ class SpikeTrainModel:
         self.BDelta2TDelta2BT = Delta2BT.T @ Delta2BT
         self.Omega_psi_B = self.BDelta2TDelta2BT
 
-        self.beta = np.random.rand(L, P)
-        self.S = np.random.rand(R)
-        self.alpha = np.random.rand(L)
-        self.theta = np.random.rand(L)
-        self.pi = np.random.rand(L)
-        self.sigma2 = np.random.rand(1)
-        self.mu = np.random.rand(C)
+        self.beta = np.random.rand(A*L, P)
+        self.alpha = np.random.rand(A, L)
+        self.theta = np.random.rand(A, L)
+        self.pi = np.random.rand(A, L)
+        self.trial_peak_times = np.random.rand(R, 2 * A * L)
+        self.Sigma = np.random.rand(2*A*L, 2*A*L)
+        self.mu = np.random.rand(2*A*L, C)
         self.compute_posterior_terms()
 
         # variables
@@ -111,19 +116,27 @@ class SpikeTrainModel:
         self.chi = -1e10 * np.ones_like(self.chi)
         self.chi[latent_coupling == 1] = 0
 
-    def warped_time(self, avg_peak_time, trial_peak_time):
+    def warped_time(self, avg_peak_times, trial_peak_times):
         time = self.time
         warped_time = np.zeros_like(time)
-        l = time[self.left_landmark]
-        r = time[self.right_landmark]
-        p = avg_peak_time
-        s = trial_peak_time
-        s_new = p + s
-        if s_new < l:
-            s_new = l
-        elif s_new > r:
-            s_new = r
-        s_new = 0.45  # TODO: remove this
+        l1 = time[self.left_landmark1]
+        r1 = time[self.right_landmark1]
+        p1 = avg_peak_times[0]
+        s1 = trial_peak_times[0]
+        s1_new = p1 + s1
+        if s1_new < l1:
+            s1_new = l1
+        elif s1_new > r1:
+            s1_new = r1
+        l2 = time[self.left_landmark2]
+        r2 = time[self.right_landmark2]
+        p2 = avg_peak_times[1]
+        s2 = trial_peak_times[1]
+        s2_new = p2 + s2
+        if s2_new < l2:
+            s2_new = l2
+        elif s2_new > r2:
+            s2_new = r2
         for i in range(len(time)):
             t = time[i]
             if t < l:
@@ -136,24 +149,29 @@ class SpikeTrainModel:
                 warped_time[i] = t
         return warped_time
 
-    def warped_latent_factors_trial(self, gamma, avg_peak_time, trial_peak_time): # warped factors for trial r
-        warped_time = self.warped_time(avg_peak_time, trial_peak_time)
+    def warped_latent_factors_trial(self, gamma, avg_peak_times, trial_peak_times): # warped factors for trial r
+        warped_time = self.warped_time(avg_peak_times, trial_peak_times)
         warped_splines = BSpline.design_matrix(warped_time, self.knots, self.degree).transpose()
         warped_factor = gamma @ warped_splines
         return warped_splines, warped_factor
 
     def warped_latent_factors(self):
         splines = self.B
-        beta = self.beta[self.joint_factors_indices]
-        factors = np.exp(beta) @ splines
+        factors = np.exp(self.beta) @ splines
         trial_warped_factors = []
         trial_warped_splines = []
-        for i in range(factors.shape[0]):
-            avg_peak_time = self.time[np.argmax(factors[i, self.left_landmark:self.right_landmark])]
+        for l in range(factors.shape[0]):
+            if l in self.joint_factors_indices:
+                # cross trial average peak times
+                avg_peak_time1 = self.time[np.argmax(factors[l, self.left_landmark1:self.right_landmark1])]
+                avg_peak_time2 = self.time[np.argmax(factors[l, self.left_landmark2:self.right_landmark2])]
+            else:
+                avg_peak_time1 = self.time[self.mid_landmark1]
+                avg_peak_time2 = self.time[self.mid_landmark2]
             trial_factors = []
             trial_splines = []
-            for trial_peak_time in self.S:
-                warped_splines, warped_factor = self.warped_latent_factors_trial(np.exp(beta[i,:]), avg_peak_time, trial_peak_time)
+            for trial_peak_times in self.trial_peak_times:
+                warped_splines, warped_factor = self.warped_latent_factors_trial(np.exp(self.beta[l,:]), [avg_peak_time1, avg_peak_time2], trial_peak_times[2*l:2*(l+1)])
                 trial_factors.append(warped_factor)
                 trial_splines.append(warped_splines)
             trial_warped_factors.append(np.vstack(trial_factors))
@@ -162,8 +180,8 @@ class SpikeTrainModel:
         beta_complement = self.beta[indices_to_keep]
         factors = np.exp(beta_complement) @ splines
         for thisfac in factors:
-            trial_warped_factors.append(np.vstack([thisfac[np.newaxis,:]]*self.S.shape[0]))
-            trial_warped_splines.append([splines]*self.S.shape[0])
+            trial_warped_factors.append(np.vstack([thisfac[np.newaxis,:]] * self.trial_peak_times.shape[0]))
+            trial_warped_splines.append([splines] * self.trial_peak_times.shape[0])
         trial_warped_factors = np.stack(trial_warped_factors)
         return trial_warped_splines, trial_warped_factors # L x R x P x T, L x R x T
 
@@ -203,12 +221,12 @@ class SpikeTrainModel:
         self.WxY_matrix = np.einsum('lk,krt->lrt', self.w_matrix, self.Y)
         self.WxA_matrix = np.sum(self.w_matrix * self.a_matrix, axis=1)[:, np.newaxis, np.newaxis]
 
-    def compute_loss(self):
+    def compute_log_likelihood(self):
 
         LK = self.w_matrix * (self.YxN_matrix - self.a_matrix*(self.deltatSumExpN_vector[:, np.newaxis] + self.theta[:, np.newaxis]) -
                               np.log(self.alpha[:, np.newaxis]) + self.alpha[:, np.newaxis]*(np.log(self.theta[:, np.newaxis]) + self.b_matrix) +
                               np.log(self.pi[:, np.newaxis]))
-        LR = -(1/2) * np.log(2 * np.pi * self.sigma2) - (1 / 2) * ((self.S - self.C @ self.mu) / np.sqrt(self.sigma2)) ** 2
+        LR = -(1/2) * np.log(2 * np.pi * self.Sigma) - (1 / 2) * ((self.trial_peak_times - self.C @ self.mu) / np.sqrt(self.Sigma)) ** 2
         L = np.sum(LK) + np.sum(LR)
         return L
 
@@ -295,7 +313,7 @@ class SpikeTrainModel:
         for i in range(factors.shape[0]):
             avg_peak_time = self.time[np.argmax(factors[i, self.left_landmark:self.right_landmark])]
             trial_factor_derivs = []
-            for trial_peak_time in self.S:
+            for trial_peak_time in self.trial_peak_times:
                 warped_time = self.warped_time(avg_peak_time, trial_peak_time)
                 trial_deriv = splines_derivatives(warped_time)[np.newaxis,:,i] * self.trial_peaktime_gradient_for_timewarp(avg_peak_time, trial_peak_time)[np.newaxis,:]
                 trial_factor_derivs.append(trial_deriv)
@@ -311,7 +329,7 @@ class SpikeTrainModel:
         L, R, T = gradient_term.shape
         WarpedFactorsDerivs_x_WarpedTimesDerivs = self.NDeriv_times_PhiDeriv_gradients()
         sum_k_term = np.sum(gradient_term * WarpedFactorsDerivs_x_WarpedTimesDerivs, axis=(0, 2))[np.newaxis,:]
-        sum_r_term = (1/self.sigma2)*np.sum(self.S - self.C @ self.mu)
+        sum_r_term = (1 / self.Sigma) * np.sum(self.trial_peak_times - self.C @ self.mu)
         S_gradients = sum_k_term - sum_r_term
         return S_gradients[0,:]
 
@@ -321,10 +339,10 @@ class SpikeTrainModel:
         ct = 0
         learning_rate = 1
         S_gradients = self.peaktime_gradients()
-        self.S_minus = np.copy(self.S)
+        self.S_minus = np.copy(self.trial_peak_times)
         loss_next = loss
         while ct < max_iters:
-            self.S = self.S_minus + learning_rate * S_gradients
+            self.trial_peak_times = self.S_minus + learning_rate * S_gradients
             self.update_factor_terms()
             loss_next = self.compute_loss()
             # Armijo condition, using Frobenius norm for matrices, but for maximization
@@ -369,9 +387,9 @@ class SpikeTrainModel:
         # update pi
         self.pi = sum_k_w_matrix / w_matrix.shape[0]
         # update mu
-        self.mu = np.sum(self.S @ self.C) / np.sum(self.C, axis=0)
-        # update sigma2
-        self.sigma2 = np.sum((self.S - self.C @ self.mu) ** 2) / self.C.shape[0]
+        self.mu = np.sum(self.trial_peak_times @ self.C) / np.sum(self.C, axis=0)
+        # update Sigma
+        self.Sigma = np.sum((self.trial_peak_times - self.C @ self.mu) ** 2) / self.C.shape[0]
 
     def log_obj_with_backtracking_line_search_and_time_warping(self, tau_psi, tau_beta, tau_s, beta_first=1,
                                                                time_warping=False,

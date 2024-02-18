@@ -3,7 +3,7 @@ import sys
 sys.path.append(os.path.abspath('.'))
 
 import pickle
-from src.simulate_data_multitrial import DataAnalyzer
+from src.EM.simulate_data_multitrial import DataAnalyzer
 from src.EM.SpikeTrainModel_EM import SpikeTrainModel
 from src.psplines_gradient_method.general_functions import plot_outputs, plot_spikes, plot_intensity_and_latents, \
     plot_likelihoods, int_or_str, write_outputs
@@ -23,17 +23,17 @@ def main(K, R, L, intensity_mltply, intensity_bias, tau_psi, tau_beta, tau_s, be
     print(f'folder_name: {folder_name}')
     output_dir = os.path.join(os.getcwd(), 'outputs', folder_name)
 
-    np.random.seed(data_seed)
-    data = DataAnalyzer().initialize(K=K, intensity_mltply=intensity_mltply, intensity_bias=intensity_bias, trial_offsets=np.arange(R))
+    # np.random.seed(data_seed)
+    joint_factor_indices = [2, 5]
+    degree = 3
+    data = DataAnalyzer().initialize(joint_factor_indices, K=K, intensity_mltply=intensity_mltply, intensity_bias=intensity_bias)
 
     binned, stim_time = data.sample_data()
     Y = binned  # K x T
-    degree = 3
-    joint_factor_indices = [0,1]
     trial_condition_design = np.zeros((R, 5))
     trial_condition_design[:, 0] = 1
-    model = SpikeTrainModel(Y, stim_time, joint_factor_indices, trial_condition_design)
-    model = model.initialize_for_time_warping(L, degree)
+    model = SpikeTrainModel(Y, stim_time, trial_condition_design)
+    model = model.initialize_for_time_warping(L, joint_factor_indices, degree)
     # model.compute_loss()
     # model.beta_gradients()
     # model.update_beta(10)
@@ -87,7 +87,7 @@ def main(K, R, L, intensity_mltply, intensity_bias, tau_psi, tau_beta, tau_s, be
         degree = 3
         if param_seed == 'TRUTH':
             model = SpikeTrainModel(Y, stim_time).initialize_for_time_warping(L, degree)
-            model.init_ground_truth(data.latent_factors, data.latent_coupling)
+            model.init_ground_truth(data.latent_factors, data.neuron_coupling)
         else:
             np.random.seed(param_seed)
             model = SpikeTrainModel(Y, stim_time).initialize_for_time_warping(L, degree)
@@ -207,7 +207,7 @@ if __name__ == "__main__":
     parser.add_argument('--num_epochs', type=int, default=1500, help='Number of training epochs')
     parser.add_argument('--beta_first', type=int, default=0, help='Whether to update beta first or G first')
     parser.add_argument('--notes', type=str, default='empty', help='Run notes')
-    parser.add_argument('--K', type=int, default=200, help='Number of neurons')
+    parser.add_argument('--K', type=int, default=600, help='Number of neurons')
     parser.add_argument('--R', type=int, default=50, help='Number of trials')
     parser.add_argument('--L', type=int, default=3, help='Number of latent factors')
     parser.add_argument('--intensity_mltply', type=float, default=25, help='Latent factor intensity multiplier')

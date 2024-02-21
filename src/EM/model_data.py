@@ -20,12 +20,16 @@ class ModelData:
         self.Y = None
         self.trial_warped_factors = None
         self.trial_warped_splines = None
-        self.trial_peak_offsets = None
 
         #parameters
         self.beta = None  # AL x P
         self.alpha = None  # 1 x AL
         self.theta = None  # 1 x AL
+        self.pi = None  # 1 x AL
+        self.trial_peak_offsets = None
+        self.trial_offset_covar_matrix = None  # 2AL x 2AL
+        self.condition_peak_offsets = None  # 1 x 2AL
+        self.condition_offset_covar_matrix = None  # 2AL x 2AL
 
     def initialize(self, time, joint_factor_indices, degree=3):
         self.time = time
@@ -39,6 +43,7 @@ class ModelData:
     def randomly_initialize_parameters(self):
         self.alpha = np.random.uniform(0, 1, self.beta.shape[0])
         self.theta = np.random.uniform(0, 1, self.beta.shape[0])
+        self.pi = np.random.uniform(0, 1, self.beta.shape[0])
 
     def warp_all_latent_factors_for_all_trials(self):
         factors = np.exp(self.beta) @ self.B

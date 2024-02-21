@@ -1,5 +1,6 @@
 import numpy as np
 import multiprocessing as mp
+from src.EM.model_data import ModelData
 from src.psplines_gradient_method.general_functions import create_second_diff_matrix
 from scipy.interpolate import BSpline
 from scipy.sparse import csr_array, vstack, hstack
@@ -7,18 +8,39 @@ from scipy.special import psi, softmax
 from scipy.optimize import root
 
 
-class SpikeTrainModel:
+class SpikeTrainModel(ModelData):
     def __init__(self, Y, time, trial_condition_design):
+        super().__init__()
+        # self.time = None
+        # self.joint_factors_indices = None
+        # self.degree = None
+        # self.dt = None
+        # self.knots = None
+        # self.B = None
+        # self.left_landmark1 = 20
+        # self.mid_landmark1 = 45
+        # self.right_landmark1 = 70
+        # self.left_landmark2 = 120
+        # self.mid_landmark2 = 145
+        # self.right_landmark2 = 170
+        # self.Y = None
+        # self.trial_warped_factors = None
+        # self.trial_warped_splines = None
+        # self.trial_peak_offsets = None
+        #
+        # # parameters
+        # self.beta = None  # AL x P
+        # self.alpha = None  # 1 x AL
+        # self.theta = None  # 1 x AL
+
+
+
+
         # variables
-        self.alpha = None  # A x L
-        self.theta = None  # A x L
-        self.pi = None  # A x L
-        self.beta = None  # AL x P
+
         self.Sigma = None  # 2AL x 2AL, we are DEFINITELY going to constrain this to be a sparse matrix
-        self.mu = None  # 2AL x C
         self.trial_peak_times = None  # R x 2AL
         self.d2 = None  # 1 x L
-
         self.beta_minus = None  # L x P
         self.S_minus = None  # 1 x R
 

@@ -1,5 +1,4 @@
 import numpy as np
-from scipy.interpolate import BSpline
 from src.EM.model_data import ModelData
 
 class DataAnalyzer(ModelData):
@@ -24,18 +23,18 @@ class DataAnalyzer(ModelData):
         # self.trial_peak_offsets = None
         #
         # # parameters
-        # self.beta = None
+        # self.beta = None  # AL x P
+        # self.alpha = None  # 1 x AL
+        # self.theta = None  # 1 x AL
+        # self.trial_offset_covar_matrix = None
 
         self.latent_factors = None
-        self.corr_matrix = None
-        self.std_dev = None
         self.neuron_gains = None
         self.neuron_factor_assignments = None
         self.neuron_intensities = None
 
     def initialize(self, joint_factor_indices, degree=3, A=2, K=100, R=50, T=200,
-                   intensity_type=('constant', '1peak', '2peaks'), coeff=1,
-                   ratio=1, intensity_mltply=15, intensity_bias=5):
+                   intensity_type=('constant', '1peak', '2peaks'), ratio=1, intensity_mltply=15, intensity_bias=5):
         time = np.arange(0, T, 1) / 100
         super().initialize(time, joint_factor_indices, degree)
 
@@ -46,9 +45,7 @@ class DataAnalyzer(ModelData):
         L = self.latent_factors.shape[0]
         warp = 0.04
         covar_matrix = np.random.uniform(-warp, warp, (2*L, 2*L))
-        covar_matrix = covar_matrix.T @ covar_matrix
-        self.std_dev = np.sqrt(np.diag(covar_matrix))
-        self.corr_matrix = np.diag(1/self.std_dev) @ covar_matrix @ np.diag(1/self.std_dev)
+        self.trial_offset_covar_matrix = covar_matrix.T @ covar_matrix
         self.trial_peak_offsets = np.random.multivariate_normal(np.zeros(2*L), covar_matrix, R)
         # compute trial_warped_factors and trial_warped_splines
         self.warp_all_latent_factors_for_all_trials()
@@ -113,6 +110,7 @@ class DataAnalyzer(ModelData):
             last_index += neuron_count
         self.neuron_gains = neuron_gains
         self.neuron_factor_assignments = neuron_factor_assignments.astype(int)
+        self.pi = ratio
 
     def generate_spike_trains(self):
 

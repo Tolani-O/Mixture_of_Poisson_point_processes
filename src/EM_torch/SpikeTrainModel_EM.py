@@ -1,134 +1,136 @@
 import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import multiprocessing as mp
-from src.EM.model_data import ModelData
+from src.EM_torch.model_data import ModelData
 from src.psplines_gradient_method.general_functions import create_second_diff_matrix
 from scipy.interpolate import BSpline
 from scipy.sparse import csr_array, vstack, hstack
 from scipy.special import psi, softmax
 from scipy.optimize import root
 
-
 class SpikeTrainModel(ModelData):
-    def __init__(self, Y, time, trial_condition_design):
+    def __init__(self):
         super().__init__()
-        # self.time = None
-        # self.joint_factors_indices = None
-        # self.degree = None
-        # self.dt = None
-        # self.knots = None
-        # self.B = None
-        # self.left_landmark1 = 20
-        # self.mid_landmark1 = 45
-        # self.right_landmark1 = 70
-        # self.left_landmark2 = 120
-        # self.mid_landmark2 = 145
-        # self.right_landmark2 = 170
-        # self.Y = None
-        # self.trial_warped_factors = None
-        # self.trial_warped_splines = None
-        # self.trial_peak_offsets = None
-        #
-        # # parameters
-        # self.beta = None  # AL x P
-        # self.alpha = None  # 1 x AL
-        # self.theta = None  # 1 x AL
+
+        # parameters
+        self.smoothness_budget = None  # L x 1
+        self.BDelta2TDelta2BT = None  # T x T
 
 
+    def initialize(self, Y, time, factor_access, n_factors, n_trial_samples, n_config_samples, degree=3):
 
+        super().initialize(time, degree)
 
         # variables
-
-        self.Sigma = None  # 2AL x 2AL, we are DEFINITELY going to constrain this to be a sparse matrix
-        self.trial_peak_times = None  # R x 2AL
-        self.d2 = None  # 1 x L
-        self.beta_minus = None  # L x P
-        self.S_minus = None  # 1 x R
+        self.smoothness_budget = nn.Parameter(torch.zeros((n_factors, 1)))
 
         # parameters
-        self.Y = Y  # A x K x R x T
-        self.time = time
-        self.trials = self.Y.shape[1]
-        self.dt = round(self.time[1] - self.time[0], 3)
-        self.alpha_prime_multiply = None
-        self.alpha_prime_add = None
-        self.U_ones = None
-        self.B = None
-        self.knots = None
-        self.BDelta1TDelta1BT = None
-        self.Delta2BT = None
-        self.Omega_psi_B = None
-        self.degree = None
-        self.left_landmark1 = None
-        self.mid_landmark1 = None
-        self.right_landmark1 = None
-        self.left_landmark2 = None
-        self.mid_landmark2 = None
-        self.right_landmark2 = None
-        self.joint_factors_indices = None  # 1 x A
-        self.C = trial_condition_design # R x C
-        self.w_matrix = None
-        self.a_matrix = None
-        self.b_matrix = None
-        self.YxN_matrix = None
-        self.deltatSumExpN_vector = None
-        self.trial_warped_factors = None
-        self.trial_warped_splines = None
-        self.WxY_matrix = None
-        self.WxA_matrix = None
-
-
-    def initialize_for_time_warping(self, L, joint_factor_indices, degree=3):
-
-        # parameters
-        A, K, R, T = self.Y.shape
-        P = T + 2
-        Q = P  # will be equal to P now
-        R, C = self.C.shape
-        self.degree = 3
-        self.knots = np.concatenate([np.repeat(self.time[0], degree), self.time, np.repeat(self.time[-1], degree)])
-        self.knots[-1] = self.knots[-1] + self.dt
-        self.left_landmark1 = 20
-        self.mid_landmark1 = 45
-        self.right_landmark1 = 80
-        self.left_landmark2 = 120
-        self.mid_landmark2 = 200
-        self.right_landmark2 = 280
-        self.joint_factors_indices = joint_factor_indices  # 1 x A
-
-
-        # time warping b-spline matrix. Coefficients would be from psi
-        self.B = BSpline.design_matrix(self.time, self.knots, self.degree).transpose()
-        self.alpha_prime_multiply = np.eye(Q)
-        self.alpha_prime_multiply[0, 0] = 0
-        self.alpha_prime_multiply[1, 1] = 0
-        self.alpha_prime_multiply = csr_array(self.alpha_prime_multiply)
-        self.alpha_prime_add = np.zeros((1, Q))
-        self.alpha_prime_add[:, 1] = 1
-        self.U_ones = np.triu(np.ones((Q, Q)))
-        Delta2BT = csr_array(create_second_diff_matrix(T)) @ self.B.T
+        _, T, n_trials, n_configs = Y.shape
+        self.Y = torch.from_numpy(Y)
+        self.neuron_factor_access = factor_access
+        self.randomly_initialize_parameters(n_factors, n_trials, n_configs, n_trial_samples, n_config_samples)
+        Delta2BT = csr_array(create_second_diff_matrix(T)) @ self.B.to_dense().numpy().T
         self.BDelta2TDelta2BT = Delta2BT.T @ Delta2BT
-        self.Omega_psi_B = self.BDelta2TDelta2BT
-
-        self.beta = np.random.rand(A*L, P)
-        self.alpha = np.random.rand(A, L)
-        self.theta = np.random.rand(A, L)
-        self.pi = np.random.rand(A, L)
-        self.trial_peak_times = np.random.rand(R, 2 * A * L)
-        self.Sigma = np.random.rand(2*A*L, 2*A*L)
-        self.mu = np.random.rand(2*A*L, C)
-        self.compute_posterior_terms()
-
-        # variables
-        self.chi = np.random.rand(K, L)
-        self.chi[:, 0] = 0
-        self.c = np.random.rand(K, L)
-        self.gamma = np.random.rand(L, P)
-        self.gamma[0, :] = 0
-        self.zeta = np.zeros((R, Q))
-        self.d2 = np.zeros((L, 1))
-        self.d2[0, :] = 0
 
         return self
+
+    def construct_weight_matrices(self, tau_beta=1, tau_sigma=1):
+        # Weight Matrices
+        (warped_factors,
+         sum_RT_Y_times_warped_bases,
+         sum_RT_warped_factors_times_warped_bases) = (
+            self.warp_all_latent_factors_for_all_trials())
+        # warped_factors # L x P x K x M x N x C
+        # sum_RT_Y_times_warped_bases # L x P x T x M x N x R x C
+        # sum_RT_warped_factors_times_warped_bases # L x P x M x N x C
+        # self.Y # K x T x R x C
+        # Y_times_N_matrix  # K x L x T x M x N x R x C
+        Y_times_N_matrix = torch.einsum('ktrc,ltmnrc->kltmnrc', self.Y, warped_factors)
+        exp_N_matrix = torch.exp(warped_factors)
+        # sum_Y_term # K x C
+        # logterm1  # K x C x L
+        # logterm2  # L x M x N x C
+        sum_Y_term = torch.sum(self.Y, dim=(1,2)) # K x C
+        logterm1 = sum_Y_term.unsqueeze(-1) + self.alpha.unsqueeze(0).unsqueeze(0)
+        logterm2 = self.dt * torch.sum(exp_N_matrix, dim=(1, 4)) + self.theta.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+        # logterm # K x L x M x N x C
+        logterm = torch.einsum('kcl,lmnc->klmnc', logterm1, torch.log(logterm2))
+        # sum_Y_times_N_matrix  # K x L x M x N x C
+        sum_Y_times_N_matrix = torch.sum(Y_times_N_matrix, dim=(2, 5))
+        # alphalogtheta # 1 x L x 1 x 1 x 1
+        alphalogtheta = (self.alpha * torch.log(self.theta)).unsqueeze(0).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+        # sum_Y_times_logalpha  # K x C x L
+        sum_Y_times_logalpha = sum_Y_term.unsqueeze(-1) * torch.log(self.alpha).unsqueeze(0).unsqueeze(0)
+        # sum_Y_times_logalpha # K x L x 1 x 1 x C
+        sum_Y_times_logalpha = sum_Y_times_logalpha.permute(0, 2, 1).unsqueeze(2).unsqueeze(2)
+        # logpi # 1 x L x 1 x 1 x 1
+        logpi = torch.log(self.pi).unsqueeze(0).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+
+        # U_tensor # K x L x M x N x C
+        U_tensor = torch.exp(sum_Y_times_N_matrix - logterm + alphalogtheta + sum_Y_times_logalpha + logpi)
+
+        # W_CMNK_tensor # K x L x M x N x C
+        W_CMNK_tensor = F.softmax(U_tensor, dim=1)
+
+        exp_sum_logsumexp_tensor = torch.sum(torch.logsumexp(U_tensor, dim=1), dim=0)
+        exp_sum_logsumexp_tensor_reshape = exp_sum_logsumexp_tensor.reshape(-1, W_CMNK_tensor.shape[-1])
+
+        # W_C_tensor # 1 x 1 x M x N x C
+        W_C_tensor = F.softmax(exp_sum_logsumexp_tensor_reshape, dim=0).reshape(exp_sum_logsumexp_tensor.shape).unsqueeze(0).unsqueeze(0)
+
+        # W_tensor # K x L x M x N x C
+        W_tensor = (W_CMNK_tensor * W_C_tensor).detach()
+
+        # Liklelihood Terms
+        A_tensor = torch.einsum('kcl,lmnc->klmnc', logterm1.detach(), 1/logterm2.detach())
+        likelihood_term = (sum_Y_times_N_matrix - A_tensor * logterm2 - torch.lgamma(self.alpha.unsqueeze(0).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)) +
+             self.alpha.unsqueeze(0).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1) * (torch.log(self.theta).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1) + torch.digamma(logterm1.detach()).permute(0, 2, 1).unsqueeze(2).unsqueeze(2) -
+                                                                                  torch.log(logterm2.detach().unsqueeze(0))) + logpi)
+
+        # Entropy Terms
+        d = self.config_peak_offset_stdevs.shape[0]
+        transformed_config_peak_offsets = torch.einsum('j,ncj->ncj', self.config_peak_offset_stdevs, self.config_peak_offset_presamples)
+        # entropy_term1  # N x C
+        entropy_term1 = -0.5 * torch.sum((torch.log((2 * torch.pi)**d * torch.prod(self.config_peak_offset_stdevs**2)) + (transformed_config_peak_offsets / self.config_peak_offset_stdevs.unsqueeze(0).unsqueeze(0)) ** 2), dim=2)
+        # entropy_term1  # 1 x 1 x 1 x N x C
+        entropy_term1 = entropy_term1.unsqueeze(0).unsqueeze(0).unsqueeze(0)
+
+        transformed_trial_peak_offsets = torch.einsum('ij,mrcj->mrci', self.trial_peak_offset_covar_ltri, self.trial_peak_offset_presamples)
+        Sigma = torch.mm(self.trial_peak_offset_covar_ltri, self.trial_peak_offset_covar_ltri.t())
+        det_Sigma = torch.det(Sigma)
+        inv_Sigma = torch.inverse(Sigma)
+        # entropy_term2  # M x C
+        entropy_term2 = -0.5 * torch.sum((torch.log((2 * torch.pi)**d * det_Sigma) + torch.einsum('mrci,ij,mrcj->mrc', transformed_trial_peak_offsets, inv_Sigma, transformed_trial_peak_offsets)), dim=1)
+        # entropy_term2  # 1 x 1 x M x 1 x C
+        entropy_term2 = entropy_term2.unsqueeze(1).unsqueeze(0).unsqueeze(0)
+
+
+        # beta gradients
+        sum_RT_warped_factors_times_warped_bases = sum_RT_warped_factors_times_warped_bases.unsqueeze(2)
+        A_tensor = A_tensor.permute(1, 0, 2, 3, 4).unsqueeze(1)
+        W_tensor = W_tensor.permute(1, 0, 2, 3, 4).unsqueeze(1)
+        # A_tensor  # L x P x K x M x N x C
+        # sum_RT_warped_factors_times_warped_bases  # L x P x K x M x N x C
+        # W_tensor # L x P x K x M x N x C
+        beta_grad = torch.exp(self.beta) * torch.sum(W_tensor * (sum_RT_Y_times_warped_bases - self.dt * A_tensor * sum_RT_warped_factors_times_warped_bases), dim=(2, 3, 4, 5))
+        
+
+
+
+        # penalty terms
+        sigma_Penalty = - tau_sigma * torch.sum(torch.abs(inv_Sigma))
+        diagBetaDeltaBeta = torch.sum((torch.exp(self.beta) @ self.BDelta2TDelta2BT) * torch.exp(self.beta), axis=1)
+        s2_norm = F.softmax(self.d2, dim=0)
+        beta_s2_penalty = - tau_beta * (s2_norm.T @ diagBetaDeltaBeta)
+
+        # Total Loss
+        total_loss = torch.sum(W_tensor * likelihood_term + W_C_tensor * entropy_term1 + W_C_tensor * entropy_term2) + sigma_Penalty + beta_s2_penalty
+
+        return total_loss
+
+
 
     def init_ground_truth(self, latent_factors, latent_coupling):
         V_inv = np.linalg.pinv(self.V.toarray().T)
@@ -137,120 +139,6 @@ class SpikeTrainModel(ModelData):
         self.c = np.zeros_like(self.c)
         self.chi = -1e10 * np.ones_like(self.chi)
         self.chi[latent_coupling == 1] = 0
-
-    def warped_time(self, avg_peak_times, trial_peak_times):
-        time = self.time
-        warped_time = np.zeros_like(time)
-        l1 = time[self.left_landmark1]
-        r1 = time[self.right_landmark1]
-        p1 = avg_peak_times[0]
-        s1 = trial_peak_times[0]
-        s1_new = p1 + s1
-        if s1_new < l1:
-            s1_new = l1
-        elif s1_new > r1:
-            s1_new = r1
-        l2 = time[self.left_landmark2]
-        r2 = time[self.right_landmark2]
-        p2 = avg_peak_times[1]
-        s2 = trial_peak_times[1]
-        s2_new = p2 + s2
-        if s2_new < l2:
-            s2_new = l2
-        elif s2_new > r2:
-            s2_new = r2
-        for i in range(len(time)):
-            t = time[i]
-            if t < l:
-                warped_time[i] = t
-            elif t < s_new:
-                warped_time[i] = (t-l)*(p-l)/(s_new-l)+l
-            elif t < r:
-                warped_time[i] = (t-s_new)*(r-p)/(r-s_new)+p
-            else:
-                warped_time[i] = t
-        return warped_time
-
-    def warped_latent_factors_trial(self, gamma, avg_peak_times, trial_peak_times): # warped factors for trial r
-        warped_time = self.warped_time(avg_peak_times, trial_peak_times)
-        warped_splines = BSpline.design_matrix(warped_time, self.knots, self.degree).transpose()
-        warped_factor = gamma @ warped_splines
-        return warped_splines, warped_factor
-
-    def warped_latent_factors(self):
-        splines = self.B
-        factors = np.exp(self.beta) @ splines
-        trial_warped_factors = []
-        trial_warped_splines = []
-        for l in range(factors.shape[0]):
-            if l in self.joint_factors_indices:
-                # cross trial average peak times
-                avg_peak_time1 = self.time[np.argmax(factors[l, self.left_landmark1:self.right_landmark1])]
-                avg_peak_time2 = self.time[np.argmax(factors[l, self.left_landmark2:self.right_landmark2])]
-            else:
-                avg_peak_time1 = self.time[self.mid_landmark1]
-                avg_peak_time2 = self.time[self.mid_landmark2]
-            trial_factors = []
-            trial_splines = []
-            for trial_peak_times in self.trial_peak_times:
-                warped_splines, warped_factor = self.warped_latent_factors_trial(np.exp(self.beta[l,:]), [avg_peak_time1, avg_peak_time2], trial_peak_times[2*l:2*(l+1)])
-                trial_factors.append(warped_factor)
-                trial_splines.append(warped_splines)
-            trial_warped_factors.append(np.vstack(trial_factors))
-            trial_warped_splines.append(trial_splines)
-        indices_to_keep = np.delete(np.arange(self.beta.shape[0]), self.joint_factors_indices)
-        beta_complement = self.beta[indices_to_keep]
-        factors = np.exp(beta_complement) @ splines
-        for thisfac in factors:
-            trial_warped_factors.append(np.vstack([thisfac[np.newaxis,:]] * self.trial_peak_times.shape[0]))
-            trial_warped_splines.append([splines] * self.trial_peak_times.shape[0])
-        trial_warped_factors = np.stack(trial_warped_factors)
-        return trial_warped_splines, trial_warped_factors # L x R x P x T, L x R x T
-
-    def compute_posterior_terms(self):
-        trial_warped_splines, trial_warped_factors = self.warped_latent_factors()
-        # Compute YxN_matrix for all k, l in one go
-        YxN_matrix = np.einsum('krt,lrt->kl', self.Y, trial_warped_factors).T
-        # Compute alpha_pow_Y_theta_pow_alpha_pi_matrix for all k, l in one go
-        alpha = self.alpha.reshape((-1, 1))
-        # Compute Y_k_sum for all k in  one go
-        Y_k_sum = np.sum(self.Y, axis=(1, 2))
-        Y_k_sum_reshape = Y_k_sum.reshape((1, -1))
-        # alpha_pow_Y_theta_pow_alpha_pi_matrix = (np.power(alpha, Y_k_sum_reshape) *
-        #                                          np.power(self.theta, self.alpha)[:, np.newaxis] *
-        #                                          self.pi[:, np.newaxis])
-        # Compute alpha_plus_Y_matrix for all k, l in one go
-        alpha_plus_Y_matrix = self.alpha[:, np.newaxis] + Y_k_sum
-        # Compute deltatSumExpN_vector for all k, l in one go
-        deltatSumExpN_vector = self.dt * np.sum(np.exp(trial_warped_factors), axis=(1, 2)) + self.theta
-        deltatSumExpN_plus_theta_vector = deltatSumExpN_vector + self.theta
-
-        w_matrix = (YxN_matrix - alpha_plus_Y_matrix * np.log(deltatSumExpN_plus_theta_vector[:, np.newaxis]) +
-            self.alpha[:, np.newaxis] * np.log(self.theta[:, np.newaxis]) + np.dot(alpha, Y_k_sum_reshape) +
-            np.log(self.pi[:, np.newaxis])) # K x L
-        w_matrix = softmax(w_matrix, axis=0)
-        # w_matrix2 = (np.exp(YxN_matrix) * alpha_pow_Y_theta_pow_alpha_pi_matrix) / deltatSumExpN_plus_theta_vector[:, np.newaxis] ** alpha_plus_Y_matrix
-        # w_matrix2 = w_matrix / np.sum(w_matrix, axis=1)[:, np.newaxis]
-        A_matrix = (alpha_plus_Y_matrix / deltatSumExpN_plus_theta_vector[:, np.newaxis])
-        B_matrix = psi(alpha_plus_Y_matrix) - np.log(deltatSumExpN_plus_theta_vector[:, np.newaxis])  # K x L
-        self.w_matrix = w_matrix
-        self.a_matrix = A_matrix
-        self.b_matrix = B_matrix
-        self.YxN_matrix = YxN_matrix
-        self.deltatSumExpN_vector = deltatSumExpN_vector
-        self.trial_warped_factors = trial_warped_factors
-        self.trial_warped_splines = trial_warped_splines
-        self.WxY_matrix = np.einsum('lk,krt->lrt', self.w_matrix, self.Y)
-        self.WxA_matrix = np.sum(self.w_matrix * self.a_matrix, axis=1)[:, np.newaxis, np.newaxis]
-
-    def compute_log_likelihood(self):
-
-        LK = self.w_matrix * (self.YxN_matrix - self.a_matrix*(self.deltatSumExpN_vector[:, np.newaxis] + self.theta[:, np.newaxis]) -
-                              np.log(self.alpha[:, np.newaxis]) + self.alpha[:, np.newaxis]*(np.log(self.theta[:, np.newaxis]) + self.b_matrix) +
-                              np.log(self.pi[:, np.newaxis]))
-        LR = -(1/2) * np.log(2 * np.pi * self.Sigma) - (1 / 2) * ((self.trial_peak_times - self.C @ self.mu) / np.sqrt(self.Sigma)) ** 2
-        L = np.sum(LK) + np.sum(LR)
-        return L
 
     def beta_gradients(self):
 

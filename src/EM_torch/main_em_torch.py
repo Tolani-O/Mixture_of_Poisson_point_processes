@@ -24,17 +24,14 @@ def main(K, R, L, intensity_mltply, intensity_bias, tau_psi, tau_beta, tau_s, be
     output_dir = os.path.join(os.getcwd(), 'outputs', folder_name)
 
     # np.random.seed(data_seed)
-    joint_factor_indices = [2, 5]
-    degree = 3
-    data = DataAnalyzer().initialize(joint_factor_indices, K=K, intensity_mltply=intensity_mltply, intensity_bias=intensity_bias)
+    data = DataAnalyzer().initialize(K=K, intensity_mltply=intensity_mltply, intensity_bias=intensity_bias)
 
-    binned, stim_time = data.sample_data()
-    Y = binned  # K x T
-    trial_condition_design = np.zeros((R, 5))
-    trial_condition_design[:, 0] = 1
-    model = SpikeTrainModel(Y, stim_time, trial_condition_design)
-    model = model.initialize_for_time_warping(L, joint_factor_indices, degree)
-    # model.compute_loss()
+    Y, stim_time, factor_access = data.sample_data()
+    n_factors = 6
+    n_trial_samples = 4
+    n_config_samples = 5
+    model = SpikeTrainModel().initialize(Y, stim_time, factor_access, n_factors, n_trial_samples, n_config_samples)
+    model.construct_weight_matrices()
     # model.beta_gradients()
     # model.update_beta(10)
     # model.peaktime_gradients()
@@ -207,7 +204,7 @@ if __name__ == "__main__":
     parser.add_argument('--num_epochs', type=int, default=1500, help='Number of training epochs')
     parser.add_argument('--beta_first', type=int, default=0, help='Whether to update beta first or G first')
     parser.add_argument('--notes', type=str, default='empty', help='Run notes')
-    parser.add_argument('--K', type=int, default=600, help='Number of neurons')
+    parser.add_argument('--K', type=int, default=100, help='Number of neurons')
     parser.add_argument('--R', type=int, default=50, help='Number of trials')
     parser.add_argument('--L', type=int, default=3, help='Number of latent factors')
     parser.add_argument('--intensity_mltply', type=float, default=25, help='Latent factor intensity multiplier')

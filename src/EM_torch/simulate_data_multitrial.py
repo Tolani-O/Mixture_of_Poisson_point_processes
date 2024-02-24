@@ -1,65 +1,39 @@
 import numpy as np
 import torch
-
+import torch.nn.functional as F
 from src.EM_torch.model_data import ModelData
 
 class DataAnalyzer(ModelData):
 
     def __init__(self):
         super().__init__()
-        # self.time = None
-        # self.joint_factors_indices = None
-        # self.degree = None
-        # self.dt = None
-        # self.knots = None
-        # self.B = None
-        # self.left_landmark1 = 20
-        # self.mid_landmark1 = 45
-        # self.right_landmark1 = 70
-        # self.left_landmark2 = 120
-        # self.mid_landmark2 = 145
-        # self.right_landmark2 = 170
-        # self.Y = None
-        # self.trial_warped_factors = None
-        # self.trial_warped_splines = None
-        # self.trial_peak_offsets = None
-        #
-        # # parameters
-        # self.beta = None  # AL x P
-        # self.alpha = None  # 1 x AL
-        # self.theta = None  # 1 x AL
-        # self.trial_offset_covar_matrix = None
 
-        self.latent_factors = None
-        self.neuron_gains = None
-        self.neuron_factor_assignments = None
-        self.neuron_intensities = None
+        self.latent_factors = None  # unobserved
+        self.neuron_gains = None  # unobserved
+        self.neuron_factor_assignments = None  # unobserved
+        self.neuron_intensities = None  # unobserved
 
-    def initialize(self, joint_factor_indices, degree=3, A=2, K=100, R=50, T=200,
-                   intensity_type=('constant', '1peak', '2peaks'), ratio=1, intensity_mltply=15, intensity_bias=5):
+    def initialize(self, A=2, K=100, T=200, intensity_type=('constant', '1peak', '2peaks'), intensity_mltply=15, intensity_bias=5):
+        degree = 3
         time = np.arange(0, T, 1) / 100
-        super().initialize(time, joint_factor_indices, degree)
-
+        super().initialize(time, degree)
+        n_factors = len(intensity_type) * A
+        n_trials = 3
+        n_configs = 2
+        K = 5
+        n_trial_samples = 1
+        n_config_samples = 1
+        # K is the number of neurons in a single condition across areas.
+        # each condition has the same number of neurons, to total number of neurons across conditions is K * C
+        self.randomly_initialize_parameters(n_factors, n_trials, n_configs, n_trial_samples, n_config_samples)
         self.latent_factors = self.generate_latent_factors(intensity_type, intensity_mltply, intensity_bias)
         self.latent_factors = torch.from_numpy(np.vstack([self.latent_factors] * A))
         B_inv = torch.pinverse(self.B.to_dense().t())
         self.beta = torch.log(torch.matmul(self.latent_factors, B_inv.T))
-
-        self.randomly_initialize_parameters()
-
-        L = self.latent_factors.shape[0]
-        warp = 0.04
-        covar_matrix = np.random.uniform(-warp, warp, (2*L, 2*L))
-        self.trial_offset_covar_matrix = covar_matrix.T @ covar_matrix
-        # compute trial_warped_factors and trial_warped_splines
-
-        self.warp_all_latent_factors_for_all_trials()
-        self.construct_weight_matrices()
-
-        # self.randomly_initialize_parameters()
-        self.generate_neuron_gains_and_factor_assignments(K, L, ratio)
-        self.generate_spike_trains()
-
+        warped_factors, _, _ = self.warp_all_latent_factors_for_all_trials(False)
+        trial_warped_factors = warped_factors.squeeze().detach().numpy()
+        self.generate_neuron_gains_factor_assignments_condition_assignment_and_factor_access(K, n_configs, A)
+        self.generate_spike_trains(trial_warped_factors)
         return self
 
     def generate_latent_factors(self, intensity_type, intensity_mltply, intensity_bias):
@@ -95,54 +69,46 @@ class DataAnalyzer(ModelData):
 
         return latent_factors
 
-    def generate_neuron_gains_and_factor_assignments(self, num_neurons, num_factors, ratio):
-        if num_factors == 1:
-            ratio = [1]
-        elif isinstance(ratio, int):  # if ratio is 1 in this case, it will be normalized in a few lines,
-            # and amounts to a uniform distribution of neurons
-            ratio = [ratio] * num_factors
-        # make sure num_factors and len(ratio) are the same
-        assert num_factors == len(ratio)
-        # make sure ratio sums to 1
-        ratio = np.array(ratio)
-        ratio = ratio / np.sum(ratio)
+    def generate_neuron_gains_factor_assignments_condition_assignment_and_factor_access(self, num_neurons, num_conditions, num_areas):
 
-        neuron_gains = np.zeros(num_neurons)
-        neuron_factor_assignments = np.zeros(num_neurons)
-        last_index = 0
-        for l in range(num_factors):
-            neuron_count = int(num_neurons * ratio[l])
-            neuron_gains[last_index:(last_index+neuron_count)] = np.random.gamma(self.alpha[l], self.theta[l], neuron_count)
-            neuron_factor_assignments[last_index:(last_index+neuron_count)] = l
-            last_index += neuron_count
+        num_factors_across_areas = len(self.pi)
+        num_factors = num_factors_across_areas//num_areas
+        ratio = F.softmax(self.pi, dim=0).detach().numpy()
+        neuron_factor_assignments = np.random.choice(num_factors_across_areas, num_neurons*num_conditions, p=ratio).reshape(num_conditions, -1)
+        neuron_factor_access = np.zeros((num_conditions, num_neurons, num_factors))
+        for a in range(num_areas):
+            neuron_factor_access[(((num_factors*a)<=neuron_factor_assignments)&((num_factors*a+2)>=neuron_factor_assignments)),:] = np.arange(3*a, 3*a+3)
+        neuron_gains = np.random.gamma(self.alpha[neuron_factor_assignments.flatten()].detach().numpy(),
+                                       self.theta[neuron_factor_assignments.flatten()].detach().numpy()).reshape(neuron_factor_assignments.shape)
         self.neuron_gains = neuron_gains
-        self.neuron_factor_assignments = neuron_factor_assignments.astype(int)
-        self.pi = ratio
+        self.neuron_factor_assignments = neuron_factor_assignments
+        self.neuron_factor_access = neuron_factor_access
 
-    def generate_spike_trains(self):
+    def generate_spike_trains(self, trial_warped_factors):
 
-        neuron_intensities = self.neuron_gains[:, np.newaxis, np.newaxis] * self.trial_warped_factors[self.neuron_factor_assignments, :, :]
-        rates = np.max(neuron_intensities, axis=2)
+        neuron_trial_warped_factors = []
+        for i in range(self.neuron_factor_assignments.shape[0]):
+            neuron_trial_warped_factors.append(trial_warped_factors[self.neuron_factor_assignments[i,:], :, :, i])
+        neuron_trial_warped_factors = np.stack(neuron_trial_warped_factors, axis=3)
+        neuron_intensities = self.neuron_gains.T[:,None,None,:] * neuron_trial_warped_factors
+        rates = np.max(neuron_intensities, axis=1)
         arrival_times = np.zeros_like(rates)
         homogeneous_poisson_process = np.zeros_like(neuron_intensities)
-        while np.min(arrival_times)<neuron_intensities.shape[2]:
+        while np.min(arrival_times)<neuron_intensities.shape[1]:
             arrival_times += np.random.exponential(1/rates)
-            update_entries = arrival_times < neuron_intensities.shape[2]
+            update_entries = arrival_times < neuron_intensities.shape[1]
             update_indices = np.floor(update_entries * arrival_times).astype(int)
-            row_indices, col_indices = np.indices(update_indices.shape)
-            update_indices_flat = update_indices.flatten()
-            row_indices_flat = row_indices.flatten()
-            col_indices_flat = col_indices.flatten()
-            homogeneous_poisson_process[row_indices_flat, col_indices_flat, update_indices_flat] = 1
-        acceptance_threshold = neuron_intensities / rates[:, :, np.newaxis]
+            dim_indices = np.indices(update_indices.shape)
+            homogeneous_poisson_process[dim_indices[0].flatten(), update_indices.flatten(), dim_indices[1].flatten(), dim_indices[2].flatten()] = 1
+        acceptance_threshold = neuron_intensities / rates[:, None, :, :]
         acceptance_probabilities = np.random.uniform(0, 1, neuron_intensities.shape)
         accepted_spikes = (acceptance_probabilities <= acceptance_threshold).astype(int)
         self.Y = accepted_spikes * homogeneous_poisson_process
-        self.Y[:, :, 0] = 0
+        # self.Y[:, :, 0] = 0
         self.neuron_intensities = neuron_intensities
 
     def sample_data(self):
-        return self.Y, self.time
+        return self.Y, self.time.numpy(), self.neuron_factor_access
 
     def compute_log_likelihood(self):
         likelihood = np.sum(np.log(self.neuron_intensities) * self.Y - self.neuron_intensities * self.dt)

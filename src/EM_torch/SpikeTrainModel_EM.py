@@ -1,21 +1,20 @@
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import multiprocessing as mp
 from src.EM_torch.model_data import ModelData
 from src.psplines_gradient_method.general_functions import create_second_diff_matrix
 from scipy.interpolate import BSpline
 from scipy.sparse import csr_array, vstack, hstack
-from scipy.special import psi, softmax
+from scipy.special import psi, softmax, logsumexp, loggamma
 from scipy.optimize import root
 
 class SpikeTrainModel(ModelData):
     def __init__(self):
         super().__init__()
 
-        # parameters
+        # variables
         self.smoothness_budget = None  # L x 1
+
+        # parameters
         self.BDelta2TDelta2BT = None  # T x T
 
 
@@ -24,111 +23,178 @@ class SpikeTrainModel(ModelData):
         super().initialize(time, degree)
 
         # variables
-        self.smoothness_budget = nn.Parameter(torch.zeros((n_factors, 1)))
+        self.smoothness_budget = np.zeros((n_factors, 1))
 
         # parameters
         _, T, n_trials, n_configs = Y.shape
-        self.Y = torch.from_numpy(Y)
-        self.neuron_factor_access = factor_access
         self.randomly_initialize_parameters(n_factors, n_trials, n_configs, n_trial_samples, n_config_samples)
-        Delta2BT = csr_array(create_second_diff_matrix(T)) @ self.B.to_dense().numpy().T
+        self.Y = Y
+        self.neuron_factor_access = factor_access
+        Delta2BT = csr_array(create_second_diff_matrix(T)) @ self.B.T
         self.BDelta2TDelta2BT = Delta2BT.T @ Delta2BT
 
         return self
 
-    def construct_weight_matrices(self, tau_beta=1, tau_sigma=1):
+    def compute_log_likelihood(self, tau_beta=1, tau_sigma=1, tau_budget=1, derivs=False):
         # Weight Matrices
         (warped_factors,
+         warped_time,
          sum_RT_Y_times_warped_bases,
-         sum_RT_warped_factors_times_warped_bases) = (
-            self.warp_all_latent_factors_for_all_trials())
-        # warped_factors # L x P x K x M x N x C
-        # sum_RT_Y_times_warped_bases # L x P x T x M x N x R x C
+         sum_RT_warped_factors_times_warped_bases,
+         transformed_trial_peak_offsets,
+         transformed_config_peak_offsets) = self.warp_all_latent_factors_for_all_trials(np.exp(self.beta), derivs)
+        # warped_factors # L x T x M x N x R x C
+        # sum_RT_Y_times_warped_bases # L x P x K x M x N x C
         # sum_RT_warped_factors_times_warped_bases # L x P x M x N x C
         # self.Y # K x T x R x C
         # Y_times_N_matrix  # K x L x T x M x N x R x C
-        Y_times_N_matrix = torch.einsum('ktrc,ltmnrc->kltmnrc', self.Y, warped_factors)
-        exp_N_matrix = torch.exp(warped_factors)
+        # sum_Y_times_N_matrix  # K x L x M x N x C
+        # neuron_factor_access  #  C x K x L/A
+        Y_times_N_matrix = np.einsum('ktrc,ltmnrc->kltmnrc', self.Y, warped_factors)
+        sum_Y_times_N_matrix = np.sum(Y_times_N_matrix, axis=(2, 5))
+        exp_N_matrix = np.exp(warped_factors)
         # sum_Y_term # K x C
         # logterm1  # K x C x L
         # logterm2  # L x M x N x C
-        sum_Y_term = torch.sum(self.Y, dim=(1,2)) # K x C
-        logterm1 = sum_Y_term.unsqueeze(-1) + self.alpha.unsqueeze(0).unsqueeze(0)
-        logterm2 = self.dt * torch.sum(exp_N_matrix, dim=(1, 4)) + self.theta.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+        sum_Y_term = np.sum(self.Y, axis=(1,2)) # K x C
+        logterm1 = sum_Y_term[:,:,None] + self.alpha[None,None,:]
+        logterm2 = self.dt * np.sum(exp_N_matrix, axis=(1, 4)) + self.theta[:,None,None,None]
         # logterm # K x L x M x N x C
-        logterm = torch.einsum('kcl,lmnc->klmnc', logterm1, torch.log(logterm2))
-        # sum_Y_times_N_matrix  # K x L x M x N x C
-        sum_Y_times_N_matrix = torch.sum(Y_times_N_matrix, dim=(2, 5))
+        logterm = np.einsum('kcl,lmnc->klmnc', logterm1, np.log(logterm2))
         # alphalogtheta # 1 x L x 1 x 1 x 1
-        alphalogtheta = (self.alpha * torch.log(self.theta)).unsqueeze(0).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+        alphalogtheta = np.expand_dims(self.alpha * np.log(self.theta), (0,2,3,4))
         # sum_Y_times_logalpha  # K x C x L
-        sum_Y_times_logalpha = sum_Y_term.unsqueeze(-1) * torch.log(self.alpha).unsqueeze(0).unsqueeze(0)
+        sum_Y_times_logalpha = sum_Y_term[:,:,None] * np.log(self.alpha)[None,None,:]
         # sum_Y_times_logalpha # K x L x 1 x 1 x C
-        sum_Y_times_logalpha = sum_Y_times_logalpha.permute(0, 2, 1).unsqueeze(2).unsqueeze(2)
+        sum_Y_times_logalpha = np.transpose(sum_Y_times_logalpha, (0, 2, 1))[:,:,None,None,:]
         # logpi # 1 x L x 1 x 1 x 1
-        logpi = torch.log(self.pi).unsqueeze(0).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+        logpi_expand = np.expand_dims(np.log(self.pi), (0,2,3,4))
+        alpha_expand = np.expand_dims(self.alpha, (0,2,3,4))
+        theta_expand = np.expand_dims(self.theta, (0,2,3,4))
 
         # U_tensor # K x L x M x N x C
-        U_tensor = torch.exp(sum_Y_times_N_matrix - logterm + alphalogtheta + sum_Y_times_logalpha + logpi)
+        U_tensor = np.exp(sum_Y_times_N_matrix - logterm + alphalogtheta + sum_Y_times_logalpha + logpi_expand)
 
         # W_CMNK_tensor # K x L x M x N x C
-        W_CMNK_tensor = F.softmax(U_tensor, dim=1)
+        W_CMNK_tensor = softmax(U_tensor, axis=1)
 
-        exp_sum_logsumexp_tensor = torch.sum(torch.logsumexp(U_tensor, dim=1), dim=0)
+        exp_sum_logsumexp_tensor = np.sum(logsumexp(U_tensor, axis=1), axis=0)
         exp_sum_logsumexp_tensor_reshape = exp_sum_logsumexp_tensor.reshape(-1, W_CMNK_tensor.shape[-1])
 
         # W_C_tensor # 1 x 1 x M x N x C
-        W_C_tensor = F.softmax(exp_sum_logsumexp_tensor_reshape, dim=0).reshape(exp_sum_logsumexp_tensor.shape).unsqueeze(0).unsqueeze(0)
+        W_C_tensor = softmax(exp_sum_logsumexp_tensor_reshape, axis=0).reshape(exp_sum_logsumexp_tensor.shape)[None,None,:,:,:]
 
         # W_tensor # K x L x M x N x C
-        W_tensor = (W_CMNK_tensor * W_C_tensor).detach()
+        W_tensor = (W_CMNK_tensor * W_C_tensor)
+
+        # A_tensor # K x L x M x N x C
+        A_tensor = np.einsum('kcl,lmnc->klmnc', logterm1, 1 / logterm2)
 
         # Liklelihood Terms
-        A_tensor = torch.einsum('kcl,lmnc->klmnc', logterm1.detach(), 1/logterm2.detach())
-        likelihood_term = (sum_Y_times_N_matrix - A_tensor * logterm2 - torch.lgamma(self.alpha.unsqueeze(0).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)) +
-             self.alpha.unsqueeze(0).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1) * (torch.log(self.theta).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1) + torch.digamma(logterm1.detach()).permute(0, 2, 1).unsqueeze(2).unsqueeze(2) -
-                                                                                  torch.log(logterm2.detach().unsqueeze(0))) + logpi)
+        likelihood_term = (sum_Y_times_N_matrix - A_tensor * logterm2[None,:,:,:,:] - loggamma(alpha_expand) + alpha_expand *
+                           (np.log(theta_expand) + np.transpose(psi(logterm1), (0, 2, 1))[:,:,None,None,:] - np.log(logterm2[None,:,:,:,:])) + logpi_expand)
+        likelihood_term = np.sum(W_tensor * likelihood_term)
 
         # Entropy Terms
-        d = self.config_peak_offset_stdevs.shape[0]
-        transformed_config_peak_offsets = torch.einsum('j,ncj->ncj', self.config_peak_offset_stdevs, self.config_peak_offset_presamples)
+        dim = self.config_peak_offset_stdevs.shape[0]
+        prod = np.einsum('ncl,l->ncl', transformed_config_peak_offsets, 1/self.config_peak_offset_stdevs)
         # entropy_term1  # N x C
-        entropy_term1 = -0.5 * torch.sum((torch.log((2 * torch.pi)**d * torch.prod(self.config_peak_offset_stdevs**2)) + (transformed_config_peak_offsets / self.config_peak_offset_stdevs.unsqueeze(0).unsqueeze(0)) ** 2), dim=2)
+        entropy_term1 = -0.5 * np.sum(np.log((2 * np.pi)**dim * np.prod(self.config_peak_offset_stdevs**2)) + prod**2, axis=2)
         # entropy_term1  # 1 x 1 x 1 x N x C
-        entropy_term1 = entropy_term1.unsqueeze(0).unsqueeze(0).unsqueeze(0)
+        entropy_term1 = np.sum(W_C_tensor * np.expand_dims(entropy_term1, (0,1,2)))
 
-        transformed_trial_peak_offsets = torch.einsum('ij,mrcj->mrci', self.trial_peak_offset_covar_ltri, self.trial_peak_offset_presamples)
-        Sigma = torch.mm(self.trial_peak_offset_covar_ltri, self.trial_peak_offset_covar_ltri.t())
-        det_Sigma = torch.det(Sigma)
-        inv_Sigma = torch.inverse(Sigma)
+        Sigma = self.trial_peak_offset_covar_ltri @ self.trial_peak_offset_covar_ltri.T
+        det_Sigma = np.linalg.det(Sigma)
+        inv_Sigma = np.linalg.inv(Sigma)
         # entropy_term2  # M x C
-        entropy_term2 = -0.5 * torch.sum((torch.log((2 * torch.pi)**d * det_Sigma) + torch.einsum('mrci,ij,mrcj->mrc', transformed_trial_peak_offsets, inv_Sigma, transformed_trial_peak_offsets)), dim=1)
+        entropy_term2 = -0.5 * np.sum(np.log((2 * np.pi)**dim * det_Sigma) + np.einsum('mrci,ij,mrcj->mrc', transformed_trial_peak_offsets, inv_Sigma, transformed_trial_peak_offsets), axis=1)
         # entropy_term2  # 1 x 1 x M x 1 x C
-        entropy_term2 = entropy_term2.unsqueeze(1).unsqueeze(0).unsqueeze(0)
-
-
-        # beta gradients
-        sum_RT_warped_factors_times_warped_bases = sum_RT_warped_factors_times_warped_bases.unsqueeze(2)
-        A_tensor = A_tensor.permute(1, 0, 2, 3, 4).unsqueeze(1)
-        W_tensor = W_tensor.permute(1, 0, 2, 3, 4).unsqueeze(1)
-        # A_tensor  # L x P x K x M x N x C
-        # sum_RT_warped_factors_times_warped_bases  # L x P x K x M x N x C
-        # W_tensor # L x P x K x M x N x C
-        beta_grad = torch.exp(self.beta) * torch.sum(W_tensor * (sum_RT_Y_times_warped_bases - self.dt * A_tensor * sum_RT_warped_factors_times_warped_bases), dim=(2, 3, 4, 5))
-        
-
-
+        entropy_term2 = np.sum(W_C_tensor * np.expand_dims(entropy_term2, (0,1,3)))
 
         # penalty terms
-        sigma_Penalty = - tau_sigma * torch.sum(torch.abs(inv_Sigma))
-        diagBetaDeltaBeta = torch.sum((torch.exp(self.beta) @ self.BDelta2TDelta2BT) * torch.exp(self.beta), axis=1)
-        s2_norm = F.softmax(self.d2, dim=0)
-        beta_s2_penalty = - tau_beta * (s2_norm.T @ diagBetaDeltaBeta)
+        sigma_Penalty = - tau_sigma * np.sum(np.abs(inv_Sigma))
+
+        latent_coefficients = np.exp(self.beta)
+        smoothness_budget_constrained = softmax(self.smoothness_budget, axis=0)
+        beta_s2_penalty = - tau_beta * smoothness_budget_constrained.T @ np.sum((latent_coefficients @ self.BDelta2TDelta2BT) * latent_coefficients, axis=1)
+
+        smoothness_budget = - tau_budget * (self.smoothness_budget.T @ self.smoothness_budget)
+
+
+
+        # beta_gradients = self.compute_beta_gradients_and_update_beta(sum_RT_warped_factors_times_warped_bases, sum_RT_Y_times_warped_bases, A_tensor, W_tensor, 0.01)
+
+
+    def compute_beta_gradients_and_update_beta(self, sum_RT_warped_factors_times_warped_bases, sum_RT_Y_times_warped_bases, A_tensor, W_tensor, learning_rate, tau_beta):
+
+        # sum_RT_Y_times_warped_bases # L x P x K x M x N x C
+        # sum_RT_warped_factors_times_warped_bases # L x P x M x N x C
+        # A_tensor # K x L x M x N x C
+        # W_tensor # K x L x M x N x C
+        sum_RT_warped_factors_times_warped_bases = np.transpose(sum_RT_warped_factors_times_warped_bases, (1,0,2,3,4))
+        sum_RT_Y_times_warped_bases = np.transpose(sum_RT_Y_times_warped_bases, (2,1,0,3,4,5))
+        # sum_RT_Y_times_warped_bases # K x P x L x M x N x C
+        # sum_RT_warped_factors_times_warped_bases # P x L x M x N x C
+        # inner_terms  # K x P x L x M x N x C
+        inner_terms = sum_RT_Y_times_warped_bases - self.dt * np.einsum('klmnc,plmnc->kplmnc', A_tensor, sum_RT_warped_factors_times_warped_bases)
+        weighted_inner_terms = np.einsum('klmnc,kplmnc->kplmnc', W_tensor, inner_terms)
+        likelihood_gradient_component = np.exp(self.beta) * np.sum(weighted_inner_terms, axis=(0, 3, 4, 5)).T
+        smoothness_budget_constrained = softmax(self.smoothness_budget, axis=0)
+        penalty_gradient_component = - 2 * tau_beta * smoothness_budget_constrained * self.beta * (self.beta @ self.BDelta2TDelta2BT)
+
+        beta_gradients = likelihood_gradient_component + penalty_gradient_component
+        self.beta += learning_rate * beta_gradients
+
+        return beta_gradients
+
+    def compute_Sigma_gradients_and_update_Sigma(self, sum_RT_warped_factors_times_warped_bases, sum_RT_Y_times_warped_bases, A_tensor, W_tensor, learning_rate):
+        # sum_RT_Y_times_warped_bases # L x P x K x M x N x C
+        # sum_RT_warped_factors_times_warped_bases # L x P x M x N x C
+        # A_tensor # K x L x M x N x C
+        # W_tensor # K x L x M x N x C
+        sum_RT_warped_factors_times_warped_bases = np.transpose(sum_RT_warped_factors_times_warped_bases,
+                                                                (1, 0, 2, 3, 4))
+        sum_RT_Y_times_warped_bases = np.transpose(sum_RT_Y_times_warped_bases, (2, 1, 0, 3, 4, 5))
+        # sum_RT_Y_times_warped_bases # K x P x L x M x N x C
+        # sum_RT_warped_factors_times_warped_bases # P x L x M x N x C
+        # inner_terms  # K x P x L x M x N x C
+        inner_terms = sum_RT_Y_times_warped_bases - self.dt * np.einsum('klmnc,plmnc->kplmnc', A_tensor,
+                                                                        sum_RT_warped_factors_times_warped_bases)
+        weighted_inner_terms = np.einsum('klmnc,kplmnc->kplmnc', W_tensor, inner_terms)
+        beta_gradients = np.exp(self.beta) * np.sum(weighted_inner_terms, axis=(0, 3, 4, 5)).T
+
+        self.beta += learning_rate * beta_gradients
+
+        return beta_gradients
+
+
+
+
+
+
+        # gradient of sigma_Penalty
+        dlogL_dG_star = ((self.Y - lambda_del_t) @ betaStar_BPsi.T) * self.mask_G
+        while ct < max_iters:
+            G_star_minus = self.G_star + learning_rate * dlogL_dG_star
+            G_star_plus = np.maximum(np.abs(G_star_minus) - tau_G * learning_rate, 0) * np.sign(G_star_minus)
+            gen_grad_curr = (G_star_plus - self.G_star) / learning_rate
+        sigma_Penalty_grad = - tau_sigma * torch.inverse(Sigma)
 
         # Total Loss
-        total_loss = torch.sum(W_tensor * likelihood_term + W_C_tensor * entropy_term1 + W_C_tensor * entropy_term2) + sigma_Penalty + beta_s2_penalty
+        total_loss = np.sum(W_tensor * likelihood_term + W_C_tensor * entropy_term1 + W_C_tensor * entropy_term2) + sigma_Penalty + beta_s2_penalty
 
         return total_loss
+
+    def penalty_term(self, tau_beta, tau_s):
+
+
+        smoothness_budget_penalty = tau_s * torch.sum(self.smoothness_budget ** 2)
+        penalty = beta_s2_penalty + smoothness_budget_penalty
+
+        # beta penalty gradients
+        s2_component = - 2 * tau_beta *  smoothness_budget_constrained * latent_factors @ self.BDelta2TDelta2BT
+
+        return -penalty, smoothness_budget_constrained
 
 
 
@@ -139,54 +205,6 @@ class SpikeTrainModel(ModelData):
         self.c = np.zeros_like(self.c)
         self.chi = -1e10 * np.ones_like(self.chi)
         self.chi[latent_coupling == 1] = 0
-
-    def beta_gradients(self):
-
-        # some of these matrices are three dimensional
-        deltatExpN_times_WxA_matrix = self.dt * np.exp(self.trial_warped_factors) * self.WxA_matrix
-        gradient_term = self.WxY_matrix - deltatExpN_times_WxA_matrix
-        L, R, T = gradient_term.shape
-        P = self.beta.shape[1]
-        beta_gradients = np.zeros((L, P))
-        for l in range(L):
-            factor_gradient_intermediate = np.zeros((P, R))
-            for r in range(R):
-                factor_gradient_intermediate[:,r,np.newaxis] = self.trial_warped_splines[l][r] @ gradient_term[l, r, :, np.newaxis]
-            beta_gradients[l,:] = np.sum(factor_gradient_intermediate, axis=1)
-        beta_gradients = np.exp(self.beta) * beta_gradients
-        return beta_gradients
-
-    def update_factor_terms(self):
-        trial_warped_splines, trial_warped_factors = self.warped_latent_factors()
-        # Compute YxN_matrix for all k, l in one go
-        self.YxN_matrix = np.einsum('krt,lrt->kl', self.Y, trial_warped_factors).T
-        self.deltatSumExpN_vector = self.dt * np.sum(np.exp(trial_warped_factors), axis=(1, 2))
-        self.trial_warped_factors = trial_warped_factors
-        self.trial_warped_splines = trial_warped_splines
-
-    def update_beta(self, loss, factor=1e-2, alpha=0.1, max_iters=4):
-
-        ct = 0
-        learning_rate = 1
-        beta_gradients = self.beta_gradients()
-        self.beta_minus = np.copy(self.beta)
-        loss_next = loss
-        while ct < max_iters:
-            self.beta = self.beta_minus + learning_rate * beta_gradients
-            self.update_factor_terms()
-            loss_next = self.compute_loss()
-            # Armijo condition, using Frobenius norm for matrices, but for maximization
-            if loss_next >= loss + alpha * learning_rate * np.linalg.norm(beta_gradients, ord='fro') ** 2:
-                break
-            learning_rate *= factor
-            ct += 1
-        if ct < max_iters:
-            loss = loss_next
-        else:
-            ct = np.inf
-            self.beta = self.beta_minus
-        self.update_factor_terms()
-        return loss, ct
 
     def trial_peaktime_gradient_for_timewarp(self, avg_peak_time, trial_peak_time):
         time = self.time

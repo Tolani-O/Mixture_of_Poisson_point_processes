@@ -1,6 +1,5 @@
 import numpy as np
-import torch
-import torch.nn.functional as F
+from scipy.special import softmax
 from src.EM_torch.model_data import ModelData
 
 class DataAnalyzer(ModelData):
@@ -27,11 +26,11 @@ class DataAnalyzer(ModelData):
         # each condition has the same number of neurons, to total number of neurons across conditions is K * C
         self.randomly_initialize_parameters(n_factors, n_trials, n_configs, n_trial_samples, n_config_samples)
         self.latent_factors = self.generate_latent_factors(intensity_type, intensity_mltply, intensity_bias)
-        self.latent_factors = torch.from_numpy(np.vstack([self.latent_factors] * A))
-        B_inv = torch.pinverse(self.B.to_dense().t())
-        self.beta = torch.log(torch.matmul(self.latent_factors, B_inv.T))
-        warped_factors, _, _ = self.warp_all_latent_factors_for_all_trials(False)
-        trial_warped_factors = warped_factors.squeeze().detach().numpy()
+        self.latent_factors = np.vstack([self.latent_factors] * A)
+        B_inv = np.linalg.pinv(self.B.toarray().T)
+        self.beta = np.log(self.latent_factors @ B_inv.T)
+        warped_factors, _, _, _, _, _ = self.warp_all_latent_factors_for_all_trials(np.exp(self.beta), False)
+        trial_warped_factors = warped_factors.squeeze()
         self.generate_neuron_gains_factor_assignments_condition_assignment_and_factor_access(K, n_configs, A)
         self.generate_spike_trains(trial_warped_factors)
         return self
@@ -73,13 +72,13 @@ class DataAnalyzer(ModelData):
 
         num_factors_across_areas = len(self.pi)
         num_factors = num_factors_across_areas//num_areas
-        ratio = F.softmax(self.pi, dim=0).detach().numpy()
+        ratio = softmax(self.pi, axis=0)
         neuron_factor_assignments = np.random.choice(num_factors_across_areas, num_neurons*num_conditions, p=ratio).reshape(num_conditions, -1)
         neuron_factor_access = np.zeros((num_conditions, num_neurons, num_factors))
         for a in range(num_areas):
             neuron_factor_access[(((num_factors*a)<=neuron_factor_assignments)&((num_factors*a+2)>=neuron_factor_assignments)),:] = np.arange(3*a, 3*a+3)
-        neuron_gains = np.random.gamma(self.alpha[neuron_factor_assignments.flatten()].detach().numpy(),
-                                       self.theta[neuron_factor_assignments.flatten()].detach().numpy()).reshape(neuron_factor_assignments.shape)
+        neuron_gains = np.random.gamma(self.alpha[neuron_factor_assignments.flatten()],
+                                       self.theta[neuron_factor_assignments.flatten()]).reshape(neuron_factor_assignments.shape)
         self.neuron_gains = neuron_gains
         self.neuron_factor_assignments = neuron_factor_assignments
         self.neuron_factor_access = neuron_factor_access
@@ -108,7 +107,7 @@ class DataAnalyzer(ModelData):
         self.neuron_intensities = neuron_intensities
 
     def sample_data(self):
-        return self.Y, self.time.numpy(), self.neuron_factor_access
+        return self.Y, self.time, self.neuron_factor_access
 
     def compute_log_likelihood(self):
         likelihood = np.sum(np.log(self.neuron_intensities) * self.Y - self.neuron_intensities * self.dt)

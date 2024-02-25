@@ -28,10 +28,10 @@ def main(K, R, L, intensity_mltply, intensity_bias, tau_psi, tau_beta, tau_s, be
 
     Y, stim_time, factor_access = data.sample_data()
     n_factors = 6
-    n_trial_samples = 4
-    n_config_samples = 5
+    n_trial_samples = 4 # m
+    n_config_samples = 5 # n
     model = SpikeTrainModel().initialize(Y, stim_time, factor_access, n_factors, n_trial_samples, n_config_samples)
-    model.construct_weight_matrices()
+    model.compute_log_likelihood(derivs=True)
     # model.beta_gradients()
     # model.update_beta(10)
     # model.peaktime_gradients()

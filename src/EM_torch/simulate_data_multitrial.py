@@ -70,13 +70,13 @@ class DataAnalyzer(ModelData):
 
     def generate_neuron_gains_factor_assignments_condition_assignment_and_factor_access(self, num_neurons, num_conditions, num_areas):
 
-        num_factors_across_areas = len(self.pi)
-        num_factors = num_factors_across_areas//num_areas
+        num_factors = len(self.pi)
         ratio = softmax(self.pi, axis=0)
-        neuron_factor_assignments = np.random.choice(num_factors_across_areas, num_neurons*num_conditions, p=ratio).reshape(num_conditions, -1)
+        neuron_factor_assignments = np.random.choice(num_factors, num_neurons*num_conditions, p=ratio).reshape(num_conditions, -1)
         neuron_factor_access = np.zeros((num_conditions, num_neurons, num_factors))
         for a in range(num_areas):
-            neuron_factor_access[(((num_factors*a)<=neuron_factor_assignments)&((num_factors*a+2)>=neuron_factor_assignments)),:] = np.arange(3*a, 3*a+3)
+            area_start_indx = a * (num_factors//2)
+            neuron_factor_access[((area_start_indx<=neuron_factor_assignments)&((area_start_indx+2)>=neuron_factor_assignments)), (3*a):(3*a+3)] = 1
         neuron_gains = np.random.gamma(self.alpha[neuron_factor_assignments.flatten()],
                                        self.theta[neuron_factor_assignments.flatten()]).reshape(neuron_factor_assignments.shape)
         self.neuron_gains = neuron_gains

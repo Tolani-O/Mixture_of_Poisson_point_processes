@@ -49,8 +49,8 @@ class SpikeTrainModel(ModelData):
         # self.Y # K x T x R x C
         # Y_times_N_matrix  # K x L x T x M x N x R x C
         # sum_Y_times_N_matrix  # K x L x M x N x C
-        # neuron_factor_access  #  C x K x L/A
-        Y_times_N_matrix = np.einsum('ktrc,ltmnrc->kltmnrc', self.Y, warped_factors)
+        # neuron_factor_access  #  C x K x L
+        Y_times_N_matrix = np.einsum('ktrc,ckl,ltmnrc->kltmnrc', self.Y, self.neuron_factor_access, warped_factors)
         sum_Y_times_N_matrix = np.sum(Y_times_N_matrix, axis=(2, 5))
         exp_N_matrix = np.exp(warped_factors)
         # sum_Y_term # K x C
@@ -60,13 +60,13 @@ class SpikeTrainModel(ModelData):
         logterm1 = sum_Y_term[:,:,None] + self.alpha[None,None,:]
         logterm2 = self.dt * np.sum(exp_N_matrix, axis=(1, 4)) + self.theta[:,None,None,None]
         # logterm # K x L x M x N x C
-        logterm = np.einsum('kcl,lmnc->klmnc', logterm1, np.log(logterm2))
+        logterm = np.einsum('kcl,ckl,lmnc->klmnc', logterm1, self.neuron_factor_access, np.log(logterm2))
         # alphalogtheta # 1 x L x 1 x 1 x 1
         alphalogtheta = np.expand_dims(self.alpha * np.log(self.theta), (0,2,3,4))
         # sum_Y_times_logalpha  # K x C x L
-        sum_Y_times_logalpha = sum_Y_term[:,:,None] * np.log(self.alpha)[None,None,:]
+        sum_Y_times_logalpha = np.einsum('kc,ckl,l->klc', sum_Y_term, self.neuron_factor_access, np.log(self.alpha))
         # sum_Y_times_logalpha # K x L x 1 x 1 x C
-        sum_Y_times_logalpha = np.transpose(sum_Y_times_logalpha, (0, 2, 1))[:,:,None,None,:]
+        sum_Y_times_logalpha = sum_Y_times_logalpha[:,:,None,None,:]
         # logpi # 1 x L x 1 x 1 x 1
         logpi_expand = np.expand_dims(np.log(self.pi), (0,2,3,4))
         alpha_expand = np.expand_dims(self.alpha, (0,2,3,4))
@@ -88,7 +88,7 @@ class SpikeTrainModel(ModelData):
         W_tensor = (W_CMNK_tensor * W_C_tensor)
 
         # A_tensor # K x L x M x N x C
-        A_tensor = np.einsum('kcl,lmnc->klmnc', logterm1, 1 / logterm2)
+        A_tensor = np.einsum('kcl,ckl,lmnc->klmnc', logterm1, self.neuron_factor_access, 1/logterm2)
 
         # Liklelihood Terms
         likelihood_term = (sum_Y_times_N_matrix - A_tensor * logterm2[None,:,:,:,:] - loggamma(alpha_expand) + alpha_expand *

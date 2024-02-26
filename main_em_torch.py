@@ -30,15 +30,16 @@ def main(K, R, L, intensity_mltply, intensity_bias, tau_psi, tau_beta, tau_s, be
     A = 2
     data = DataAnalyzer().initialize(K=K, A=A, intensity_mltply=intensity_mltply, intensity_bias=intensity_bias, n_trials=n_trials, n_configs=n_configs)
     Y, stim_time, factor_access = data.sample_data()
-    n_factors = 6 # L
     n_trial_samples = 10 # m
     n_config_samples = 10 # n
-    model = LikelihoodModel().initialize(Y, stim_time, factor_access, n_factors, n_trial_samples, n_config_samples)
-    factors = np.exp(data.beta) @ data.B
-    model.init_ground_truth(torch.tensor(factors))
+    model = LikelihoodModel().initialize(Y, stim_time, factor_access, n_trial_samples, n_config_samples)
+    factors = np.exp() @ data.B
+    model.init_ground_truth(torch.tensor(data.beta), torch.tensor(data.alpha), torch.tensor(data.theta), torch.tensor(data.pi),
+                            torch.tensor(data.config_peak_offset_stdevs), torch.tensor(data.trial_peak_offset_covar_ltri))
     optimizer_nn = torch.optim.Adam(model.parameters(), lr=0.01)
 
     true_likelihood = data.compute_log_likelihood()
+    true_ELBO = model.compute_log_elbo() + model.compute_offset_entropy_terms()
     print(f"True likelihood: {true_likelihood}")
     start_epoch = 0
 

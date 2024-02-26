@@ -29,14 +29,13 @@ def main(K, R, L, intensity_mltply, intensity_bias, tau_psi, tau_beta, tau_s, be
     n_configs = 10
     A = 2
     data = DataAnalyzer().initialize(K=K, A=A, intensity_mltply=intensity_mltply, intensity_bias=intensity_bias, n_trials=n_trials, n_configs=n_configs)
-
     Y, stim_time, factor_access = data.sample_data()
     n_factors = 6 # L
     n_trial_samples = 10 # m
     n_config_samples = 10 # n
     model = LikelihoodModel().initialize(Y, stim_time, factor_access, n_factors, n_trial_samples, n_config_samples)
-    # factors = np.exp(data.beta) @ data.B
-    # model.init_ground_truth(torch.tensor(factors))
+    factors = np.exp(data.beta) @ data.B
+    model.init_ground_truth(torch.tensor(factors))
     optimizer_nn = torch.optim.Adam(model.parameters(), lr=0.01)
 
     true_likelihood = data.compute_log_likelihood()
@@ -114,7 +113,7 @@ def main(K, R, L, intensity_mltply, intensity_bias, tau_psi, tau_beta, tau_s, be
         start_time = time.time()  # Record the start time of the epoch
 
         optimizer_nn.zero_grad()
-        loss = model.forward(10,10,10)
+        loss = model.forward(10, 10 ,10)
         loss.backward()
         optimizer_nn.step()
 
@@ -130,9 +129,9 @@ def main(K, R, L, intensity_mltply, intensity_bias, tau_psi, tau_beta, tau_s, be
 
         if epoch % 10 == 0:
             s2_norm = F.softmax(model.smoothness_budget, dim=0)
-            output_str = (f"Epoch: {epoch}, Loss: {loss}, "
+            output_str = (f"Epoch: {epoch}, Loss: {-loss.detach()}, "
                           f"Epoch Time: {epoch_time / 60:.2f} mins, Total Time: {total_time / (60 * 60):.2f} hrs\n"
-                          f"s_norm: {s2_norm.t()}\n")
+                          f"s_norm: {s2_norm.detach().t()}\n")
             # output_str = (f"Epoch: {epoch}, Loss: {loss}, Log Likelihood: {log_likelihood}, "
             #               f"Epoch Time: {epoch_time / 60:.2f} mins, Total Time: {total_time / (60 * 60):.2f} hrs\n"
             #               f"s_norm: {s2_norm.T}\n")

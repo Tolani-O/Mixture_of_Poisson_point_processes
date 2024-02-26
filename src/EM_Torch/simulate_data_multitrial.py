@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.special import softmax
-from src.EM_torch.model_data import ModelData
+from src.EM_Torch.model_data import ModelData
 
 class DataAnalyzer(ModelData):
 
@@ -12,19 +12,20 @@ class DataAnalyzer(ModelData):
         self.neuron_factor_assignments = None  # unobserved
         self.neuron_intensities = None  # unobserved
 
-    def initialize(self, A=2, K=100, T=200, intensity_type=('constant', '1peak', '2peaks'), intensity_mltply=15, intensity_bias=5):
+    def initialize(self, A=2, K=100, T=200, intensity_type=('constant', '1peak', '2peaks'),
+                   intensity_mltply=15, intensity_bias=5, n_trials=3, n_configs=2):
         degree = 3
         time = np.arange(0, T, 1) / 100
         super().initialize(time, degree)
         n_factors = len(intensity_type) * A
-        n_trials = 3
-        n_configs = 2
-        K = 5
-        n_trial_samples = 1
-        n_config_samples = 1
+        # n_trials = 3
+        # n_configs = 2
+        # K = 5
+        # n_trial_samples = 1
+        # n_config_samples = 1
         # K is the number of neurons in a single condition across areas.
         # each condition has the same number of neurons, to total number of neurons across conditions is K * C
-        self.randomly_initialize_parameters(n_factors, n_trials, n_configs, n_trial_samples, n_config_samples)
+        self.randomly_initialize_parameters(n_factors, n_trials, n_configs, 1, 1)
         self.latent_factors = self.generate_latent_factors(intensity_type, intensity_mltply, intensity_bias)
         self.latent_factors = np.vstack([self.latent_factors] * A)
         B_inv = np.linalg.pinv(self.B.toarray().T)

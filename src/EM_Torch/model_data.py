@@ -124,7 +124,7 @@ class ModelData:
         mid = np.broadcast_to(np.expand_dims(mid, (1,2,3,4,5)), (mid.shape) + tuple(warped_time.shape[1:-1]) + (6,))
         late = self.time[self.right_landmark2:]
         late = np.broadcast_to(np.expand_dims(late, (1,2,3,4,5)), (late.shape) + tuple(warped_time.shape[1:-1]) + (6,))
-        # warped_time  # T x M X N x R X C X L/2
+        # warped_time  # T x M X N x R X C X L
         warped_times = np.vstack([early, warped_time[:,:,:,:,:,:6], mid, warped_time[:,:,:,:,:,6:], late])
         return warped_times
 
@@ -162,7 +162,3 @@ class ModelData:
             sum_RT_Y_times_warped_bases = np.stack(sum_RT_Y_times_warped_bases)
             sum_RT_warped_factors_times_warped_bases = np.stack(sum_RT_warped_factors_times_warped_bases)
         return warped_factors, sum_RT_Y_times_warped_bases, sum_RT_warped_factors_times_warped_bases
-
-
-    def compute_log_likelihood(self):
-        pass

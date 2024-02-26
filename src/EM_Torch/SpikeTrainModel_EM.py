@@ -83,7 +83,7 @@ class LikelihoodModel(nn.Module):
         self.beta = nn.Parameter(torch.log(latent_factors))
         self.alpha = nn.Parameter(alpha)
         self.theta = nn.Parameter(theta)
-        self.pi = torch.stack([torch.zeros(1), nn.Parameter(pi)])
+        self.pi = nn.Parameter(pi)
         self.config_peak_offset_stdevs = nn.Parameter(config_peak_offset_stdevs)
         self.trial_peak_offset_covar_ltri = nn.Parameter(trial_peak_offset_covar_ltri)
 
@@ -191,7 +191,7 @@ class LikelihoodModel(nn.Module):
         # sum_Y_times_logalpha # K x L x 1 x 1 x C
         sum_Y_times_logalpha = sum_Y_times_logalpha[:,:,None,None,:]
         # logpi # 1 x L x 1 x 1 x 1
-        logpi_expand = torch.log(F.softmax(torch.stack([torch.zeros(1), self.pi]), dim=0)).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
+        logpi_expand = torch.log(F.softmax(torch.cat([torch.zeros(1), self.pi]), dim=0)).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
         alpha_expand = torch.exp(self.alpha).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
         theta_expand = torch.exp(self.theta).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
 
@@ -255,7 +255,7 @@ class LikelihoodModel(nn.Module):
                                     torch.exp(self.beta),
                                     torch.tensor([0]).unsqueeze(0).expand(self.beta.shape[0],-1)],
                                    dim=1).float()
-        smoothness_budget_constrained = F.softmax(torch.stack([torch.zeros(1), self.smoothness_budget]), dim=0)
+        smoothness_budget_constrained = F.softmax(torch.cat([torch.zeros(1), self.smoothness_budget]), dim=0)
         beta_s2_penalty = - tau_beta * smoothness_budget_constrained.float().t() @ torch.sum((latent_factors @ self.BDelta2TDelta2BT.float()) * latent_factors, dim=1)
 
         smoothness_budget_penalty = - tau_budget * (self.smoothness_budget.t() @ self.smoothness_budget)

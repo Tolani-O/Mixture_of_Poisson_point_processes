@@ -6,12 +6,7 @@ class DataAnalyzer:
 
     def __init__(self):
         self.time = None
-        self.joint_factors_indices = None
-        self.degree = None
         self.dt = None
-        self.knots = None
-        self.B = None
-        self.Basis_elements = None
         landmark_spread = 50
         self.left_landmark1 = 20
         self.mid_landmark1 = self.left_landmark1 + landmark_spread / 2
@@ -23,6 +18,8 @@ class DataAnalyzer:
         self.neuron_factor_access = None
         self.config_peak_offset_presamples = None  # C x 2AL
         self.trial_peak_offset_presamples = None  # CR x 2AL
+        self.transformed_trial_peak_offset_samples = None  # CR x 2AL
+        self.transformed_config_peak_offset_samples = None  # C x 2AL
 
         # parameters
         self.beta = None  # AL x P
@@ -42,35 +39,24 @@ class DataAnalyzer:
                    intensity_mltply=15, intensity_bias=5, n_trials=3, n_configs=2):
         degree = 3
         time = np.arange(0, T, 1) / 100
-
         self.time = time
-        self.degree = degree
         self.dt = round(self.time[1] - self.time[0], 3)
-        self.knots = np.concatenate([np.repeat(self.time[0], degree), self.time, np.repeat(self.time[-1], degree)])
-        self.knots[-1] = self.knots[-1] + self.dt
-        self.B = BSpline.design_matrix(self.time, self.knots, degree).transpose()
 
         n_factors = len(intensity_type) * A
-        # n_trials = 3
-        # n_configs = 2
-        # K = 5
-        # n_trial_samples = 1
-        # n_config_samples = 1
         # K is the number of neurons in a single condition across areas.
         # each condition has the same number of neurons, to total number of neurons across conditions is K * C
-
         # fixed values
         self.config_peak_offset_presamples = np.random.normal(0, 1, (1, n_configs, 2 * n_factors))
         self.trial_peak_offset_presamples = (np.random.normal(0, 1, (1, n_trials * n_configs, 2 * n_factors))
                                              .reshape(1, n_trials, n_configs, 2 * n_factors))
         # paremeters
-        self.beta = np.random.normal(n_factors, self.B.shape[0])
-        self.alpha = np.random.normal(n_factors)
-        self.theta = np.random.normal(n_factors)
-        self.pi = np.random.normal(n_factors-1)
-        self.config_peak_offset_stdevs = np.random.normal(2 * n_factors)
+        self.beta = np.random.normal(size=(n_factors, self.time.shape[0]))
+        self.alpha = np.random.normal(size=n_factors)
+        self.theta = np.random.normal(size=n_factors)
+        self.pi = np.random.normal(size=n_factors-1)
+        self.config_peak_offset_stdevs = np.random.normal(size=2 * n_factors)
         bounds = 0.05
-        matrix = np.tril(np.random.uniform(-bounds, bounds, (2 * n_factors, 2 * n_factors)))
+        matrix = np.tril(np.random.normal(size=(2 * n_factors, 2 * n_factors)))
         # Ensure diagonal elements are positive
         for i in range(min(matrix.shape)):
             matrix[i, i] += np.exp(matrix[i, i])
@@ -84,9 +70,8 @@ class DataAnalyzer:
 
         latent_factors = self.generate_latent_factors(intensity_type, intensity_mltply, intensity_bias)
         latent_factors = np.vstack([latent_factors] * A)
-        B_inv = np.linalg.pinv(self.B.toarray().T)
-        self.beta = np.log(latent_factors @ B_inv.T)
-        warped_factors, _, _, _ = self.warp_all_latent_factors_for_all_trials(np.exp(self.beta))
+        self.beta = np.log(latent_factors)
+        warped_factors = self.warp_all_latent_factors_for_all_trials(np.exp(self.beta))
         trial_warped_factors = warped_factors.squeeze()
         self.generate_neuron_gains_factor_assignments_condition_assignment_and_factor_access(K, n_configs, A)
         self.generate_spike_trains(trial_warped_factors)
@@ -167,21 +152,21 @@ class DataAnalyzer:
 
     def warp_all_latent_factors_for_all_trials(self, gamma):
 
-        transformed_trial_peak_offsets = np.einsum('lj,mrcj->mrcl', self.trial_peak_offset_covar_ltri, self.trial_peak_offset_presamples)
-        transformed_config_peak_offsets = np.einsum('l,ncl->ncl', np.exp(self.config_peak_offset_stdevs), self.config_peak_offset_presamples)
-        avg_peak_times, left_landmarks, right_landmarks, s_new = self.compute_offsets_and_landmarks(gamma, transformed_config_peak_offsets, transformed_trial_peak_offsets)
-        warped_times = self.warp_times(avg_peak_times, left_landmarks, right_landmarks, s_new)
-        warped_factors = self.recompute_warp_terms(gamma, warped_times)
-        return warped_factors, warped_times, transformed_trial_peak_offsets, transformed_config_peak_offsets
+        self.transformed_trial_peak_offsets = np.einsum('lj,mrcj->mrcl', self.trial_peak_offset_covar_ltri, self.trial_peak_offset_presamples)
+        self.transformed_config_peak_offsets = np.einsum('l,ncl->ncl', np.exp(self.config_peak_offset_stdevs), self.config_peak_offset_presamples)
+        avg_peak_times, left_landmarks, right_landmarks, s_new = self.compute_offsets_and_landmarks()
+        warped_times = self.compute_warped_times(avg_peak_times, left_landmarks, right_landmarks, s_new)
+        warped_factors = self.compute_warped_factors(warped_times)
+        return warped_factors
 
-    def compute_offsets_and_landmarks(self, gamma, transformed_config_peak_offsets, transformed_trial_peak_offsets):
+    def compute_offsets_and_landmarks(self):
 
-        factors = gamma @ self.B
+        factors = np.exp(self.beta)
         avg_peak1_times = self.time[self.left_landmark1 + np.argmax(factors[:, self.left_landmark1:self.right_landmark1], axis=1)]
         avg_peak2_times = self.time[self.left_landmark2 + np.argmax(factors[:, self.left_landmark2:self.right_landmark2], axis=1)]
         avg_peak_times = np.hstack([avg_peak1_times, avg_peak2_times])
         # offsets  # M X N x R X C X L
-        offsets = np.expand_dims(transformed_trial_peak_offsets, 1) + np.expand_dims(transformed_config_peak_offsets, (0, 2))
+        offsets = np.expand_dims(self.transformed_trial_peak_offsets, 1) + np.expand_dims(self.transformed_config_peak_offsets, (0, 2))
         avg_peak_times = np.expand_dims(avg_peak_times, (0, 1, 2, 3))
         s_new = avg_peak_times + offsets  # offset peak time
         left_landmarks = self.time[np.expand_dims(np.repeat(np.array([self.left_landmark1, self.left_landmark2]), s_new.shape[-1] // 2), (0, 1, 2, 3))]
@@ -190,36 +175,53 @@ class DataAnalyzer:
         s_new = np.where(s_new >= right_landmarks, right_landmarks - self.dt, s_new)
         return avg_peak_times, left_landmarks, right_landmarks, s_new
 
-    def warp_times(self, avg_peak_times, left_landmarks, right_landmarks, trial_peak_times):
+    def compute_warped_times(self, avg_peak_times, left_landmarks, right_landmarks, trial_peak_times):
         landmark_spead = self.right_landmark1 - self.left_landmark1
         left_shifted_time = np.arange(0, self.time[landmark_spead], self.dt)
         left_shifted_peak_times = trial_peak_times - left_landmarks
         right_shifted_peak_times = trial_peak_times - right_landmarks
         left_slope = (avg_peak_times - left_landmarks) / left_shifted_peak_times
         right_slope = (avg_peak_times - right_landmarks) / right_shifted_peak_times
-        warped_time = np.stack([np.zeros_like(trial_peak_times)] * left_shifted_time.shape[0])
+        warped_times = np.stack([np.zeros_like(trial_peak_times)] * left_shifted_time.shape[0])
         for i in range(left_shifted_time.shape[0]):
-            warped_time[i] = np.where(left_shifted_time[i] < left_shifted_peak_times, (left_shifted_time[i]*left_slope)+left_landmarks,
+            warped_times[i] = np.where(left_shifted_time[i] < left_shifted_peak_times, (left_shifted_time[i]*left_slope)+left_landmarks,
                                          ((left_shifted_time[i]-left_shifted_peak_times)*right_slope)+avg_peak_times)
-        early = self.time[:self.left_landmark1]
-        early = np.broadcast_to(np.expand_dims(early, (1,2,3,4,5)), (early.shape) + tuple(warped_time.shape[1:-1]) + (6,))
-        mid = self.time[self.right_landmark1:self.left_landmark2]
-        mid = np.broadcast_to(np.expand_dims(mid, (1,2,3,4,5)), (mid.shape) + tuple(warped_time.shape[1:-1]) + (6,))
-        late = self.time[self.right_landmark2:]
-        late = np.broadcast_to(np.expand_dims(late, (1,2,3,4,5)), (late.shape) + tuple(warped_time.shape[1:-1]) + (6,))
-        # warped_time  # T x M X N x R X C X L
-        warped_times = np.vstack([early, warped_time[:,:,:,:,:,:6], mid, warped_time[:,:,:,:,:,6:], late])
+        # landmark_spead = 50
+        # warped_time  # 50 x M X N x R X C X 2L
         return warped_times
 
 
-    def recompute_warp_terms(self, gamma, warped_time):
-        warped_factors = []
-        for l in range(gamma.shape[0]):
-            l_warped_time = warped_time[:, :, :, :, :, l]
-            spl = BSpline(self.knots, gamma[l].T, self.degree)
-            warped_factor_l = spl(l_warped_time)
-            warped_factors.append(warped_factor_l)
-        warped_factors = np.stack(warped_factors)
+    def compute_warped_factors(self, warped_times):
+        factors = np.exp(self.beta)
+        # warped_time  # 50 x M X N x R X C X 2L
+        warped_indices = warped_times / self.dt
+        floor_warped_indices = np.floor(warped_indices).astype(int)
+        ceil_warped_indices = np.ceil(warped_indices).astype(int)
+        ceil_weights = warped_indices - floor_warped_indices
+        floor_weights = 1 - ceil_weights
+        weighted_floor_warped_factors = []
+        weighted_ceil_warped_factors = []
+        for l in range(factors.shape[0]):
+            floor_warped_factor_l = factors[l, floor_warped_indices[:, :, :, :, :, [l, (l + factors.shape[0])]]]
+            weighted_floor_warped_factor_l = floor_warped_factor_l * floor_weights[:, :, :, :, :,
+                                                                     [l, (l + factors.shape[0])]]
+            ceil_warped_factor_l = factors[l, ceil_warped_indices[:, :, :, :, :, [l, (l + factors.shape[0])]]]
+            weighted_ceil_warped_factor_l = ceil_warped_factor_l * ceil_weights[:, :, :, :, :,
+                                                                   [l, (l + factors.shape[0])]]
+            weighted_floor_warped_factors.append(weighted_floor_warped_factor_l)
+            weighted_ceil_warped_factors.append(weighted_ceil_warped_factor_l)
+        weighted_floor_warped_factors = np.stack(weighted_floor_warped_factors)
+        weighted_ceil_warped_factors = np.stack(weighted_ceil_warped_factors)
+        warped_factors = weighted_floor_warped_factors + weighted_ceil_warped_factors
+
+        early = factors[:, :self.left_landmark1]
+        early = np.broadcast_to(np.expand_dims(early, (2, 3, 4, 5)), (early.shape) + tuple(warped_factors.shape[2:-1]))
+        mid = factors[:, self.right_landmark1:self.left_landmark2]
+        mid = np.broadcast_to(np.expand_dims(mid, (2, 3, 4, 5)), (mid.shape) + tuple(warped_factors.shape[2:-1]))
+        late = factors[:, self.right_landmark2:]
+        late = np.broadcast_to(np.expand_dims(late, (2, 3, 4, 5)), (late.shape) + tuple(warped_factors.shape[2:-1]))
+        warped_factors = np.concatenate([early, warped_factors[:, :, :, :, :, :, 0], mid, warped_factors[:, :, :, :, :, :, 1], late], axis=1)
+
         return warped_factors
 
 

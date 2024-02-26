@@ -11,7 +11,6 @@ class LikelihoodModel(nn.Module):
         super(LikelihoodModel, self).__init__()
 
         self.time = None
-        self.joint_factors_indices = None
         self.dt = None
         landmark_spread = 50
         self.left_landmark1 = 20
@@ -39,13 +38,14 @@ class LikelihoodModel(nn.Module):
         self.smoothness_budget = None  # L x 1
 
 
-    def initialize(self, Y, time, factor_access, n_factors, n_trial_samples, n_config_samples):
+    def initialize(self, Y, time, factor_access, n_trial_samples, n_config_samples):
         self.Y = torch.tensor(Y)
         self.time = torch.tensor(time)
         self.neuron_factor_access = torch.tensor(factor_access)
         dt = round(time[1] - time[0], 3)
         self.dt = torch.tensor(dt)
         K, T, n_trials, n_configs = Y.shape
+        C, K, n_factors = factor_access.shape
 
         # fixed values
         self.n_config_samples = n_config_samples
@@ -86,13 +86,6 @@ class LikelihoodModel(nn.Module):
         self.pi = torch.stack([torch.zeros(1), nn.Parameter(pi)])
         self.config_peak_offset_stdevs = nn.Parameter(config_peak_offset_stdevs)
         self.trial_peak_offset_covar_ltri = nn.Parameter(trial_peak_offset_covar_ltri)
-        self.beta.requires_grad = False
-        self.alpha.requires_grad = False
-        self.theta.requires_grad = False
-        self.pi.requires_grad = False
-        self.config_peak_offset_stdevs.requires_grad = False
-        self.trial_peak_offset_covar_ltri.requires_grad = False
-        return self
 
 
     def warp_all_latent_factors_for_all_trials(self):
@@ -230,7 +223,7 @@ class LikelihoodModel(nn.Module):
         return elbo_term
 
 
-    def compute_offset_entropy_terms(self, tau_beta, tau_budget, tau_sigma): # last 2 entropy terms and penalty terms
+    def compute_offset_entropy_terms(self): # last 2 entropy terms
         # Entropy1 Terms
         dim = self.config_peak_offset_stdevs.shape[0]
         prod_sq = torch.einsum('ncl,l->ncl', self.transformed_config_peak_offset_samples, torch.exp(-self.config_peak_offset_stdevs))**2
@@ -249,8 +242,14 @@ class LikelihoodModel(nn.Module):
         # entropy_term2  # 1 x 1 x M x 1 x C
         # W_C_tensor # 1 x 1 x M x N x C
         entropy_term2 = torch.sum(self.W_C_tensor * entropy_term2.unsqueeze(0).unsqueeze(1).unsqueeze(3))
+        entropy_term = entropy_term1 + entropy_term2
+        return entropy_term
 
+
+    def compute_penalty_terms(self, tau_beta, tau_budget, tau_sigma):
         # Penalty Terms
+        Sigma = self.trial_peak_offset_covar_ltri @ self.trial_peak_offset_covar_ltri.T
+        inv_Sigma = torch.linalg.inv(Sigma)
         sigma_Penalty = - tau_sigma * torch.sum(torch.abs(inv_Sigma))
         latent_factors = torch.cat([torch.tensor([0]).unsqueeze(0).expand(self.beta.shape[0],-1),
                                     torch.exp(self.beta),
@@ -261,27 +260,12 @@ class LikelihoodModel(nn.Module):
 
         smoothness_budget_penalty = - tau_budget * (self.smoothness_budget.t() @ self.smoothness_budget)
 
-        return entropy_term1 + entropy_term2 + sigma_Penalty + beta_s2_penalty + smoothness_budget_penalty
+        penalty_term = sigma_Penalty + beta_s2_penalty + smoothness_budget_penalty
+        return penalty_term
 
 
     def forward(self, tau_beta, tau_budget, tau_sigma):
         likelihood_term = self.compute_log_elbo()
-        entropy_terms = self.compute_offset_entropy_terms(tau_beta, tau_budget, tau_sigma)
-        return -(likelihood_term + entropy_terms)
-
-
-    def compute_log_likelihood(self):
-        # Weight Matrices
-        warped_factors = self.warp_all_latent_factors_for_all_trials()
-        # warped_factors # L x T x M x N x R x C
-        # self.Y # K x T x R x C
-        # Y_times_N_matrix  # K x L x T x M x N x R x C
-        # sum_Y_times_N_matrix  # K x L x M x N x C
-        # neuron_factor_access  #  C x K x L
-        Y_times_N_matrix = torch.einsum('ktrc,ckl,ltmnrc->kltmnrc', self.Y, self.neuron_factor_access, warped_factors)
-        sum_Y_times_N_matrix = torch.sum(Y_times_N_matrix, dim=(2, 5))
-        exp_N_matrix = torch.exp(warped_factors)
-        # sum_Y_term # K x C
-        # logterm1  # K x C x L
-        # logterm2  # L x M x N x C
-        sum_Y_term = torch.sum(self.Y, dim=(1,2))
+        entropy_term = self.compute_offset_entropy_terms()
+        penalty_term = self.compute_penalty_terms(tau_beta, tau_budget, tau_sigma)
+        return -(likelihood_term + entropy_term + penalty_term)

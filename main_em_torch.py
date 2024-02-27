@@ -25,13 +25,13 @@ def main(K, R, L, intensity_mltply, intensity_bias, tau_psi, tau_beta, tau_s, be
     output_dir = os.path.join(os.getcwd(), 'outputs', folder_name)
 
     # np.random.seed(data_seed)
-    n_trials = 15
-    n_configs = 10
+    n_trials = 2 #15
+    n_configs = 2 #10
     A = 2
     data = DataAnalyzer().initialize(K=K, A=A, intensity_mltply=intensity_mltply, intensity_bias=intensity_bias, n_trials=n_trials, n_configs=n_configs)
     Y, stim_time, factor_access = data.sample_data()
-    n_trial_samples = 11 # m
-    n_config_samples = 13 # n
+    n_trial_samples = 9 # m
+    n_config_samples = 10 # n
     model = LikelihoodModel().initialize(Y, stim_time, factor_access, n_trial_samples, n_config_samples)
     model.init_ground_truth(torch.tensor(data.beta).float(), torch.tensor(data.alpha).float(),
                             torch.tensor(data.theta).float(), torch.tensor(data.pi).float(),
@@ -116,14 +116,13 @@ def main(K, R, L, intensity_mltply, intensity_bias, tau_psi, tau_beta, tau_s, be
         start_time = time.time()  # Record the start time of the epoch
 
         optimizer_nn.zero_grad()
-        loss = model.forward(0, 0 ,0)
+        likelihood_term, entropy_term, penalty_term = model.forward(10, 0 ,0)
+        loss = -(likelihood_term + entropy_term + penalty_term)
         loss.backward()
         optimizer_nn.step()
 
-        # loss = result["loss"]
-        # log_likelihood = result["log_likelihood"]
-        losses.append(loss)
-        # log_likelihoods.append(log_likelihood)
+        losses.append(-loss.detach())
+        log_likelihoods.append((likelihood_term + entropy_term).detach())
 
         end_time = time.time()  # Record the end time of the epoch
         elapsed_time = end_time - start_time  # Calculate the elapsed time for the epoch
@@ -132,7 +131,7 @@ def main(K, R, L, intensity_mltply, intensity_bias, tau_psi, tau_beta, tau_s, be
 
         if epoch % 10 == 0:
             s2_norm = F.softmax(model.smoothness_budget, dim=0)
-            output_str = (f"Epoch: {epoch}, Loss: {-loss.detach()}, "
+            output_str = (f"Epoch: {epoch}, Loss: {-loss.detach()}, Log Likelihood: {(likelihood_term + entropy_term).detach()}, "
                           f"Epoch Time: {epoch_time / 60:.2f} mins, Total Time: {total_time / (60 * 60):.2f} hrs\n"
                           f"s_norm: {s2_norm.detach().t()}\n")
             # output_str = (f"Epoch: {epoch}, Loss: {loss}, Log Likelihood: {log_likelihood}, "

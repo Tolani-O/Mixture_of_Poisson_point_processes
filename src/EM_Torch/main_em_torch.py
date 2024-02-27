@@ -26,7 +26,7 @@ def main(K, R, L, intensity_mltply, intensity_bias, tau_psi, tau_beta, tau_s, be
 
     # np.random.seed(data_seed)
     n_trials = 2 #15
-    n_configs = 2 #10
+    n_configs = 3 #10
     A = 2
     data = DataAnalyzer().initialize(K=K, A=A, intensity_mltply=intensity_mltply, intensity_bias=intensity_bias, n_trials=n_trials, n_configs=n_configs)
     Y, stim_time, factor_access = data.sample_data()
@@ -40,7 +40,7 @@ def main(K, R, L, intensity_mltply, intensity_bias, tau_psi, tau_beta, tau_s, be
     optimizer_nn = torch.optim.Adam(model.parameters(), lr=0.01)
 
     true_likelihood = data.compute_log_likelihood()
-    true_ELBO = model.compute_log_elbo() + model.compute_offset_entropy_terms()
+    true_ELBO = model.compute_log_elbo(torch.arange(n_configs)) + model.compute_offset_entropy_terms()
     print(f"True likelihood: {true_likelihood}")
     print(f"True ELBO: {true_ELBO}")
     start_epoch = 0
@@ -115,14 +115,14 @@ def main(K, R, L, intensity_mltply, intensity_bias, tau_psi, tau_beta, tau_s, be
     for epoch in range(start_epoch, start_epoch + num_epochs):
         start_time = time.time()  # Record the start time of the epoch
 
-        optimizer_nn.zero_grad()
-        likelihood_term, entropy_term, penalty_term = model.forward(10, 0 ,0)
-        loss = -(likelihood_term + entropy_term + penalty_term)
-        loss.backward()
-        optimizer_nn.step()
-
-        losses.append(-loss.detach())
-        log_likelihoods.append((likelihood_term + entropy_term).detach())
+        for c in range(n_configs):
+            optimizer_nn.zero_grad()
+            likelihood_term, entropy_term, penalty_term = model.forward(config_indcs=torch.tensor([c,]), tau_beta=1000, tau_budget=500, tau_sigma=100)
+            loss = -(likelihood_term + entropy_term + penalty_term)
+            loss.backward()
+            optimizer_nn.step()
+            losses.append(-loss.detach())
+            log_likelihoods.append((likelihood_term + entropy_term).detach())
 
         end_time = time.time()  # Record the end time of the epoch
         elapsed_time = end_time - start_time  # Calculate the elapsed time for the epoch

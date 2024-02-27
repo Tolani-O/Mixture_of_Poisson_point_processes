@@ -88,8 +88,8 @@ class LikelihoodModel(nn.Module):
         self.trial_peak_offset_covar_ltri = nn.Parameter(trial_peak_offset_covar_ltri)
 
 
-    def warp_all_latent_factors_for_all_trials(self):
-        K, T, n_trials, n_configs = self.Y.shape
+    def warp_all_latent_factors_for_all_trials(self, n_configs):
+        K, T, n_trials, C = self.Y.shape
         n_factors = self.beta.shape[0]
         config_peak_offset_samples = torch.randn(self.n_config_samples, n_configs, 2 * n_factors)
         trial_peak_offset_samples = torch.randn(self.n_trial_samples, n_trials * n_configs, 2 * n_factors).view(
@@ -165,29 +165,32 @@ class LikelihoodModel(nn.Module):
         return warped_factors
 
 
-    def compute_log_elbo(self): # and first 2 entropy terms
+    def compute_log_elbo(self, config_indcs): # and first 2 entropy terms
         # Weight Matrices
-        warped_factors = self.warp_all_latent_factors_for_all_trials()
+        n_configs = len(config_indcs)
+        warped_factors = self.warp_all_latent_factors_for_all_trials(n_configs)
         # warped_factors # L x T x M x N x R x C
         # self.Y # K x T x R x C
         # Y_times_N_matrix  # K x L x T x M x N x R x C
         # sum_Y_times_N_matrix  # K x L x M x N x C
         # neuron_factor_access  #  C x K x L
-        Y_times_N_matrix = torch.einsum('ktrc,ckl,ltmnrc->kltmnrc', self.Y, self.neuron_factor_access, warped_factors)
+        Y = self.Y[:,:,:,config_indcs]
+        neuron_factor_access = self.neuron_factor_access[config_indcs,:,:]
+        Y_times_N_matrix = torch.einsum('ktrc,ckl,ltmnrc->kltmnrc', Y, neuron_factor_access, warped_factors)
         sum_Y_times_N_matrix = torch.sum(Y_times_N_matrix, dim=(2, 5))
         exp_N_matrix = torch.exp(warped_factors)
         # sum_Y_term # K x C
         # logterm1  # K x C x L
         # logterm2  # L x M x N x C
-        sum_Y_term = torch.sum(self.Y, dim=(1,2)) # K x C
+        sum_Y_term = torch.sum(Y, dim=(1,2)) # K x C
         logterm1 = sum_Y_term[:,:,None] + F.softplus(self.alpha)[None,None,:]
         logterm2 = self.dt * torch.sum(exp_N_matrix, dim=(1, 4)) + F.softplus(self.theta)[:,None,None,None]
         # logterm # K x L x M x N x C
-        logterm = torch.einsum('kcl,ckl,lmnc->klmnc', logterm1, self.neuron_factor_access, torch.log(logterm2))
+        logterm = torch.einsum('kcl,ckl,lmnc->klmnc', logterm1, neuron_factor_access, torch.log(logterm2))
         # alphalogtheta # 1 x L x 1 x 1 x 1
         alphalogtheta = (F.softplus(self.alpha) * torch.log(F.softplus(self.theta))).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
         # sum_Y_times_logalpha  # K x C x L
-        sum_Y_times_logalpha = torch.einsum('kc,ckl,l->klc', sum_Y_term, self.neuron_factor_access, torch.log(F.softplus(self.alpha)))
+        sum_Y_times_logalpha = torch.einsum('kc,ckl,l->klc', sum_Y_term, neuron_factor_access, torch.log(F.softplus(self.alpha)))
         # sum_Y_times_logalpha # K x L x 1 x 1 x C
         sum_Y_times_logalpha = sum_Y_times_logalpha[:,:,None,None,:]
         # logpi # 1 x L x 1 x 1 x 1
@@ -212,7 +215,7 @@ class LikelihoodModel(nn.Module):
         W_tensor = (W_CMNK_tensor * W_C_tensor).detach()
 
         # A_tensor # K x L x M x N x C
-        A_tensor = torch.einsum('kcl,ckl,lmnc->klmnc', logterm1, self.neuron_factor_access, 1/logterm2)
+        A_tensor = torch.einsum('kcl,ckl,lmnc->klmnc', logterm1, neuron_factor_access, 1/logterm2)
 
         # Liklelihood Terms
         elbo_term = (sum_Y_times_N_matrix - A_tensor * logterm2[None,:,:,:,:] - torch.lgamma(alpha_expand) + alpha_expand *
@@ -264,8 +267,8 @@ class LikelihoodModel(nn.Module):
         return penalty_term
 
 
-    def forward(self, tau_beta, tau_budget, tau_sigma):
-        likelihood_term = self.compute_log_elbo()
+    def forward(self, config_indcs, tau_beta, tau_budget, tau_sigma):
+        likelihood_term = self.compute_log_elbo(config_indcs)
         entropy_term = self.compute_offset_entropy_terms()
         penalty_term = self.compute_penalty_terms(tau_beta, tau_budget, tau_sigma)
         return likelihood_term, entropy_term, penalty_term

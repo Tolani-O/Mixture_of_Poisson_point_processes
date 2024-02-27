@@ -67,7 +67,7 @@ class LikelihoodModel(nn.Module):
         matrix = torch.tril(torch.randn(2 * n_factors, 2 * n_factors))
         # Ensure diagonal elements are positive
         for i in range(min(matrix.size())):
-            matrix[i, i] += torch.exp(matrix[i, i])
+            matrix[i, i] += F.softplus(matrix[i, i])
         # Make it a learnable parameter
         self.trial_peak_offset_covar_ltri = nn.Parameter(matrix)
         self.smoothness_budget = nn.Parameter(torch.zeros(n_factors-1))
@@ -80,7 +80,7 @@ class LikelihoodModel(nn.Module):
 
 
     def init_ground_truth(self, latent_factors, alpha, theta, pi, config_peak_offset_stdevs, trial_peak_offset_covar_ltri):
-        self.beta = nn.Parameter(torch.log(latent_factors))
+        self.beta = nn.Parameter(latent_factors)
         self.alpha = nn.Parameter(alpha)
         self.theta = nn.Parameter(theta)
         self.pi = nn.Parameter(pi)
@@ -95,7 +95,7 @@ class LikelihoodModel(nn.Module):
         trial_peak_offset_samples = torch.randn(self.n_trial_samples, n_trials * n_configs, 2 * n_factors).view(
             self.n_trial_samples, n_trials, n_configs, 2 * n_factors)
         self.transformed_trial_peak_offset_samples = torch.einsum('lj,mrcj->mrcl', self.trial_peak_offset_covar_ltri, trial_peak_offset_samples)
-        self.transformed_config_peak_offset_samples = torch.einsum('l,ncl->ncl', torch.exp(self.config_peak_offset_stdevs), config_peak_offset_samples)
+        self.transformed_config_peak_offset_samples = torch.einsum('l,ncl->ncl', F.softplus(self.config_peak_offset_stdevs), config_peak_offset_samples)
         avg_peak_times, left_landmarks, right_landmarks, s_new = self.compute_offsets_and_landmarks()
         warped_times = self.compute_warped_times(avg_peak_times, left_landmarks, right_landmarks, s_new)
         warped_factors = self.compute_warped_factors(warped_times)
@@ -103,7 +103,7 @@ class LikelihoodModel(nn.Module):
 
 
     def compute_offsets_and_landmarks(self):
-        factors = torch.exp(self.beta)
+        factors = F.softplus(self.beta)
         avg_peak1_times = self.time[self.left_landmark1 + torch.argmax(factors[:, self.left_landmark1:self.right_landmark1], dim=1)]
         avg_peak2_times = self.time[self.left_landmark2 + torch.argmax(factors[:, self.left_landmark2:self.right_landmark2], dim=1)]
         avg_peak_times = torch.cat([avg_peak1_times, avg_peak2_times])
@@ -134,7 +134,7 @@ class LikelihoodModel(nn.Module):
 
 
     def compute_warped_factors(self, warped_times):
-        factors = torch.exp(self.beta)
+        factors = F.softplus(self.beta)
         # warped_time  # 50 x M X N x R X C X 2L
         warped_indices = warped_times / self.dt
         floor_warped_indices = torch.floor(warped_indices).int()
@@ -180,20 +180,20 @@ class LikelihoodModel(nn.Module):
         # logterm1  # K x C x L
         # logterm2  # L x M x N x C
         sum_Y_term = torch.sum(self.Y, dim=(1,2)) # K x C
-        logterm1 = sum_Y_term[:,:,None] + torch.exp(self.alpha)[None,None,:]
-        logterm2 = self.dt * torch.sum(exp_N_matrix, dim=(1, 4)) + torch.exp(self.theta)[:,None,None,None]
+        logterm1 = sum_Y_term[:,:,None] + F.softplus(self.alpha)[None,None,:]
+        logterm2 = self.dt * torch.sum(exp_N_matrix, dim=(1, 4)) + F.softplus(self.theta)[:,None,None,None]
         # logterm # K x L x M x N x C
         logterm = torch.einsum('kcl,ckl,lmnc->klmnc', logterm1, self.neuron_factor_access, torch.log(logterm2))
         # alphalogtheta # 1 x L x 1 x 1 x 1
-        alphalogtheta = (torch.exp(self.alpha) * self.theta).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
+        alphalogtheta = (F.softplus(self.alpha) * torch.log(F.softplus(self.theta))).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
         # sum_Y_times_logalpha  # K x C x L
-        sum_Y_times_logalpha = torch.einsum('kc,ckl,l->klc', sum_Y_term, self.neuron_factor_access, self.alpha)
+        sum_Y_times_logalpha = torch.einsum('kc,ckl,l->klc', sum_Y_term, self.neuron_factor_access, torch.log(F.softplus(self.alpha)))
         # sum_Y_times_logalpha # K x L x 1 x 1 x C
         sum_Y_times_logalpha = sum_Y_times_logalpha[:,:,None,None,:]
         # logpi # 1 x L x 1 x 1 x 1
         logpi_expand = torch.log(F.softmax(torch.cat([torch.zeros(1), self.pi]), dim=0)).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
-        alpha_expand = torch.exp(self.alpha).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
-        theta_expand = torch.exp(self.theta).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
+        alpha_expand = F.softplus(self.alpha).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
+        theta_expand = F.softplus(self.theta).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
 
         # U_tensor # K x L x M x N x C
         U_tensor = torch.exp(sum_Y_times_N_matrix - logterm + alphalogtheta + sum_Y_times_logalpha + logpi_expand)
@@ -226,9 +226,9 @@ class LikelihoodModel(nn.Module):
     def compute_offset_entropy_terms(self): # last 2 entropy terms
         # Entropy1 Terms
         dim = self.config_peak_offset_stdevs.shape[0]
-        prod_sq = torch.einsum('ncl,l->ncl', self.transformed_config_peak_offset_samples, torch.exp(-self.config_peak_offset_stdevs))**2
+        prod_sq = torch.einsum('ncl,l->ncl', self.transformed_config_peak_offset_samples, 1/F.softplus(self.config_peak_offset_stdevs))**2
         # entropy_term1  # N x C
-        entropy_term1 = -0.5 * torch.sum(torch.log((2 * torch.pi)**dim * torch.exp(2*torch.sum(self.config_peak_offset_stdevs))) + prod_sq, dim=2) # sum over l
+        entropy_term1 = -0.5 * torch.sum(torch.log((2 * torch.pi)**dim * torch.prod(F.softplus(self.config_peak_offset_stdevs)**2)) + prod_sq, dim=2) # sum over l
         # entropy_term1  # 1 x 1 x 1 x N x C
         # W_C_tensor # 1 x 1 x M x N x C
         entropy_term1 = torch.sum(self.W_C_tensor * entropy_term1.unsqueeze(0).unsqueeze(1).unsqueeze(2))
@@ -252,7 +252,7 @@ class LikelihoodModel(nn.Module):
         inv_Sigma = torch.linalg.inv(Sigma)
         sigma_Penalty = - tau_sigma * torch.sum(torch.abs(inv_Sigma))
         latent_factors = torch.cat([torch.tensor([0]).unsqueeze(0).expand(self.beta.shape[0],-1),
-                                    torch.exp(self.beta),
+                                    F.softplus(self.beta),
                                     torch.tensor([0]).unsqueeze(0).expand(self.beta.shape[0],-1)],
                                    dim=1).float()
         smoothness_budget_constrained = F.softmax(torch.cat([torch.zeros(1), self.smoothness_budget]), dim=0)
@@ -268,4 +268,4 @@ class LikelihoodModel(nn.Module):
         likelihood_term = self.compute_log_elbo()
         entropy_term = self.compute_offset_entropy_terms()
         penalty_term = self.compute_penalty_terms(tau_beta, tau_budget, tau_sigma)
-        return -(likelihood_term + entropy_term + penalty_term)
+        return likelihood_term, entropy_term, penalty_term

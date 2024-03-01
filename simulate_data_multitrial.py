@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.special import softmax
-from scipy.interpolate import BSpline
+from src.EM_Torch.general_functions import softplus, inv_softplus
 
 class DataAnalyzer:
 
@@ -30,25 +30,18 @@ class DataAnalyzer:
         self.config_peak_offset_stdevs = None  # 2AL
 
         # neuron parameters
-        self.latent_factors = None  # unobserved
         self.neuron_gains = None  # unobserved
         self.neuron_factor_assignments = None  # unobserved
         self.neuron_intensities = None  # unobserved
 
-    def initialize(self, A=2, K=100, T=200, intensity_type=('constant', '1peak', '2peaks'),
-                   intensity_mltply=15, intensity_bias=5, n_trials=3, n_configs=2):
+    def initialize(self, A=2, T=200, intensity_type=('constant', '1peak', '2peaks'),
+                   intensity_mltply=15, intensity_bias=5):
         degree = 3
         time = np.arange(0, T, 1) / 100
         self.time = time
         self.dt = round(self.time[1] - self.time[0], 3)
 
         n_factors = len(intensity_type) * A
-        # K is the number of neurons in a single condition across areas.
-        # each condition has the same number of neurons, to total number of neurons across conditions is K * C
-        # fixed values
-        self.config_peak_offset_presamples = np.random.normal(0, 1, (1, n_configs, 2 * n_factors))
-        self.trial_peak_offset_presamples = (np.random.normal(0, 1, (1, n_trials * n_configs, 2 * n_factors))
-                                             .reshape(1, n_trials, n_configs, 2 * n_factors))
         # paremeters
         self.beta = np.random.normal(size=(n_factors, self.time.shape[0]))
         self.alpha = np.random.normal(size=n_factors)
@@ -59,7 +52,7 @@ class DataAnalyzer:
         matrix = np.tril(np.random.normal(size=(2 * n_factors, 2 * n_factors)))
         # Ensure diagonal elements are positive
         for i in range(min(matrix.shape)):
-            matrix[i, i] += self.softplus(matrix[i, i])
+            matrix[i, i] += softplus(matrix[i, i])
         # Make it a learnable parameter
         self.trial_peak_offset_covar_ltri = matrix
         # solely to check if the covariance matrix is positive semi-definite
@@ -67,21 +60,10 @@ class DataAnalyzer:
         # bool((trial_peak_offset_covar_matrix == trial_peak_offset_covar_matrix.T).all() and (np.linalg.eigvals(trial_peak_offset_covar_matrix).real >= 0).all())
         # std_dev = np.sqrt(np.diag(trial_peak_offset_covar_matrix))
         # corr = np.diag(1/std_dev) @ trial_peak_offset_covar_matrix @ np.diag(1/std_dev)
-
         latent_factors = self.generate_latent_factors(intensity_type, intensity_mltply, intensity_bias)
         latent_factors = np.vstack([latent_factors] * A)
-        self.beta = self.inv_softplus(latent_factors)
-        warped_factors = self.warp_all_latent_factors_for_all_trials()
-        trial_warped_factors = warped_factors.squeeze()
-        self.generate_neuron_gains_factor_assignments_condition_assignment_and_factor_access(K, n_configs, A)
-        self.generate_spike_trains(trial_warped_factors)
+        self.beta = inv_softplus(latent_factors)
         return self
-
-    def softplus(self, x):
-        return np.log(1 + np.exp(x))
-
-    def inv_softplus(self, x):
-        return np.log(np.exp(x) - 1)
 
     def generate_latent_factors(self, intensity_type, intensity_mltply, intensity_bias):
 
@@ -116,7 +98,7 @@ class DataAnalyzer:
 
         return latent_factors
 
-    def generate_neuron_gains_factor_assignments_condition_assignment_and_factor_access(self, num_neurons, num_conditions, num_areas):
+    def generate_neuron_gains_factor_assignments_condition_assignment_and_factor_access(self, num_neurons, num_areas, num_conditions):
 
         num_factors = len(self.pi)+1
         ratio = softmax(np.hstack([np.zeros(1), self.pi]), axis=0)
@@ -125,8 +107,8 @@ class DataAnalyzer:
         for a in range(num_areas):
             area_start_indx = a * (num_factors//2)
             neuron_factor_access[((area_start_indx<=neuron_factor_assignments)&((area_start_indx+2)>=neuron_factor_assignments)), (3*a):(3*a+3)] = 1
-        neuron_gains = (np.random.gamma(self.softplus(self.alpha[neuron_factor_assignments.flatten()]),
-                                        self.softplus(self.theta[neuron_factor_assignments.flatten()]))
+        neuron_gains = (np.random.gamma(softplus(self.alpha[neuron_factor_assignments.flatten()]),
+                                        softplus(self.theta[neuron_factor_assignments.flatten()]))
                         .reshape(neuron_factor_assignments.shape))
         self.neuron_gains = neuron_gains
         self.neuron_factor_assignments = neuron_factor_assignments
@@ -158,8 +140,8 @@ class DataAnalyzer:
 
     def warp_all_latent_factors_for_all_trials(self):
 
-        self.transformed_trial_peak_offsets = np.einsum('lj,mrcj->mrcl', self.trial_peak_offset_covar_ltri, self.trial_peak_offset_presamples)
-        self.transformed_config_peak_offsets = np.einsum('l,ncl->ncl', self.softplus(self.config_peak_offset_stdevs), self.config_peak_offset_presamples)
+        self.transformed_trial_peak_offset_samples = np.einsum('lj,mrcj->mrcl', self.trial_peak_offset_covar_ltri, self.trial_peak_offset_presamples)
+        self.transformed_config_peak_offset_samples = np.einsum('l,ncl->ncl', softplus(self.config_peak_offset_stdevs), self.config_peak_offset_presamples)
         avg_peak_times, left_landmarks, right_landmarks, s_new = self.compute_offsets_and_landmarks()
         warped_times = self.compute_warped_times(avg_peak_times, left_landmarks, right_landmarks, s_new)
         warped_factors = self.compute_warped_factors(warped_times)
@@ -167,12 +149,12 @@ class DataAnalyzer:
 
     def compute_offsets_and_landmarks(self):
 
-        factors = self.softplus(self.beta)
+        factors = softplus(self.beta)
         avg_peak1_times = self.time[self.left_landmark1 + np.argmax(factors[:, self.left_landmark1:self.right_landmark1], axis=1)]
         avg_peak2_times = self.time[self.left_landmark2 + np.argmax(factors[:, self.left_landmark2:self.right_landmark2], axis=1)]
         avg_peak_times = np.hstack([avg_peak1_times, avg_peak2_times])
         # offsets  # M X N x R X C X L
-        offsets = np.expand_dims(self.transformed_trial_peak_offsets, 1) + np.expand_dims(self.transformed_config_peak_offsets, (0, 2))
+        offsets = np.expand_dims(self.transformed_trial_peak_offset_samples, 1) + np.expand_dims(self.transformed_config_peak_offset_samples, (0, 2))
         avg_peak_times = np.expand_dims(avg_peak_times, (0, 1, 2, 3))
         s_new = avg_peak_times + offsets  # offset peak time
         left_landmarks = self.time[np.expand_dims(np.repeat(np.array([self.left_landmark1, self.left_landmark2]), s_new.shape[-1] // 2), (0, 1, 2, 3))]
@@ -198,7 +180,7 @@ class DataAnalyzer:
 
 
     def compute_warped_factors(self, warped_times):
-        factors = self.softplus(self.beta)
+        factors = softplus(self.beta)
         # warped_time  # 50 x M X N x R X C X 2L
         warped_indices = warped_times / self.dt
         floor_warped_indices = np.floor(warped_indices).astype(int)
@@ -231,9 +213,19 @@ class DataAnalyzer:
         return warped_factors
 
 
-    def sample_data(self):
-        return self.Y, self.time, self.neuron_factor_access
+    def sample_data(self, K, A, n_configs, n_trials):
+        n_factors = self.beta.shape[0]
+        # K is the number of neurons in a single condition across areas.
+        # each condition has the same number of neurons, to total number of neurons across conditions is K * C
+        # fixed values
+        self.config_peak_offset_presamples = np.random.normal(0, 1, (1, n_configs, 2 * n_factors))
+        self.trial_peak_offset_presamples = (np.random.normal(0, 1, (1, n_trials * n_configs, 2 * n_factors))
+                                             .reshape(1, n_trials, n_configs, 2 * n_factors))
+        trial_warped_factors = self.warp_all_latent_factors_for_all_trials().squeeze()
+        self.generate_neuron_gains_factor_assignments_condition_assignment_and_factor_access(K, A, n_configs)
+        self.generate_spike_trains(trial_warped_factors)
+        return self.Y, self.time, self.neuron_factor_access, self.neuron_intensities
 
-    def compute_log_likelihood(self):
-        likelihood = np.sum(np.log(self.neuron_intensities) * self.Y - self.neuron_intensities * self.dt)
+    def compute_log_likelihood(self, Y, neuron_intensities):
+        likelihood = np.sum(np.log(neuron_intensities) * Y - neuron_intensities * self.dt)
         return likelihood

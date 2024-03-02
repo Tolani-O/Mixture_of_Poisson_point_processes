@@ -6,13 +6,14 @@ import torch
 from matplotlib.figure import figaspect
 import json
 import argparse
+import pickle
 
 def get_parser():
     parser = argparse.ArgumentParser(description='Sequence Modeling - Polyphonic Music')
     parser.add_argument('--cuda', action='store_false', default=False, help='use CUDA (default: False)')
     parser.add_argument('--n_trials', type=int, default=15, help='Number of trials per stimulus condition')
     parser.add_argument('--n_configs', type=int, default=40, help='Number of stimulus conditions')
-    parser.add_argument('--A', type=int, default=7, help='Number of areas')
+    parser.add_argument('--A', type=int, default=3, help='Number of areas')
     parser.add_argument('--n_trial_samples', type=int, default=10, help='Number of trial samples for monte carlo integration')
     parser.add_argument('--n_config_samples', type=int, default=10, help='Number of config samples for monte carlo integration')
     parser.add_argument('--lr', type=float, default=1e-3, help='initial learning rate (default: 1e-3)')
@@ -30,7 +31,7 @@ def get_parser():
     parser.add_argument('--intensity_mltply', type=float, default=25, help='Latent factor intensity multiplier')
     parser.add_argument('--intensity_bias', type=float, default=1, help='Latent factor intensity bias')
     parser.add_argument('--param_seed', type=int_or_str, default='', help='options are: seed (int), Truth (str)')
-    parser.add_argument('--log_interval', type=int, default=100, metavar='N', help='report interval (default: 100')
+    parser.add_argument('--log_interval', type=int, default=10, metavar='N', help='report interval (default: 100')
 
     parser.add_argument('--nhid', type=int, default=150, help='number of hidden units per layer (default: 150)')
     parser.add_argument('--batch_size', type=int_or_str, default='All', help='the batch size for training')
@@ -126,17 +127,20 @@ def plot_latent_coupling(latent_coupling, output_dir):
 
 def load_model_checkpoint(output_dir, load_epoch):
     load_model_dir = os.path.join(output_dir, 'models', f'model_{load_epoch}.pth')
+    load_data_dir = os.path.join(output_dir, 'models', 'data.pkl')
     load_text_dir = os.path.join(output_dir, 'log.txt')
     if os.path.isfile(load_model_dir):
         model = torch.load(load_model_dir)
         with open(load_text_dir, 'r') as file:
             output_str = [next(file) for _ in range(4)]
         output_str = ''.join(output_str)
+        with open(load_data_dir, 'rb') as data_file:
+            data = pickle.load(data_file)
     else:
-        print(f'No model_{load_epoch}.pth file found in {load_model_dir}')
+        print(f'No model_{load_epoch}.pth file found at {load_model_dir}')
         model = None
         output_str = None
-    return model, output_str
+    return model, output_str, data
 
 
 def reset_metric_checkpoint(output_dir, folder_name, sub_folder_name, metric_files, start_epoch):
@@ -153,7 +157,7 @@ def reset_metric_checkpoint(output_dir, folder_name, sub_folder_name, metric_fil
             json.dump(file_contents, file, indent=4)
 
 
-def create_relevant_files(output_dir, args, output_str):
+def create_relevant_files(output_dir, args, output_str, data):
     with open(os.path.join(output_dir, 'log.txt'), 'w') as file:
         file.write(output_str)
 
@@ -175,6 +179,24 @@ def create_relevant_files(output_dir, args, output_str):
     with open(os.path.join(output_dir, 'losses_test.json'), 'w+b') as file:
         file.write(b'[]')
 
+    with open(os.path.join(output_dir, 'beta_MSE_test.json'), 'w+b') as file:
+        file.write(b'[]')
+
+    with open(os.path.join(output_dir, 'alpha_MSE_test.json'), 'w+b') as file:
+        file.write(b'[]')
+
+    with open(os.path.join(output_dir, 'theta_MSE_test.json'), 'w+b') as file:
+        file.write(b'[]')
+
+    with open(os.path.join(output_dir, 'pi_MSE_test.json'), 'w+b') as file:
+        file.write(b'[]')
+
+    with open(os.path.join(output_dir, 'stdevs_MSE_test.json'), 'w+b') as file:
+        file.write(b'[]')
+
+    with open(os.path.join(output_dir, 'ltri_MSE_test.json'), 'w+b') as file:
+        file.write(b'[]')
+
     command_str = (f"python src/psplines_gradient_method/main.py "
                    f"--K {args.K} --R {args.n_trials} --L {args.L} --intensity_mltply {args.intensity_mltply} "
                    f"--intensity_bias {args.intensity_bias} --tau_beta {args.tau_beta} --tau_sigma1 {args.tau_sigma1} "
@@ -182,6 +204,12 @@ def create_relevant_files(output_dir, args, output_str):
                    f"--data_seed {args.data_seed} --param_seed {args.param_seed} --load_and_train 1")
     with open(os.path.join(output_dir, 'command.txt'), 'w') as file:
         file.write(command_str)
+
+    models_file = os.path.join(output_dir, 'models')
+    if not os.path.exists(models_file):
+        os.makedirs(models_file)
+    with open(os.path.join(models_file, 'data.pkl'), 'wb') as data_file:
+        pickle.dump(data, data_file)
 
 
 def write_log_and_model(output_str, output_dir, epoch, model):
@@ -225,10 +253,15 @@ def plot_outputs(latent_factors, warped_factors, stim_time, output_dir, folder, 
 def write_losses(list, name, metric, output_dir, starts_out_empty):
     if 'likelihood' in metric.lower():
         file_name = 'log_likelihoods'
-    else:
+    elif 'loss' in metric.lower():
         file_name = 'losses'
+    else:
+        file_name = metric
     file_name = f'{file_name}_{name.lower()}.json'
-    with open(os.path.join(output_dir, file_name), 'r+b') as file:
+    file_dir = os.path.join(output_dir, file_name)
+    if not os.path.exists(file_dir):
+        raise Exception(f'File {file_name} has not been created yet')
+    with open(file_dir, 'r+b') as file:
         _ = file.seek(-1, 2)  # Go to the one character before the end of the file
         if file.read(1) != b']':
             raise ValueError("JSON file must end with a ']'")

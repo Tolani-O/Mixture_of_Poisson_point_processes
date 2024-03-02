@@ -1,6 +1,6 @@
 import os
 import sys
-sys.path.append(os.path.abspath('../EM_Torch'))
+sys.path.append(os.path.abspath('.'))
 from src.EM_Torch.simulate_data_multitrial import DataAnalyzer
 from src.EM_Torch.SpikeTrainModel_EM import LikelihoodModel
 from src.EM_Torch.general_functions import load_model_checkpoint, softplus, plot_spikes, \
@@ -15,18 +15,19 @@ import torch.nn.functional as F
 
 args = get_parser().parse_args()
 
-args.n_trials = 2  # 15
-args.n_configs = 3  # 10
-args.A = 2
-args.n_trial_samples = 4  # m
-args.n_config_samples = 5  # n
+# args.n_trials = 2  # 15
+# args.n_configs = 3  # 10
+args.A = 3
+args.n_trial_samples = 10  # m
+args.n_config_samples = 10  # n
 args.param_seed = 'TRUTH'
-args.log_interval = 1
+args.log_interval = 10
 
 if args.param_seed == '':
     args.param_seed = np.random.randint(0, 2 ** 32 - 1)
 args.data_seed = np.random.randint(0, 2 ** 32 - 1)
 
+print('Start')
 # Set the random seed manually for reproducibility.
 np.random.seed(args.data_seed)
 # Ground truth data
@@ -105,6 +106,15 @@ if __name__ == "__main__":
         log_likelihoods_train.append((likelihood_term + entropy_term).detach().item())
 
         with torch.no_grad():
+            # likelihood_term, entropy_term, penalty_term = model.forward(Y=torch.tensor(Y_train),
+            #                                                             neuron_factor_access=torch.tensor(factor_access_train),
+            #                                                             config_indcs=torch.arange(args.n_configs),
+            #                                                             tau_beta=args.tau_beta, tau_budget=args.tau_budget,
+            #                                                             tau_sigma1=args.tau_sigma1, tau_sigma2=args.tau_sigma2)
+            # losses_train.append((likelihood_term + entropy_term + penalty_term).detach().item())
+            # log_likelihoods_train.append((likelihood_term + entropy_term).detach().item())
+
+
             likelihood_term, entropy_term, penalty_term = model.forward(Y=torch.tensor(Y_test),
                                                                         neuron_factor_access=torch.tensor(factor_access_test),
                                                                         config_indcs=torch.arange(args.n_configs),
@@ -113,18 +123,18 @@ if __name__ == "__main__":
             losses_test.append((likelihood_term + entropy_term + penalty_term).detach().item())
             log_likelihoods_test.append((likelihood_term + entropy_term).detach().item())
 
-        for c in range(args.n_configs):
-            optimizer.zero_grad()
-            likelihood_term, entropy_term, penalty_term = model.forward(Y=torch.tensor(Y_train),
-                                                                        neuron_factor_access=torch.tensor(factor_access_train),
-                                                                        config_indcs=torch.tensor([c, ]),
-                                                                        tau_beta=args.tau_beta, tau_budget=args.tau_budget,
-                                                                        tau_sigma1=args.tau_sigma1, tau_sigma2=args.tau_sigma2)
-            loss = -(likelihood_term + entropy_term + penalty_term)
-            loss.backward()
-            optimizer.step()
-            losses.append((likelihood_term + entropy_term + penalty_term).detach().item())
-            log_likelihoods.append((likelihood_term + entropy_term).detach().item())
+        # for c in range(args.n_configs):
+        #     optimizer.zero_grad()
+        #     likelihood_term, entropy_term, penalty_term = model.forward(Y=torch.tensor(Y_train),
+        #                                                                 neuron_factor_access=torch.tensor(factor_access_train),
+        #                                                                 config_indcs=torch.tensor([c, ]),
+        #                                                                 tau_beta=args.tau_beta, tau_budget=args.tau_budget,
+        #                                                                 tau_sigma1=args.tau_sigma1, tau_sigma2=args.tau_sigma2)
+        #     loss = -(likelihood_term + entropy_term + penalty_term)
+        #     loss.backward()
+        #     optimizer.step()
+        #     losses.append((likelihood_term + entropy_term + penalty_term).detach().item())
+        #     log_likelihoods.append((likelihood_term + entropy_term).detach().item())
 
         if epoch % args.log_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             end_time = time.time()  # Record the end time of the epoch
@@ -142,7 +152,7 @@ if __name__ == "__main__":
                 f"Epoch: {epoch:2d}, Elapsed Time: {elapsed_time / 60:.2f} mins, Total Time: {total_time / (60 * 60):.2f} hrs,\n"
                 f"Loss train: {cur_loss_train:.5f}, Log Likelihood train: {cur_log_likelihood_train:.5f},\n"
                 f"Loss test: {cur_loss_test:.5f}, Log Likelihood test: {cur_log_likelihood_test:.5f},\n"
-                f"lr: {args.lr:.5f}, smoothness_budget: {smoothness_budget_constrained.T}\n")
+                f"lr: {args.lr:.5f}, smoothness_budget: {smoothness_budget_constrained.T}\n\n")
             write_log_and_model(output_str, output_dir, epoch, model)
             plot_outputs(latent_factors, warped_factors, stim_time, output_dir, 'Train', epoch)
             is_empty = start_epoch == 0 and epoch == 0
@@ -150,16 +160,18 @@ if __name__ == "__main__":
             write_losses(losses_train, 'Train', 'Loss', output_dir, is_empty)
             write_losses(log_likelihoods_test, 'Test', 'Likelihood', output_dir, is_empty)
             write_losses(losses_test, 'Test', 'Loss', output_dir, is_empty)
-            write_losses(log_likelihoods, 'Batch', 'Likelihood', output_dir, is_empty)
-            write_losses(losses, 'Batch', 'Loss', output_dir, is_empty)
+            # write_losses(log_likelihoods, 'Batch', 'Likelihood', output_dir, is_empty)
+            # write_losses(losses, 'Batch', 'Loss', output_dir, is_empty)
             plot_losses(true_ELBO_train, output_dir, 'Train', 'Likelihood', 20)
             plot_losses(0, output_dir, 'Train', 'Loss', 20)
             plot_losses(true_ELBO_test, output_dir, 'Test', 'Likelihood', 20)
             plot_losses(0, output_dir, 'Test', 'Loss', 20)
-            plot_losses(true_ELBO_train, output_dir, 'Batch', 'Likelihood', 100)
-            plot_losses(0, output_dir, 'Batch', 'Loss', 100)
+            # plot_losses(true_ELBO_train/args.n_configs, output_dir, 'Batch', 'Likelihood', 100)
+            # plot_losses(0, output_dir, 'Batch', 'Loss', 100)
             log_likelihoods = []
             losses = []
+            log_likelihoods_train = []
+            losses_train = []
             log_likelihoods_test = []
             losses_test = []
             print(output_str)

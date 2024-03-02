@@ -59,14 +59,21 @@ class LikelihoodModel(nn.Module):
         # corr = np.diag(1/std_dev) @ trial_peak_offset_covar_matrix @ np.diag(1/std_dev)
 
 
-    def init_ground_truth(self, latent_factors, alpha, theta, pi, config_peak_offset_stdevs, trial_peak_offset_covar_ltri):
-        self.beta = nn.Parameter(latent_factors)
-        self.alpha = nn.Parameter(alpha)
-        self.theta = nn.Parameter(theta)
-        self.pi = nn.Parameter(pi)
-        self.config_peak_offset_stdevs = nn.Parameter(config_peak_offset_stdevs)
-        self.trial_peak_offset_covar_ltri = nn.Parameter(trial_peak_offset_covar_ltri)
-        self.smoothness_budget = nn.Parameter(torch.zeros(latent_factors.shape[0]-1))
+    def init_ground_truth(self, n_factors, latent_factors=None, alpha=None, theta=None, pi=None,
+                          config_peak_offset_stdevs=None, trial_peak_offset_covar_ltri=None):
+        self.init_random(n_factors)
+        if latent_factors is not None:
+            self.beta = nn.Parameter(latent_factors)
+        if alpha is not None:
+            self.alpha = nn.Parameter(alpha)
+        if theta is not None:
+            self.theta = nn.Parameter(theta)
+        if pi is not None:
+            self.pi = nn.Parameter(pi)
+        if config_peak_offset_stdevs is not None:
+            self.config_peak_offset_stdevs = nn.Parameter(config_peak_offset_stdevs)
+        if trial_peak_offset_covar_ltri is not None:
+            self.trial_peak_offset_covar_ltri = nn.Parameter(trial_peak_offset_covar_ltri)
 
 
     def warp_all_latent_factors_for_all_trials(self, n_configs, n_trials):

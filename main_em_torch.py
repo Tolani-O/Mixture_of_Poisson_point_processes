@@ -24,6 +24,7 @@ args = get_parser().parse_args()
 # args.load_epoch = 1499
 
 args.param_seed = 'TRUTH'
+args.notes = 'Full_Ground-Truth-Init'
 
 if args.param_seed == '':
     args.param_seed = np.random.randint(0, 2 ** 32 - 1)
@@ -193,12 +194,12 @@ if __name__ == "__main__":
             plot_losses(None, output_dir, 'Train', 'Loss', 20)
             plot_losses(true_ELBO_test, output_dir, 'Test', 'Likelihood', 20)
             plot_losses(None, output_dir, 'Test', 'Loss', 20)
-            plot_losses(None, output_dir, 'Test', 'beta_MSE', 0)
-            plot_losses(None, output_dir, 'Test', 'alpha_MSE', 0)
-            plot_losses(None, output_dir, 'Test', 'theta_MSE', 0)
-            plot_losses(None, output_dir, 'Test', 'pi_MSE', 0)
-            plot_losses(None, output_dir, 'Test', 'stdevs_MSE', 0)
-            plot_losses(None, output_dir, 'Test', 'ltri_MSE', 0)
+            plot_losses(None, output_dir, 'Test', 'beta_MSE', 20)
+            plot_losses(None, output_dir, 'Test', 'alpha_MSE', 20)
+            plot_losses(None, output_dir, 'Test', 'theta_MSE', 20)
+            plot_losses(None, output_dir, 'Test', 'pi_MSE', 20)
+            plot_losses(None, output_dir, 'Test', 'stdevs_MSE', 20)
+            plot_losses(None, output_dir, 'Test', 'ltri_MSE', 20)
             # plot_losses(true_ELBO_train/args.n_configs, output_dir, 'Batch', 'Likelihood', 100)
             # plot_losses(0, output_dir, 'Batch', 'Loss', 100)
             log_likelihoods = []

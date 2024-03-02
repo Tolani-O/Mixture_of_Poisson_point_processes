@@ -279,8 +279,10 @@ def write_losses(list, name, metric, output_dir, starts_out_empty):
 def plot_losses(true_likelihood, output_dir, name, metric, cutoff):
     if 'likelihood' in metric.lower():
         file_name = 'log_likelihoods'
-    else:
+    elif 'loss' in metric.lower():
         file_name = 'losses'
+    else:
+        file_name = metric
     file_name = f'{file_name}_{name.lower()}.json'
     if name.lower()=='test':
         folder = 'Test'

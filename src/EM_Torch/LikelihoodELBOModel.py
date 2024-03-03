@@ -28,7 +28,7 @@ class LikelihoodELBOModel(nn.Module):
         self.n_trial_samples = n_trial_samples
         self.W_C_tensor = None  # 1 x 1 x M x N x C
         Delta2 = create_second_diff_matrix(T)
-        self.Delta2TDelta2 = torch.tensor(Delta2.T @ Delta2).to_sparse()  # T x T # tikhonov regularization
+        self.Delta2TDelta2 = torch.tensor(Delta2.T @ Delta2).to_sparse().float()  # T x T # tikhonov regularization
 
         # Parameters
         self.beta = None  # AL x P
@@ -268,7 +268,7 @@ class LikelihoodELBOModel(nn.Module):
 
         latent_factors = F.softplus(self.beta)
         smoothness_budget_constrained = F.softmax(torch.cat([torch.zeros(1), self.smoothness_budget]), dim=0)
-        beta_s2_penalty = - tau_beta * smoothness_budget_constrained.float().t() @ torch.sum((latent_factors @ self.Delta2TDelta2.float()) * latent_factors, dim=1)
+        beta_s2_penalty = - tau_beta * smoothness_budget_constrained.t() @ torch.sum((latent_factors @ self.Delta2TDelta2) * latent_factors, dim=1)
 
         smoothness_budget_penalty = - tau_budget * (self.smoothness_budget @ self.smoothness_budget)
 

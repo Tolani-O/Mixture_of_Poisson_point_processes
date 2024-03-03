@@ -2,7 +2,7 @@ import os
 import sys
 sys.path.append(os.path.abspath('.'))
 from src.EM_Torch.simulate_data_multitrial import DataAnalyzer
-from src.EM_Torch.SpikeTrainModel_EM import LikelihoodModel
+from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
 from src.EM_Torch.general_functions import load_model_checkpoint, softplus, plot_spikes, \
     plot_intensity_and_latents, create_relevant_files, get_parser, plot_outputs, \
     write_log_and_model, write_losses, plot_losses
@@ -14,10 +14,10 @@ import torch.nn.functional as F
 
 args = get_parser().parse_args()
 
-# args.n_trials = 2  # 15
-# args.n_configs = 3  # 10
-# args.n_trial_samples = 1  # m
-# args.n_config_samples = 2  # n
+args.n_trials = 2  # R
+args.n_configs = 3  # C
+args.n_trial_samples = 1  # M
+args.n_config_samples = 2  # N
 
 # args.folder_name = ''
 # args.load = True
@@ -44,12 +44,14 @@ true_likelihood_train = data.compute_log_likelihood(Y_train, intensities_train)
 true_likelihood_test = data.compute_log_likelihood(Y_test, intensities_test)
 
 # initialize the model with training data and ground truth params
-model = LikelihoodModel(stim_time, args.n_trial_samples, args.n_config_samples)
+model = LikelihoodELBOModel(stim_time, args.n_trial_samples, args.n_config_samples)
 model.init_ground_truth(data.beta.shape[0],
                         torch.tensor(data.beta).float(), torch.tensor(data.alpha).float(),
                         torch.tensor(data.theta).float(), torch.tensor(data.pi).float(),
                         torch.tensor(data.config_peak_offset_stdevs).float(),
                         torch.tensor(data.trial_peak_offset_covar_ltri).float())
+# model.init_from_data(Y=torch.tensor(Y_train), neuron_factor_access=torch.tensor(factor_access_train)
+
 model.eval()
 with torch.no_grad():
     true_ELBO_train = model.compute_log_elbo(torch.tensor(Y_train), torch.tensor(factor_access_train), torch.arange(args.n_configs)) + model.compute_offset_entropy_terms()

@@ -50,7 +50,6 @@ model.init_ground_truth(data.beta.shape[0],
                         torch.tensor(data.theta).float(), torch.tensor(data.pi).float(),
                         torch.tensor(data.config_peak_offset_stdevs).float(),
                         torch.tensor(data.trial_peak_offset_covar_ltri).float())
-# model.init_from_data(Y=torch.tensor(Y_train), neuron_factor_access=torch.tensor(factor_access_train)
 
 model.eval()
 with torch.no_grad():
@@ -63,6 +62,7 @@ start_epoch = 0
 
 # Remove this lines
 # model.init_ground_truth(data.beta.shape[0], torch.tensor(data.beta).float())
+model.init_from_data(Y=torch.tensor(Y_train).float(), neuron_factor_access=torch.tensor(factor_access_train).float())
 
 if args.load:
     output_dir = os.path.join(output_dir, args.folder_name)

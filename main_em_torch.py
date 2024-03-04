@@ -14,23 +14,29 @@ import torch.nn.functional as F
 
 args = get_parser().parse_args()
 
-# args.n_trials = 2  # R
-# args.n_configs = 3  # C
-# args.n_trial_samples = 1  # M
-# args.n_config_samples = 2  # N
+# args.n_trials = 5  # R
+# args.n_configs = 5  # C
+# args.n_trial_samples = 4  # M
+# args.n_config_samples = 4  # N
+# args.K = 10  # K
 
-args.folder_name = 'paramSeedTRUTH_dataSeed1247878502_L3_K50_R15_A3_C40_int.mltply25_int.add1_tauBeta10_tauSigma11_tauSigma21_iters1500_notes-Full_InitBeta&PiFromData'
-args.load = True
-args.load_epoch = 1499
+# args.folder_name = 'paramSeedTRUTH_dataSeed1247878502_L3_K50_R15_A3_C40_int.mltply25_int.add1_tauBeta10_tauSigma11_tauSigma21_iters1500_notes-Full_InitBeta&PiFromData'
+# args.load = True
+# args.load_epoch = 2130
 
 args.param_seed = 'TRUTH'
-args.notes = 'Full_InitBeta&PiFromData'
-args.num_epochs = 1500
+args.notes = 'Full_InitBeta&PiFromData_lr0.01'
 args.lr = 0.01
+args.tau_beta = 0
+args.tau_sigma1 = 0
+args.tau_sigma2 = 0
+args.tau_budget = 0
 
 if args.param_seed == '':
     args.param_seed = np.random.randint(0, 2 ** 32 - 1)
 args.data_seed = np.random.randint(0, 2 ** 32 - 1)
+# Set the random seed manually for reproducibility.
+np.random.seed(args.data_seed)
 
 print('Start')
 outputs_folder = 'outputs'
@@ -51,8 +57,6 @@ if args.load:
     true_ELBO_test = float(output_str_split[4].split('\n')[0].strip())
     start_epoch = args.load_epoch+1
 else:
-    # Set the random seed manually for reproducibility.
-    np.random.seed(args.data_seed)
     # Ground truth data
     data = DataAnalyzer().initialize(A=args.A, intensity_mltply=args.intensity_mltply,
                                      intensity_bias=args.intensity_bias)
@@ -85,6 +89,7 @@ else:
     start_epoch = 0
 
     # # Remove this lines
+    # model.init_ground_truth(data.beta.shape[0], torch.zeros_like(data.beta).float())
     # model.init_ground_truth(data.beta.shape[0], torch.tensor(data.beta).float())
     model.init_from_data(Y=torch.tensor(Y_train).float(),
                          neuron_factor_access=torch.tensor(factor_access_train).float())
@@ -127,6 +132,8 @@ if __name__ == "__main__":
     stdevs_mses = []
     ltri_mses = []
     total_time = 0
+    # For debugging
+    # torch.autograd.set_detect_anomaly(True)
     for epoch in range(start_epoch, start_epoch + args.num_epochs):
         start_time = time.time()  # Record the start time of the epoch
 
@@ -151,13 +158,6 @@ if __name__ == "__main__":
             pi_mses.append(F.mse_loss(model.pi, torch.tensor(data.pi)).item())
             stdevs_mses.append(F.mse_loss(model.config_peak_offset_stdevs, torch.tensor(data.config_peak_offset_stdevs)).item())
             ltri_mses.append(F.mse_loss(model.trial_peak_offset_covar_ltri, torch.tensor(data.trial_peak_offset_covar_ltri)).item())
-            # likelihood_term, entropy_term, penalty_term = model.forward(Y=torch.tensor(Y_train),
-            #                                                             neuron_factor_access=torch.tensor(factor_access_train),
-            #                                                             config_indcs=torch.arange(args.n_configs),
-            #                                                             tau_beta=args.tau_beta, tau_budget=args.tau_budget,
-            #                                                             tau_sigma1=args.tau_sigma1, tau_sigma2=args.tau_sigma2)
-            # losses_train.append((likelihood_term + entropy_term + penalty_term).detach().item())
-            # log_likelihoods_train.append((likelihood_term + entropy_term).detach().item())
 
             likelihood_term, entropy_term, penalty_term = model.forward(Y=torch.tensor(Y_test),
                                                                         neuron_factor_access=torch.tensor(factor_access_test),
@@ -166,19 +166,6 @@ if __name__ == "__main__":
                                                                         tau_sigma1=args.tau_sigma1, tau_sigma2=args.tau_sigma2)
             losses_test.append((likelihood_term + entropy_term + penalty_term).item())
             log_likelihoods_test.append((likelihood_term + entropy_term).item())
-
-        # for c in range(args.n_configs):
-        #     optimizer.zero_grad()
-        #     likelihood_term, entropy_term, penalty_term = model.forward(Y=torch.tensor(Y_train),
-        #                                                                 neuron_factor_access=torch.tensor(factor_access_train),
-        #                                                                 config_indcs=torch.tensor([c, ]),
-        #                                                                 tau_beta=args.tau_beta, tau_budget=args.tau_budget,
-        #                                                                 tau_sigma1=args.tau_sigma1, tau_sigma2=args.tau_sigma2)
-        #     loss = -(likelihood_term + entropy_term + penalty_term)
-        #     loss.backward()
-        #     optimizer.step()
-        #     losses.append((likelihood_term + entropy_term + penalty_term).detach().item())
-        #     log_likelihoods.append((likelihood_term + entropy_term).detach().item())
 
         if epoch % args.log_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             end_time = time.time()  # Record the end time of the epoch

@@ -13,6 +13,9 @@ import torch.nn.functional as F
 
 
 args = get_parser().parse_args()
+if args.param_seed == '':
+    args.param_seed = np.random.randint(0, 2 ** 32 - 1)
+args.data_seed = np.random.randint(0, 2 ** 32 - 1)
 
 # args.n_trials = 5  # R
 # args.n_configs = 5  # C
@@ -20,28 +23,25 @@ args = get_parser().parse_args()
 # args.n_config_samples = 4  # N
 # args.K = 10  # K
 
-# args.folder_name = 'paramSeedTRUTH_dataSeed1247878502_L3_K50_R15_A3_C40_int.mltply25_int.add1_tauBeta10_tauSigma11_tauSigma21_iters1500_notes-Full_InitBeta&PiFromData'
-# args.load = True
-# args.load_epoch = 2130
+args.folder_name = 'paramSeedTRUTH_dataSeed1597527101_L3_K30_R10_A3_C15_int.mltply25_int.add1_tauBeta0_tauSigma10_tauSigma20_iters5000_notes-Full_InitBeta&PiFromData_lr0.01'
+args.load = True
+args.load_epoch = 250
+args.data_seed = 1597527101
 
-args.param_seed = 'TRUTH'
-args.notes = 'Full_InitBeta&PiFromData_lr0.01'
+# args.param_seed = 'TRUTH'
+# args.notes = 'Full_InitBeta&PiFromData_lr0.01'
 args.lr = 0.01
-args.tau_beta = 0
-args.tau_sigma1 = 0
-args.tau_sigma2 = 0
-args.tau_budget = 0
-
-if args.param_seed == '':
-    args.param_seed = np.random.randint(0, 2 ** 32 - 1)
-args.data_seed = np.random.randint(0, 2 ** 32 - 1)
-# Set the random seed manually for reproducibility.
-np.random.seed(args.data_seed)
+# args.tau_beta = 0
+# args.tau_sigma1 = 0
+# args.tau_sigma2 = 0
+# args.tau_budget = 0
 
 print('Start')
 outputs_folder = 'outputs'
 # outputs_folder = '../../outputs'
 output_dir = os.path.join(os.getcwd(), outputs_folder)
+# Set the random seed manually for reproducibility.
+np.random.seed(args.data_seed)
 if args.load:
     output_dir = os.path.join(output_dir, args.folder_name)
     model, output_str, data = load_model_checkpoint(output_dir, args.load_epoch)
@@ -50,8 +50,7 @@ if args.load:
                                                                                   n_configs=args.n_configs,
                                                                                   n_trials=args.n_trials)
     # Validation data
-    Y_test, _, factor_access_test, intensities_test = data.sample_data(K=args.K, A=args.A, n_configs=args.n_configs,
-                                                                       n_trials=args.n_trials)
+    Y_test, _, factor_access_test, intensities_test = data.sample_data(K=10, A=args.A, n_configs=5, n_trials=5)
     output_str_split = output_str.split(':')
     true_ELBO_train = float(output_str_split[3].split(',')[0].strip())
     true_ELBO_test = float(output_str_split[4].split('\n')[0].strip())
@@ -65,8 +64,7 @@ else:
                                                                                   n_configs=args.n_configs,
                                                                                   n_trials=args.n_trials)
     # Validation data
-    Y_test, _, factor_access_test, intensities_test = data.sample_data(K=args.K, A=args.A, n_configs=args.n_configs,
-                                                                       n_trials=args.n_trials)
+    Y_test, _, factor_access_test, intensities_test = data.sample_data(K=10, A=args.A, n_configs=5, n_trials=5)
 
     true_likelihood_train = data.compute_log_likelihood(Y_train, intensities_train)
     true_likelihood_test = data.compute_log_likelihood(Y_test, intensities_test)
@@ -161,7 +159,7 @@ if __name__ == "__main__":
 
             likelihood_term, entropy_term, penalty_term = model.forward(Y=torch.tensor(Y_test),
                                                                         neuron_factor_access=torch.tensor(factor_access_test),
-                                                                        config_indcs=torch.arange(args.n_configs),
+                                                                        config_indcs=torch.arange(Y_test.shape[-1]),
                                                                         tau_beta=args.tau_beta, tau_budget=args.tau_budget,
                                                                         tau_sigma1=args.tau_sigma1, tau_sigma2=args.tau_sigma2)
             losses_test.append((likelihood_term + entropy_term + penalty_term).item())

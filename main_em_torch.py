@@ -14,61 +14,78 @@ import torch.nn.functional as F
 
 args = get_parser().parse_args()
 
-args.n_trials = 2  # R
-args.n_configs = 3  # C
-args.n_trial_samples = 1  # M
-args.n_config_samples = 2  # N
+# args.n_trials = 2  # R
+# args.n_configs = 3  # C
+# args.n_trial_samples = 1  # M
+# args.n_config_samples = 2  # N
 
-# args.folder_name = ''
-# args.load = True
-# args.load_epoch = 1499
+args.folder_name = 'paramSeedTRUTH_dataSeed1247878502_L3_K50_R15_A3_C40_int.mltply25_int.add1_tauBeta10_tauSigma11_tauSigma21_iters1500_notes-Full_InitBeta&PiFromData'
+args.load = True
+args.load_epoch = 1499
 
 args.param_seed = 'TRUTH'
-args.notes = 'Full_Ground-Truth-Init'
+args.notes = 'Full_InitBeta&PiFromData'
+args.num_epochs = 1500
+args.lr = 0.01
 
 if args.param_seed == '':
     args.param_seed = np.random.randint(0, 2 ** 32 - 1)
 args.data_seed = np.random.randint(0, 2 ** 32 - 1)
 
 print('Start')
-# Set the random seed manually for reproducibility.
-np.random.seed(args.data_seed)
-# Ground truth data
-data = DataAnalyzer().initialize(A=args.A, intensity_mltply=args.intensity_mltply, intensity_bias=args.intensity_bias)
-# Training data
-Y_train, stim_time, factor_access_train, intensities_train = data.sample_data(K=args.K, A=args.A, n_configs=args.n_configs, n_trials=args.n_trials)
-# Validation data
-Y_test, _, factor_access_test, intensities_test = data.sample_data(K=args.K, A=args.A, n_configs=args.n_configs, n_trials=args.n_trials)
-
-true_likelihood_train = data.compute_log_likelihood(Y_train, intensities_train)
-true_likelihood_test = data.compute_log_likelihood(Y_test, intensities_test)
-
-# initialize the model with training data and ground truth params
-model = LikelihoodELBOModel(stim_time, args.n_trial_samples, args.n_config_samples)
-model.init_ground_truth(data.beta.shape[0],
-                        torch.tensor(data.beta).float(), torch.tensor(data.alpha).float(),
-                        torch.tensor(data.theta).float(), torch.tensor(data.pi).float(),
-                        torch.tensor(data.config_peak_offset_stdevs).float(),
-                        torch.tensor(data.trial_peak_offset_covar_ltri).float())
-
-model.eval()
-with torch.no_grad():
-    true_ELBO_train = model.compute_log_elbo(torch.tensor(Y_train), torch.tensor(factor_access_train), torch.arange(args.n_configs)) + model.compute_offset_entropy_terms()
-    true_ELBO_test = model.compute_log_elbo(torch.tensor(Y_test), torch.tensor(factor_access_test), torch.arange(args.n_configs)) + model.compute_offset_entropy_terms()
-
-output_dir = os.path.join(os.getcwd(), 'outputs')
-output_str = ''
-start_epoch = 0
-
-# Remove this lines
-# model.init_ground_truth(data.beta.shape[0], torch.tensor(data.beta).float())
-model.init_from_data(Y=torch.tensor(Y_train).float(), neuron_factor_access=torch.tensor(factor_access_train).float())
-
+outputs_folder = 'outputs'
+# outputs_folder = '../../outputs'
+output_dir = os.path.join(os.getcwd(), outputs_folder)
 if args.load:
     output_dir = os.path.join(output_dir, args.folder_name)
     model, output_str, data = load_model_checkpoint(output_dir, args.load_epoch)
-    start_epoch = args.load_epoch
+    # Training data
+    Y_train, stim_time, factor_access_train, intensities_train = data.sample_data(K=args.K, A=args.A,
+                                                                                  n_configs=args.n_configs,
+                                                                                  n_trials=args.n_trials)
+    # Validation data
+    Y_test, _, factor_access_test, intensities_test = data.sample_data(K=args.K, A=args.A, n_configs=args.n_configs,
+                                                                       n_trials=args.n_trials)
+    start_epoch = args.load_epoch+1
 else:
+    # Set the random seed manually for reproducibility.
+    np.random.seed(args.data_seed)
+    # Ground truth data
+    data = DataAnalyzer().initialize(A=args.A, intensity_mltply=args.intensity_mltply,
+                                     intensity_bias=args.intensity_bias)
+    # Training data
+    Y_train, stim_time, factor_access_train, intensities_train = data.sample_data(K=args.K, A=args.A,
+                                                                                  n_configs=args.n_configs,
+                                                                                  n_trials=args.n_trials)
+    # Validation data
+    Y_test, _, factor_access_test, intensities_test = data.sample_data(K=args.K, A=args.A, n_configs=args.n_configs,
+                                                                       n_trials=args.n_trials)
+
+    true_likelihood_train = data.compute_log_likelihood(Y_train, intensities_train)
+    true_likelihood_test = data.compute_log_likelihood(Y_test, intensities_test)
+
+    # initialize the model with training data and ground truth params
+    model = LikelihoodELBOModel(stim_time, args.n_trial_samples, args.n_config_samples)
+    model.init_ground_truth(data.beta.shape[0],
+                            torch.tensor(data.beta).float(), torch.tensor(data.alpha).float(),
+                            torch.tensor(data.theta).float(), torch.tensor(data.pi).float(),
+                            torch.tensor(data.config_peak_offset_stdevs).float(),
+                            torch.tensor(data.trial_peak_offset_covar_ltri).float())
+
+    model.eval()
+    with torch.no_grad():
+        true_ELBO_train = model.compute_log_elbo(torch.tensor(Y_train), torch.tensor(factor_access_train),
+                                                 torch.arange(args.n_configs)) + model.compute_offset_entropy_terms()
+        true_ELBO_test = model.compute_log_elbo(torch.tensor(Y_test), torch.tensor(factor_access_test),
+                                                torch.arange(args.n_configs)) + model.compute_offset_entropy_terms()
+
+    start_epoch = 0
+
+    # # Remove this lines
+    # model.init_ground_truth(data.beta.shape[0], torch.tensor(data.beta).float())
+    model.init_from_data(Y=torch.tensor(Y_train).float(),
+                         neuron_factor_access=torch.tensor(factor_access_train).float())
+
     if args.param_seed != 'TRUTH':
         torch.manual_seed(args.param_seed)
         model.init_random(factor_access_train.shape[2])

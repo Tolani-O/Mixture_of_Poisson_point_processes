@@ -137,9 +137,7 @@ def load_model_checkpoint(output_dir, load_epoch):
         with open(load_data_dir, 'rb') as data_file:
             data = pickle.load(data_file)
     else:
-        print(f'No model_{load_epoch}.pth file found at {load_model_dir}')
-        model = None
-        output_str = None
+        raise Exception(f'No model_{load_epoch}.pth file found at {load_model_dir}')
     return model, output_str, data
 
 
@@ -276,7 +274,7 @@ def write_losses(list, name, metric, output_dir, starts_out_empty):
         _ = file.write(b']')
 
 
-def plot_losses(true_likelihood, output_dir, name, metric, cutoff):
+def plot_losses(true_likelihood, output_dir, name, metric, cutoff=0):
     if 'likelihood' in metric.lower():
         file_name = 'log_likelihoods'
     elif 'loss' in metric.lower():
@@ -294,7 +292,6 @@ def plot_losses(true_likelihood, output_dir, name, metric, cutoff):
     json_path = os.path.join(output_dir, file_name)
     with open(json_path, 'r') as file:
         metric_data = json.load(file)
-    metric_data = metric_data[cutoff:]
     plt.figure(figsize=(10, 6))
     plt.plot(metric_data, label=metric)
     if 'likelihood' in metric.lower():
@@ -305,6 +302,18 @@ def plot_losses(true_likelihood, output_dir, name, metric, cutoff):
     plt.title('Plot of metric values')
     plt.legend()
     plt.savefig(os.path.join(plt_path, f'{metric}_{name}_Trajectories.png'))
+    if cutoff > 0:
+        metric_data = metric_data[cutoff:]
+        plt.figure(figsize=(10, 6))
+        plt.plot(metric_data, label=metric)
+        if 'likelihood' in metric.lower():
+            true_likelihood_vector = [true_likelihood] * len(metric_data)
+            plt.plot(true_likelihood_vector, label='True Log Likelihood')
+        plt.xlabel('Iterations')
+        plt.ylabel(metric)
+        plt.title('Plot of metric values')
+        plt.legend()
+        plt.savefig(os.path.join(plt_path, f'{metric}_{name}_Trajectories_cutoff{cutoff}.png'))
 
 
 def softplus(x):

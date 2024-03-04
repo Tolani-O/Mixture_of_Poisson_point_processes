@@ -46,6 +46,9 @@ if args.load:
     # Validation data
     Y_test, _, factor_access_test, intensities_test = data.sample_data(K=args.K, A=args.A, n_configs=args.n_configs,
                                                                        n_trials=args.n_trials)
+    output_str_split = output_str.split(':')
+    true_ELBO_train = float(output_str_split[3].split(',')[0].strip())
+    true_ELBO_test = float(output_str_split[4].split('\n')[0].strip())
     start_epoch = args.load_epoch+1
 else:
     # Set the random seed manually for reproducibility.

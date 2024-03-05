@@ -77,20 +77,21 @@ class LikelihoodELBOModel(nn.Module):
             self.trial_peak_offset_covar_ltri = nn.Parameter(trial_peak_offset_covar_ltri)
 
 
-    def init_from_data(self, Y, neuron_factor_access):
+    def init_from_data(self, Y, neuron_factor_access, factor_indcs):
         # Y # K x T x R x C
         # neuron_factor_access  # C x K x L
         K, T, R, C = Y.shape
-        n_factors = neuron_factor_access.shape[2]
-        self.init_random(n_factors)
+        n_factors = neuron_factor_access.shape[-1]
         averaged_neurons = np.einsum('ktrc,ckl->tl', Y, neuron_factor_access) / (K*C*R)
         latent_factors = np.apply_along_axis(gaussian_filter1d, axis=0, arr=averaged_neurons, sigma=4).T
-        self.beta = nn.Parameter(torch.tensor(inv_softplus(latent_factors)))
+        beta = torch.zeros((n_factors, T))
+        beta[factor_indcs] = torch.tensor(inv_softplus(latent_factors[factor_indcs]))
         props = torch.sum(neuron_factor_access, dim=(0, 1)) / (K*C)
         # true_props = props/torch.sum(props)
         tr_props = torch.log(props) + torch.logsumexp(props, dim=0)
         tr_props = tr_props - tr_props[0]
-        self.pi = nn.Parameter(tr_props[1:])
+        pi = tr_props[1:]
+        self.init_ground_truth(n_factors, beta=beta, pi=pi)
 
 
     def warp_all_latent_factors_for_all_trials(self, n_configs, n_trials):

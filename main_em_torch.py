@@ -24,15 +24,15 @@ args.data_seed = np.random.randint(0, 2 ** 32 - 1)
 # args.n_config_samples = 4  # N
 # args.K = 10  # K
 
-# args.folder_name = 'paramSeedTRUTH_dataSeed1597527101_L3_K30_R10_A3_C15_int.mltply25_int.add1_tauBeta0_tauSigma10_tauSigma20_iters5000_notes-Full_InitBeta&PiFromData_lr0.01'
+# args.folder_name = ''
 # args.load = True
-# args.load_epoch = 250
-# args.data_seed = 1597527101
+# args.load_epoch = 0
+# args.data_seed = 0
 
-args.param_seed = 'TRUTH'
-# args.notes = 'Full_InitBeta&PiFromData_lr0.01'
-args.lr = 0.01
-args.batch_size = 5
+args.notes = 'Full'
+args.lr = 0.001
+args.batch_size = 'All'
+args.param_seed = 'InitBetaGroundTruth'
 
 print('Start')
 outputs_folder = 'outputs'
@@ -40,6 +40,8 @@ outputs_folder = 'outputs'
 output_dir = os.path.join(os.getcwd(), outputs_folder)
 # Set the random seed manually for reproducibility.
 np.random.seed(args.data_seed)
+# if args.param_seed != 'TRUTH':
+#     torch.manual_seed(args.param_seed)
 if args.load:
     output_dir = os.path.join(output_dir, args.folder_name)
     model, output_str, data = load_model_checkpoint(output_dir, args.load_epoch)
@@ -85,20 +87,18 @@ else:
 
     start_epoch = 0
 
-    # Remove this lines
-    # model.init_ground_truth(data.beta.shape[0], torch.zeros_like(torch.tensor(data.beta)).float())
-    # model.init_ground_truth(data.beta.shape[0], torch.tensor(data.beta).float())
-    la = int(data.beta.shape[0]/args.A)
-    model.init_from_data(Y=torch.tensor(Y_train).float(), neuron_factor_access=torch.tensor(factor_access_train).float(),
-                         factor_indcs=[i*la for i in range(args.A)])
+    num_factors = data.beta.shape[0]
+    # model.init_ground_truth(num_factors, torch.zeros_like(torch.tensor(data.beta)).float())
+    model.init_ground_truth(num_factors, torch.tensor(data.beta).float())
+    # la = int(num_factors/args.A)
+    # factor_indcs = [i*la for i in range(args.A)]
+    # model.init_from_data(Y=torch.tensor(Y_train).float(), neuron_factor_access=torch.tensor(factor_access_train).float(),
+    #                      factor_indcs=factor_indcs)
+    # model.init_random(num_factors)
 
-    if args.param_seed != 'TRUTH':
-        torch.manual_seed(args.param_seed)
-        model.init_random(factor_access_train.shape[2])
-    args.folder_name = (f'paramSeed{args.param_seed}_dataSeed{args.data_seed}_L{args.L}_K{args.K}_R{args.n_trials}_A{args.A}_C{args.n_configs}'
-                        f'_int.mltply{args.intensity_mltply}_int.add{args.intensity_bias}'
-                        f'_tauBeta{args.tau_beta}_tauSigma1{args.tau_sigma1}_tauSigma2{args.tau_sigma2}_iters{args.num_epochs}'
-                        f'_notes-{args.notes}')
+    args.folder_name = (f'{args.param_seed}_dataSeed{args.data_seed}_K{args.K}_R{args.n_trials}_A{args.A}_C{args.n_configs}'
+                        f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauSigma1{args.tau_sigma1}_tauSigma2{args.tau_sigma2}'
+                        f'_iters{args.num_epochs}_BatchSize{args.batch_size}_lr{args.lr}_notes-{args.notes}')
     output_dir = os.path.join(output_dir, args.folder_name)
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -165,7 +165,7 @@ if __name__ == "__main__":
 
             likelihood_term, entropy_term, penalty_term = model.forward(Y=torch.tensor(Y_train),
                                                                         neuron_factor_access=torch.tensor(factor_access_train),
-                                                                        config_indcs=torch.arange(Y_test.shape[-1]),
+                                                                        config_indcs=torch.arange(Y_train.shape[-1]),
                                                                         tau_beta=args.tau_beta, tau_budget=args.tau_budget,
                                                                         tau_sigma1=args.tau_sigma1, tau_sigma2=args.tau_sigma2)
             losses_train.append((likelihood_term + entropy_term + penalty_term).item())
@@ -221,8 +221,8 @@ if __name__ == "__main__":
             plot_losses(None, output_dir, 'Test', 'pi_MSE', 20)
             plot_losses(None, output_dir, 'Test', 'stdevs_MSE', 20)
             plot_losses(None, output_dir, 'Test', 'ltri_MSE', 20)
-            plot_losses(true_ELBO_train*(args.batch_size/args.K), output_dir, 'Batch', 'Likelihood', 100)
-            plot_losses(0, output_dir, 'Batch', 'Loss', 100)
+            plot_losses(true_ELBO_train*(args.batch_size/args.K), output_dir, 'Batch', 'Likelihood', 20)
+            plot_losses(0, output_dir, 'Batch', 'Loss', 20)
             log_likelihoods = []
             losses = []
             log_likelihoods_train = []

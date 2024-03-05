@@ -265,7 +265,8 @@ class LikelihoodELBOModel(nn.Module):
 
         Sigma = self.trial_peak_offset_covar_ltri @ self.trial_peak_offset_covar_ltri.T
         inv_Sigma = torch.linalg.inv(Sigma)
-        sigma_Penalty2 = - tau_sigma2 * torch.sum(torch.abs(inv_Sigma))
+        sigma_Penalty2 = -tau_sigma2 * (
+                    torch.sum(torch.abs(inv_Sigma)) - torch.sum(torch.abs(torch.diag(inv_Sigma))))
 
         latent_factors = F.softplus(self.beta)
         smoothness_budget_constrained = F.softmax(torch.cat([torch.zeros(1), self.smoothness_budget]), dim=0)

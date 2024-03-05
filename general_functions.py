@@ -7,6 +7,7 @@ from matplotlib.figure import figaspect
 import json
 import argparse
 import pickle
+from torch.utils.data import Dataset
 
 def get_parser():
     parser = argparse.ArgumentParser(description='Sequence Modeling - Polyphonic Music')
@@ -45,6 +46,20 @@ def get_parser():
     parser.add_argument('--reset_checkpoint', type=int, default=0, help='')
     parser.add_argument('--stage', type=str, default='finetune', help='options are: initialize_output, initialize_map, finetune, endtoend')
     return parser
+
+
+class CustomDataset(Dataset):
+    def __init__(self, Y, neuron_factor_access):
+        # Y # K x T x R x C
+        # neuron_factor_access  #  C x K x L
+        self.Y = Y
+        self.neuron_factor_access = neuron_factor_access
+
+    def __len__(self):
+        return self.Y.shape[0]
+
+    def __getitem__(self, idx):
+        return self.Y[idx], self.neuron_factor_access[:,idx,:]
 
 
 def create_precision_matrix(P):

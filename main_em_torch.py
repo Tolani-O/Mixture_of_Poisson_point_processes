@@ -86,9 +86,11 @@ else:
     start_epoch = 0
 
     # Remove this lines
-    model.init_ground_truth(data.beta.shape[0], torch.zeros_like(torch.tensor(data.beta)).float())
+    # model.init_ground_truth(data.beta.shape[0], torch.zeros_like(torch.tensor(data.beta)).float())
     # model.init_ground_truth(data.beta.shape[0], torch.tensor(data.beta).float())
-    # model.init_from_data(Y=torch.tensor(Y_train).float(), neuron_factor_access=torch.tensor(factor_access_train).float())
+    la = int(data.beta.shape[0]/args.A)
+    model.init_from_data(Y=torch.tensor(Y_train).float(), neuron_factor_access=torch.tensor(factor_access_train).float(),
+                         factor_indcs=[i*la for i in range(args.A)])
 
     if args.param_seed != 'TRUTH':
         torch.manual_seed(args.param_seed)

@@ -221,7 +221,7 @@ if __name__ == "__main__":
             plot_losses(None, output_dir, 'Test', 'pi_MSE', 20)
             plot_losses(None, output_dir, 'Test', 'stdevs_MSE', 20)
             plot_losses(None, output_dir, 'Test', 'ltri_MSE', 20)
-            plot_losses(true_ELBO_train/args.n_configs, output_dir, 'Batch', 'Likelihood', 100)
+            plot_losses(true_ELBO_train*(args.batch_size/args.K), output_dir, 'Batch', 'Likelihood', 100)
             plot_losses(0, output_dir, 'Batch', 'Loss', 100)
             log_likelihoods = []
             losses = []

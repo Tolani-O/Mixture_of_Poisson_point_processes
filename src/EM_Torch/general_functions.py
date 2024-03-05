@@ -33,9 +33,9 @@ def get_parser():
     parser.add_argument('--intensity_bias', type=float, default=1, help='Latent factor intensity bias')
     parser.add_argument('--param_seed', type=int_or_str, default='', help='options are: seed (int), Truth (str)')
     parser.add_argument('--log_interval', type=int, default=10, metavar='N', help='report interval (default: 100')
+    parser.add_argument('--batch_size', type=int_or_str, default='All', help='the batch size for training')
 
     parser.add_argument('--nhid', type=int, default=150, help='number of hidden units per layer (default: 150)')
-    parser.add_argument('--batch_size', type=int_or_str, default='All', help='the batch size for training')
     parser.add_argument('--plot_lkhd', type=int, default=0, help='')
     parser.add_argument('--init_map_load_epoch', type=int, default=1500, help='Which epoch to load for init map')
     parser.add_argument('--init_load_folder', type=str, default='', help='Which folder to load inits from')

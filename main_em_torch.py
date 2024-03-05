@@ -33,10 +33,6 @@ args.param_seed = 'TRUTH'
 # args.notes = 'Full_InitBeta&PiFromData_lr0.01'
 args.lr = 0.01
 args.batch_size = 5
-# args.tau_beta = 0
-# args.tau_sigma1 = 0
-# args.tau_sigma2 = 0
-# args.tau_budget = 0
 
 print('Start')
 outputs_folder = 'outputs'
@@ -89,10 +85,10 @@ else:
 
     start_epoch = 0
 
-    # # Remove this lines
-    # model.init_ground_truth(data.beta.shape[0], torch.zeros_like(data.beta).float())
+    # Remove this lines
+    model.init_ground_truth(data.beta.shape[0], torch.zeros_like(torch.tensor(data.beta)).float())
     # model.init_ground_truth(data.beta.shape[0], torch.tensor(data.beta).float())
-    model.init_from_data(Y=torch.tensor(Y_train).float(), neuron_factor_access=torch.tensor(factor_access_train).float())
+    # model.init_from_data(Y=torch.tensor(Y_train).float(), neuron_factor_access=torch.tensor(factor_access_train).float())
 
     if args.param_seed != 'TRUTH':
         torch.manual_seed(args.param_seed)
@@ -124,8 +120,8 @@ print(f'folder_name: {args.folder_name}')
 print(output_str)
 
 if __name__ == "__main__":
-    # log_likelihoods = []
-    # losses = []
+    log_likelihoods = []
+    losses = []
     log_likelihoods_train = []
     losses_train = []
     log_likelihoods_test = []
@@ -145,6 +141,7 @@ if __name__ == "__main__":
         model.train()
         for Y, access in dataloader:
             optimizer.zero_grad()
+            access = torch.permute(access, (1,0,2))
             likelihood_term, entropy_term, penalty_term = model.forward(Y=Y, neuron_factor_access=access,
                                                                         config_indcs=torch.arange(Y.shape[-1]),
                                                                         tau_beta=args.tau_beta, tau_budget=args.tau_budget,
@@ -152,17 +149,25 @@ if __name__ == "__main__":
             loss = -(likelihood_term + entropy_term + penalty_term)
             loss.backward()
             optimizer.step()
+            losses.append((likelihood_term + entropy_term + penalty_term).item())
+            log_likelihoods.append((likelihood_term + entropy_term).item())
 
         model.eval()
         with torch.no_grad():
-            losses_train.append((likelihood_term + entropy_term + penalty_term).item())
-            log_likelihoods_train.append((likelihood_term + entropy_term).item())
             beta_mses.append(F.mse_loss(model.beta, torch.tensor(data.beta)).item())
             alpha_mses.append(F.mse_loss(model.alpha, torch.tensor(data.alpha)).item())
             theta_mses.append(F.mse_loss(model.theta, torch.tensor(data.theta)).item())
             pi_mses.append(F.mse_loss(model.pi, torch.tensor(data.pi)).item())
             stdevs_mses.append(F.mse_loss(model.config_peak_offset_stdevs, torch.tensor(data.config_peak_offset_stdevs)).item())
             ltri_mses.append(F.mse_loss(model.trial_peak_offset_covar_ltri, torch.tensor(data.trial_peak_offset_covar_ltri)).item())
+
+            likelihood_term, entropy_term, penalty_term = model.forward(Y=torch.tensor(Y_train),
+                                                                        neuron_factor_access=torch.tensor(factor_access_train),
+                                                                        config_indcs=torch.arange(Y_test.shape[-1]),
+                                                                        tau_beta=args.tau_beta, tau_budget=args.tau_budget,
+                                                                        tau_sigma1=args.tau_sigma1, tau_sigma2=args.tau_sigma2)
+            losses_train.append((likelihood_term + entropy_term + penalty_term).item())
+            log_likelihoods_train.append((likelihood_term + entropy_term).item())
 
             likelihood_term, entropy_term, penalty_term = model.forward(Y=torch.tensor(Y_test),
                                                                         neuron_factor_access=torch.tensor(factor_access_test),
@@ -202,8 +207,8 @@ if __name__ == "__main__":
             write_losses(pi_mses, 'Test', 'pi_MSE', output_dir, is_empty)
             write_losses(stdevs_mses, 'Test', 'stdevs_MSE', output_dir, is_empty)
             write_losses(ltri_mses, 'Test', 'ltri_MSE', output_dir, is_empty)
-            # write_losses(log_likelihoods, 'Batch', 'Likelihood', output_dir, is_empty)
-            # write_losses(losses, 'Batch', 'Loss', output_dir, is_empty)
+            write_losses(log_likelihoods, 'Batch', 'Likelihood', output_dir, is_empty)
+            write_losses(losses, 'Batch', 'Loss', output_dir, is_empty)
             plot_losses(true_ELBO_train, output_dir, 'Train', 'Likelihood', 20)
             plot_losses(None, output_dir, 'Train', 'Loss', 20)
             plot_losses(true_ELBO_test, output_dir, 'Test', 'Likelihood', 20)
@@ -214,8 +219,8 @@ if __name__ == "__main__":
             plot_losses(None, output_dir, 'Test', 'pi_MSE', 20)
             plot_losses(None, output_dir, 'Test', 'stdevs_MSE', 20)
             plot_losses(None, output_dir, 'Test', 'ltri_MSE', 20)
-            # plot_losses(true_ELBO_train/args.n_configs, output_dir, 'Batch', 'Likelihood', 100)
-            # plot_losses(0, output_dir, 'Batch', 'Loss', 100)
+            plot_losses(true_ELBO_train/args.n_configs, output_dir, 'Batch', 'Likelihood', 100)
+            plot_losses(0, output_dir, 'Batch', 'Loss', 100)
             log_likelihoods = []
             losses = []
             log_likelihoods_train = []

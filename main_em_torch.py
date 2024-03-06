@@ -170,7 +170,7 @@ if __name__ == "__main__":
 
                 warped_factors = model.warp_all_latent_factors_for_all_trials(args.n_configs, args.n_trials)
                 entropy_term = model.compute_offset_entropy_terms()
-                penalty_term = model.compute_penalty_term()
+                penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_budget, args.tau_sigma1, args.tau_sigma2)
                 likelihood_term_train = model.compute_log_likelihood(torch.tensor(Y_train), torch.tensor(factor_access_train),
                                                                      warped_factors)
                 likelihood_term_test = model.compute_log_likelihood(torch.tensor(Y_test), torch.tensor(factor_access_test),

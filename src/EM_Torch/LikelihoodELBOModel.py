@@ -170,18 +170,14 @@ class LikelihoodELBOModel(nn.Module):
         return warped_factors
 
 
-    def compute_log_elbo(self, Y_full, neuron_factor_access_full, config_indcs): # and first 2 entropy terms
+    def compute_log_elbo(self, Y, neuron_factor_access, warped_factors): # and first 2 entropy terms
         # Weight Matrices
-        n_configs = len(config_indcs)
-        n_trials = Y_full.shape[2]
-        warped_factors = self.warp_all_latent_factors_for_all_trials(n_configs, n_trials)
+
         # warped_factors # L x T x M x N x R x C
-        # Y_full # K x T x R x C
+        # Y # K x T x R x C
         # Y_times_N_matrix  # K x L x T x M x N x R x C
         # sum_Y_times_N_matrix  # K x L x M x N x C
         # neuron_factor_access  #  C x K x L
-        Y = Y_full[:,:,:,config_indcs]
-        neuron_factor_access = neuron_factor_access_full[config_indcs,:,:]
         Y_times_N_matrix = torch.einsum('ktrc,ckl,ltmnrc->kltmnrc', Y, neuron_factor_access, warped_factors)
         sum_Y_times_N_matrix = torch.sum(Y_times_N_matrix, dim=(2, 5))
         exp_N_matrix = torch.exp(warped_factors)
@@ -278,11 +274,12 @@ class LikelihoodELBOModel(nn.Module):
         return penalty_term
 
 
-    def forward(self, Y, neuron_factor_access, config_indcs, tau_beta, tau_budget, tau_sigma1, tau_sigma2):
-
-        likelihood_term = self.compute_log_elbo(Y, neuron_factor_access, config_indcs)
+    def forward(self, Y, neuron_factor_access, tau_beta, tau_budget, tau_sigma1, tau_sigma2):
+        _, _, n_trials, n_configs = Y.shape
+        warped_factors = self.warp_all_latent_factors_for_all_trials(n_configs, n_trials)
+        likelihood_term = self.compute_log_elbo(Y, neuron_factor_access, warped_factors)
         entropy_term = self.compute_offset_entropy_terms()
         penalty_term = self.compute_penalty_terms(tau_beta, tau_budget, tau_sigma1, tau_sigma2)
-        return likelihood_term, entropy_term, penalty_term
+        return likelihood_term, entropy_term, penalty_term, warped_factors
 
 

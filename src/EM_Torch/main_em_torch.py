@@ -80,10 +80,14 @@ else:
 
     model.eval()
     with torch.no_grad():
-        true_ELBO_train = model.compute_log_elbo(torch.tensor(Y_train), torch.tensor(factor_access_train),
-                                                 torch.arange(args.n_configs)) + model.compute_offset_entropy_terms()
-        true_ELBO_test = model.compute_log_elbo(torch.tensor(Y_test), torch.tensor(factor_access_test),
-                                                torch.arange(Y_test.shape[-1])) + model.compute_offset_entropy_terms()
+        warped_factors = model.warp_all_latent_factors_for_all_trials(args.n_configs, args.n_trials)
+        entropy_term = model.compute_offset_entropy_terms()
+        likelihood_term_train = model.compute_log_likelihood(torch.tensor(Y_train), torch.tensor(factor_access_train),
+                                                             warped_factors)
+        likelihood_term_test = model.compute_log_likelihood(torch.tensor(Y_test), torch.tensor(factor_access_test),
+                                                            warped_factors)
+        true_ELBO_train = likelihood_term_train + entropy_term
+        true_ELBO_test = likelihood_term_test + entropy_term
 
     start_epoch = 0
 
@@ -143,11 +147,11 @@ if __name__ == "__main__":
         model.train()
         for Y, access in dataloader:
             optimizer.zero_grad()
-            access = torch.permute(access, (1,0,2))
-            likelihood_term, entropy_term, penalty_term = model.forward(Y=Y, neuron_factor_access=access,
-                                                                        config_indcs=torch.arange(Y.shape[-1]),
-                                                                        tau_beta=args.tau_beta, tau_budget=args.tau_budget,
-                                                                        tau_sigma1=args.tau_sigma1, tau_sigma2=args.tau_sigma2)
+            access = torch.permute(access, (1, 0, 2))
+            likelihood_term, entropy_term, penalty_term, warped_factors = (
+                model.forward(Y=Y, neuron_factor_access=access,
+                              tau_beta=args.tau_beta, tau_budget=args.tau_budget,
+                              tau_sigma1=args.tau_sigma1, tau_sigma2=args.tau_sigma2))
             loss = -(likelihood_term + entropy_term + penalty_term)
             loss.backward()
             optimizer.step()
@@ -163,21 +167,16 @@ if __name__ == "__main__":
             stdevs_mses.append(F.mse_loss(model.config_peak_offset_stdevs, torch.tensor(data.config_peak_offset_stdevs)).item())
             ltri_mses.append(F.mse_loss(model.trial_peak_offset_covar_ltri, torch.tensor(data.trial_peak_offset_covar_ltri)).item())
 
-            likelihood_term, entropy_term, penalty_term = model.forward(Y=torch.tensor(Y_train),
-                                                                        neuron_factor_access=torch.tensor(factor_access_train),
-                                                                        config_indcs=torch.arange(Y_train.shape[-1]),
-                                                                        tau_beta=args.tau_beta, tau_budget=args.tau_budget,
-                                                                        tau_sigma1=args.tau_sigma1, tau_sigma2=args.tau_sigma2)
-            losses_train.append((likelihood_term + entropy_term + penalty_term).item())
-            log_likelihoods_train.append((likelihood_term + entropy_term).item())
+            likelihood_term_train = model.compute_log_likelihood(torch.tensor(Y_train), torch.tensor(factor_access_train),
+                                                                 warped_factors)
+            likelihood_term_test = model.compute_log_likelihood(torch.tensor(Y_test), torch.tensor(factor_access_test),
+                                                                warped_factors)
 
-            likelihood_term, entropy_term, penalty_term = model.forward(Y=torch.tensor(Y_test),
-                                                                        neuron_factor_access=torch.tensor(factor_access_test),
-                                                                        config_indcs=torch.arange(Y_test.shape[-1]),
-                                                                        tau_beta=args.tau_beta, tau_budget=args.tau_budget,
-                                                                        tau_sigma1=args.tau_sigma1, tau_sigma2=args.tau_sigma2)
-            losses_test.append((likelihood_term + entropy_term + penalty_term).item())
-            log_likelihoods_test.append((likelihood_term + entropy_term).item())
+            losses_train.append((likelihood_term_train + entropy_term + penalty_term).item())
+            log_likelihoods_train.append((likelihood_term_train + entropy_term).item())
+
+            losses_test.append((likelihood_term_test + entropy_term + penalty_term).item())
+            log_likelihoods_test.append((likelihood_term_test + entropy_term).item())
 
         if epoch % args.log_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             end_time = time.time()  # Record the end time of the epoch

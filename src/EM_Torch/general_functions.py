@@ -32,8 +32,8 @@ def get_parser():
     parser.add_argument('--intensity_mltply', type=float, default=25, help='Latent factor intensity multiplier')
     parser.add_argument('--intensity_bias', type=float, default=1, help='Latent factor intensity bias')
     parser.add_argument('--param_seed', type=int_or_str, default='', help='options are: seed (int), Truth (str)')
-    parser.add_argument('--log_interval', type=int, default=100, metavar='N', help='report interval (default: 100')
-    parser.add_argument('--eval_interval', type=int, default=20, metavar='N', help='report interval (default: 10')
+    parser.add_argument('--log_interval', type=int, default=10, metavar='N', help='report interval (default: 100')
+    parser.add_argument('--eval_interval', type=int, default=10, metavar='N', help='report interval (default: 10')
     parser.add_argument('--batch_size', type=int_or_str, default=5, help='the batch size for training')
 
     parser.add_argument('--nhid', type=int, default=150, help='number of hidden units per layer (default: 150)')

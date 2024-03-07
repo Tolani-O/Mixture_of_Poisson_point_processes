@@ -2,7 +2,7 @@ import os
 import sys
 sys.path.append(os.path.abspath('.'))
 from src.EM_Torch.simulate_data_multitrial import DataAnalyzer
-from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
+from src.EM_Torch.LikelihoodModel import LikelihoodModel
 from src.EM_Torch.general_functions import load_model_checkpoint, softplus, plot_spikes, \
     plot_intensity_and_latents, create_relevant_files, get_parser, plot_outputs, \
     write_log_and_model, write_losses, plot_losses, CustomDataset
@@ -18,11 +18,11 @@ if args.param_seed == '':
     args.param_seed = np.random.randint(0, 2 ** 32 - 1)
 args.data_seed = np.random.randint(0, 2 ** 32 - 1)
 
-# args.n_trials = 5  # R
-# args.n_configs = 5  # C
-# args.n_trial_samples = 4  # M
-# args.n_config_samples = 4  # N
-# args.K = 10  # K
+args.n_trials = 5  # R
+args.n_configs = 5  # C
+args.n_trial_samples = 4  # M
+args.n_config_samples = 4  # N
+args.K = 3  # K
 
 # args.folder_name = ''
 # args.load = True
@@ -71,30 +71,29 @@ else:
     true_likelihood_test = data.compute_log_likelihood(Y_test, intensities_test)
 
     # initialize the model with training data and ground truth params
-    model = LikelihoodELBOModel(stim_time, args.n_trial_samples, args.n_config_samples)
-    model.init_ground_truth(data.beta.shape[0],
-                            torch.tensor(data.beta).float(), torch.tensor(data.alpha).float(),
+    model = LikelihoodModel(stim_time)
+    model.init_ground_truth(torch.tensor(data.beta).float(), torch.tensor(data.alpha).float(),
                             torch.tensor(data.theta).float(), torch.tensor(data.pi).float(),
                             torch.tensor(data.config_peak_offset_stdevs).float(),
-                            torch.tensor(data.trial_peak_offset_covar_ltri).float())
+                            torch.tensor(data.trial_peak_offset_covar_ltri).float(),
+                            args.n_configs, args.n_trials, args.K)
 
     model.eval()
     with torch.no_grad():
-        warped_factors = model.warp_all_latent_factors_for_all_trials(args.n_configs, args.n_trials)
-        likelihood_term_train = model.compute_log_elbo(torch.tensor(Y_train), torch.tensor(factor_access_train),
-                                                       warped_factors)
-        entropy_term_train = model.compute_offset_entropy_terms()
-        likelihood_term_test = model.compute_log_elbo(torch.tensor(Y_test), torch.tensor(factor_access_test),
-                                                      warped_factors)
-        entropy_term_test = model.compute_offset_entropy_terms()
-        true_ELBO_train = likelihood_term_train + entropy_term_train
-        true_ELBO_test = likelihood_term_test + entropy_term_test
+        warped_factors = model.warp_all_latent_factors_for_all_trials()
+        entropy_term = model.compute_offset_entropy_terms()
+        likelihood_term_train = model.compute_log_elbo_peak_times(torch.tensor(Y_train), torch.tensor(factor_access_train),
+                                                                  warped_factors)
+        likelihood_term_test = model.compute_log_elbo_peak_times(torch.tensor(Y_test), torch.tensor(factor_access_test),
+                                                                 warped_factors)
+        true_ELBO_train = likelihood_term_train + entropy_term
+        true_ELBO_test = likelihood_term_test + entropy_term
 
     start_epoch = 0
 
     num_factors = data.beta.shape[0]
     # model.init_ground_truth(num_factors, torch.zeros_like(torch.tensor(data.beta)).float())
-    model.init_ground_truth(num_factors, torch.tensor(data.beta).float())
+    # model.init_ground_truth(num_factors, torch.tensor(data.beta).float())
     # la = int(num_factors/args.A)
     # factor_indcs = [i*la for i in range(args.A)]
     # model.init_from_data(Y=torch.tensor(Y_train).float(), neuron_factor_access=torch.tensor(factor_access_train).float(),
@@ -128,15 +127,7 @@ print(output_str)
 
 if __name__ == "__main__":
     log_likelihoods_train = []
-    losses_train = []
     log_likelihoods_test = []
-    losses_test = []
-    beta_mses = []
-    alpha_mses = []
-    theta_mses = []
-    pi_mses = []
-    stdevs_mses = []
-    ltri_mses = []
     total_time = 0
     # For debugging
     # torch.autograd.set_detect_anomaly(True)
@@ -145,34 +136,22 @@ if __name__ == "__main__":
 
         model.train()
         optimizer.zero_grad()
-        warped_factors = model.warp_all_latent_factors_for_all_trials(args.n_configs, args.n_trials)
-        penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_budget, args.tau_sigma1, args.tau_sigma2)
-        entropy_term = 0
+        warped_factors = model.warp_all_latent_factors_for_all_trials()
+        entropy_term = model.compute_offset_entropy_terms()
         likelihood_term = 0
         for Y, access in dataloader:
             access = torch.permute(access, (1, 0, 2))
-            likelihood_term += model.compute_log_elbo(Y, access, warped_factors)
-            entropy_term += model.compute_offset_entropy_terms()
-        loss = -(likelihood_term + entropy_term + penalty_term)
+            likelihood_term += model.compute_log_elbo_peak_times(Y, access, warped_factors)
+        loss = -(likelihood_term + entropy_term)
         loss.backward()
         optimizer.step()
-        losses_train.append((likelihood_term + entropy_term + penalty_term).item())
         log_likelihoods_train.append((likelihood_term + entropy_term).item())
 
         if epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             model.eval()
             with torch.no_grad():
-                beta_mses.append(F.mse_loss(model.beta, torch.tensor(data.beta)).item())
-                alpha_mses.append(F.mse_loss(model.alpha, torch.tensor(data.alpha)).item())
-                theta_mses.append(F.mse_loss(model.theta, torch.tensor(data.theta)).item())
-                pi_mses.append(F.mse_loss(model.pi, torch.tensor(data.pi)).item())
-                stdevs_mses.append(F.mse_loss(model.config_peak_offset_stdevs, torch.tensor(data.config_peak_offset_stdevs)).item())
-                ltri_mses.append(F.mse_loss(model.trial_peak_offset_covar_ltri, torch.tensor(data.trial_peak_offset_covar_ltri)).item())
-
-                likelihood_term = model.compute_log_elbo(torch.tensor(Y_test), torch.tensor(factor_access_test),
-                                                         warped_factors)
-                entropy_term = model.compute_offset_entropy_terms()
-                losses_test.append((likelihood_term + entropy_term + penalty_term).item())
+                likelihood_term = model.compute_log_elbo_peak_times(torch.tensor(Y_test), torch.tensor(factor_access_test),
+                                                                    warped_factors)
                 log_likelihoods_test.append((likelihood_term + entropy_term).item())
 
         if epoch % args.log_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
@@ -180,50 +159,21 @@ if __name__ == "__main__":
             elapsed_time = end_time - start_time  # Calculate the elapsed time for the epoch
             total_time += elapsed_time  # Calculate the total time for training
             cur_log_likelihood_train = log_likelihoods_train[-1]
-            cur_loss_train = losses_train[-1]
             cur_log_likelihood_test = log_likelihoods_test[-1]
-            cur_loss_test = losses_test[-1]
             with torch.no_grad():
-                smoothness_budget_constrained = F.softmax(model.smoothness_budget, dim=0).numpy()
                 latent_factors = F.softplus(model.beta).numpy()
                 warped_factors = None # model.warp_all_latent_factors_for_all_trials(args.n_configs, args.n_trials).numpy()
             output_str = (
                 f"Epoch: {epoch:2d}, Elapsed Time: {elapsed_time / 60:.2f} mins, Total Time: {total_time / (60 * 60):.2f} hrs,\n"
-                f"Loss train: {cur_loss_train:.5f}, Log Likelihood train: {cur_log_likelihood_train:.5f},\n"
-                f"Loss test: {cur_loss_test:.5f}, Log Likelihood test: {cur_log_likelihood_test:.5f},\n"
-                f"lr: {args.lr:.5f}, smoothness_budget: {smoothness_budget_constrained.T}\n\n")
+                f"Log Likelihood train: {cur_log_likelihood_train:.5f}, Log Likelihood test: {cur_log_likelihood_test:.5f},\n"
+                f"lr: {args.lr:.5f}\n\n")
             write_log_and_model(output_str, output_dir, epoch, model)
-            plot_outputs(latent_factors, warped_factors, stim_time, output_dir, 'Train', epoch)
             is_empty = start_epoch == 0 and epoch == 0
             write_losses(log_likelihoods_train, 'Train', 'Likelihood', output_dir, is_empty)
-            write_losses(losses_train, 'Train', 'Loss', output_dir, is_empty)
             write_losses(log_likelihoods_test, 'Test', 'Likelihood', output_dir, is_empty)
-            write_losses(losses_test, 'Test', 'Loss', output_dir, is_empty)
-            write_losses(beta_mses, 'Test', 'beta_MSE', output_dir, is_empty)
-            write_losses(alpha_mses, 'Test', 'alpha_MSE', output_dir, is_empty)
-            write_losses(theta_mses, 'Test', 'theta_MSE', output_dir, is_empty)
-            write_losses(pi_mses, 'Test', 'pi_MSE', output_dir, is_empty)
-            write_losses(stdevs_mses, 'Test', 'stdevs_MSE', output_dir, is_empty)
-            write_losses(ltri_mses, 'Test', 'ltri_MSE', output_dir, is_empty)
             plot_losses(true_ELBO_train, output_dir, 'Train', 'Likelihood')
-            plot_losses(None, output_dir, 'Train', 'Loss', 20)
             plot_losses(true_ELBO_test, output_dir, 'Test', 'Likelihood')
-            plot_losses(None, output_dir, 'Test', 'Loss', 1)
-            plot_losses(None, output_dir, 'Test', 'beta_MSE')
-            plot_losses(None, output_dir, 'Test', 'alpha_MSE')
-            plot_losses(None, output_dir, 'Test', 'theta_MSE')
-            plot_losses(None, output_dir, 'Test', 'pi_MSE')
-            plot_losses(None, output_dir, 'Test', 'stdevs_MSE')
-            plot_losses(None, output_dir, 'Test', 'ltri_MSE')
             log_likelihoods_train = []
-            losses_train = []
             log_likelihoods_test = []
-            losses_test = []
-            beta_mses = []
-            alpha_mses = []
-            theta_mses = []
-            pi_mses = []
-            stdevs_mses = []
-            ltri_mses = []
             print(output_str)
             start_time = time.time()

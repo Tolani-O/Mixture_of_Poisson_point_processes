@@ -261,8 +261,7 @@ class LikelihoodELBOModel(nn.Module):
 
         Sigma = self.trial_peak_offset_covar_ltri @ self.trial_peak_offset_covar_ltri.T
         inv_Sigma = torch.linalg.inv(Sigma)
-        sigma_Penalty2 = -tau_sigma2 * (
-                    torch.sum(torch.abs(inv_Sigma)) - torch.sum(torch.abs(torch.diag(inv_Sigma))))
+        sigma_Penalty2 = -tau_sigma2 * (torch.sum(torch.abs(inv_Sigma)) - torch.sum(torch.abs(torch.diag(inv_Sigma))))
 
         latent_factors = F.softplus(self.beta)
         smoothness_budget_constrained = F.softmax(torch.cat([torch.zeros(1), self.smoothness_budget]), dim=0)
@@ -274,12 +273,10 @@ class LikelihoodELBOModel(nn.Module):
         return penalty_term
 
 
-    def forward(self, Y, neuron_factor_access, tau_beta, tau_budget, tau_sigma1, tau_sigma2):
-        _, _, n_trials, n_configs = Y.shape
-        warped_factors = self.warp_all_latent_factors_for_all_trials(n_configs, n_trials)
-        likelihood_term = self.compute_log_elbo(Y, neuron_factor_access, warped_factors)
-        entropy_term = self.compute_offset_entropy_terms()
-        penalty_term = self.compute_penalty_terms(tau_beta, tau_budget, tau_sigma1, tau_sigma2)
-        return likelihood_term, entropy_term, penalty_term, warped_factors
-
-
+    # def forward(self, Y, neuron_factor_access, tau_beta, tau_budget, tau_sigma1, tau_sigma2):
+    #     _, _, n_trials, n_configs = Y.shape
+    #     warped_factors = self.warp_all_latent_factors_for_all_trials(n_configs, n_trials)
+    #     likelihood_term = self.compute_log_elbo(Y, neuron_factor_access, warped_factors)
+    #     entropy_term = self.compute_offset_entropy_terms()
+    #     penalty_term = self.compute_penalty_terms(tau_beta, tau_budget, tau_sigma1, tau_sigma2)
+    #     return likelihood_term, entropy_term, penalty_term, warped_factors

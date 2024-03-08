@@ -136,23 +136,22 @@ class LikelihoodModel(nn.Module):
         return warped_factors
 
 
-    def compute_log_elbo(self, Y, neuron_factor_access, warped_factors): # and first 2 entropy terms
+    def compute_log_elbo(self, Y, neuron_factor_access, warped_factors):  # and first 2 entropy terms
         # Weight Matrices
 
         # warped_factors # L x T x M x N x R x C
         # Y # K x T x R x C
         # Y_times_N_matrix  # K x L x T x M x N x R x C
         # sum_Y_times_N_matrix  # K x L x M x N x C
-        # neuron_factor_access  #  C x K x L
         Y_times_N_matrix = torch.einsum('ktrc,ckl,ltmnrc->kltmnrc', Y, neuron_factor_access, warped_factors)
         sum_Y_times_N_matrix = torch.sum(Y_times_N_matrix, dim=(2, 5))
         exp_N_matrix = torch.exp(warped_factors)
         # sum_Y_term # K x C
         # logterm1  # K x C x L
         # logterm2  # L x M x N x C
-        sum_Y_term = torch.sum(Y, dim=(1,2)) # K x C
-        logterm1 = sum_Y_term[:,:,None] + F.softplus(self.alpha)[None,None,:]
-        logterm2 = self.dt * torch.sum(exp_N_matrix, dim=(1, 4)) + F.softplus(self.theta)[:,None,None,None]
+        sum_Y_term = torch.sum(Y, dim=(1, 2))  # K x C
+        logterm1 = sum_Y_term[:, :, None] + F.softplus(self.alpha)[None, None, :]
+        logterm2 = self.dt * torch.sum(exp_N_matrix, dim=(1, 4)) + F.softplus(self.theta)[:, None, None, None]
         # logterm # K x L x M x N x C
         logterm = torch.einsum('kcl,ckl,lmnc->klmnc', logterm1, neuron_factor_access, torch.log(logterm2))
         # alphalogtheta # 1 x L x 1 x 1 x 1
@@ -160,7 +159,7 @@ class LikelihoodModel(nn.Module):
         # sum_Y_times_logalpha  # K x C x L
         sum_Y_times_logalpha = torch.einsum('kc,ckl,l->klc', sum_Y_term, neuron_factor_access, torch.log(F.softplus(self.alpha)))
         # sum_Y_times_logalpha # K x L x 1 x 1 x C
-        sum_Y_times_logalpha = sum_Y_times_logalpha[:,:,None,None,:]
+        sum_Y_times_logalpha = sum_Y_times_logalpha[:, :, None, None, :]
         # logpi # 1 x L x 1 x 1 x 1
         logpi_expand = torch.log(F.softmax(torch.cat([torch.zeros(1), self.pi]), dim=0)).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
         alpha_expand = F.softplus(self.alpha).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
@@ -173,15 +172,19 @@ class LikelihoodModel(nn.Module):
         W_CMNK_tensor = F.softmax(U_tensor, dim=1)
 
         # W_tensor # K x L x M x N x C
-        W_tensor = W_CMNK_tensor.detach()
+        # neuron_factor_access  #  C x K x L
+        W_tensor = (torch.permute(neuron_factor_access, (1, 2, 0)).unsqueeze(2).unsqueeze(3) * W_CMNK_tensor).detach()
 
         # A_tensor # K x L x M x N x C
-        A_tensor = torch.einsum('kcl,ckl,lmnc->klmnc', logterm1, neuron_factor_access, 1/logterm2)
+        A_tensor = torch.einsum('kcl,ckl,lmnc->klmnc', logterm1, neuron_factor_access, 1 / logterm2).detach()
+        B_tensor = (torch.permute(torch.digamma(logterm1), (0, 2, 1))[:, :, None, None, :] -
+                    torch.log(logterm2[None, :, :, :, :])).detach()
 
         # Liklelihood Terms
-        elbo_term = (sum_Y_times_N_matrix - A_tensor * logterm2[None,:,:,:,:] - torch.lgamma(alpha_expand) + alpha_expand *
-                           (torch.log(theta_expand) + torch.permute(torch.digamma(logterm1), (0, 2, 1))[:,:,None,None,:] -
-                            torch.log(logterm2[None,:,:,:,:])) + logpi_expand)
+        elbo_term = (sum_Y_times_N_matrix - A_tensor * logterm2[None, :, :, :, :] - torch.lgamma(alpha_expand) +
+                     alpha_expand * (torch.log(theta_expand) + B_tensor) + logpi_expand)
+
+        # elbo_term # K x L x M x N x C
         elbo_term = torch.sum(W_tensor * elbo_term)
 
         return elbo_term
@@ -189,12 +192,11 @@ class LikelihoodModel(nn.Module):
 
     def compute_log_elbo_peak_times(self, Y, neuron_factor_access, warped_factors):  # and first 2 entropy terms
         # Weight Matrices
-        self.warped_factors = warped_factors
+
         # warped_factors # L x T x M x N x R x C
         # Y # K x T x R x C
         # Y_times_N_matrix  # K x L x T x M x N x R x C
         # sum_Y_times_N_matrix  # K x L x M x N x C
-        # neuron_factor_access  #  C x K x L
         Y_times_N_matrix = torch.einsum('ktrc,ckl,ltmnrc->kltmnrc', Y, neuron_factor_access, warped_factors)
         sum_Y_times_N_matrix = torch.sum(Y_times_N_matrix, dim=(2, 5))
         exp_N_matrix = torch.exp(warped_factors)
@@ -222,28 +224,31 @@ class LikelihoodModel(nn.Module):
         W_CMNK_tensor = F.softmax(U_tensor, dim=1)
 
         # W_tensor # K x L x M x N x C
-        W_tensor = W_CMNK_tensor.detach()
+        # neuron_factor_access  #  C x K x L
+        W_tensor = (torch.permute(neuron_factor_access, (1, 2, 0)).unsqueeze(2).unsqueeze(3) * W_CMNK_tensor).detach()
 
         # A_tensor # K x L x M x N x C
-        A_tensor = torch.einsum('kcl,ckl,lmnc->klmnc', logterm1, neuron_factor_access, 1/logterm2)
+        A_tensor = torch.einsum('kcl,ckl,lmnc->klmnc', logterm1, neuron_factor_access, 1 / logterm2).detach()
 
         # Liklelihood Terms
-        elbo_term = (sum_Y_times_N_matrix - A_tensor * logterm2[None,:,:,:,:])
+        elbo_term = (sum_Y_times_N_matrix - A_tensor * logterm2[None, :, :, :, :])
+
+        # elbo_term # K x L x M x N x C
         elbo_term = torch.sum(W_tensor * elbo_term)
 
         return elbo_term
 
 
-    def compute_log_elbo_factor_assignments(self, Y, neuron_factor_access, factor_assignment_train):  # and first 2 entropy terms
+    def compute_log_elbo_factor_assignments(self, Y, neuron_factor_access, warped_factors):  # and first 2 entropy terms
         # Weight Matrices
 
         # warped_factors # L x T x M x N x R x C
         # Y # K x T x R x C
         # Y_times_N_matrix  # K x L x T x M x N x R x C
         # sum_Y_times_N_matrix  # K x L x M x N x C
-        Y_times_N_matrix = torch.einsum('ktrc,ltmnrc->kltmnrc', Y, self.warped_factors)
+        Y_times_N_matrix = torch.einsum('ktrc,ckl,ltmnrc->kltmnrc', Y, neuron_factor_access, warped_factors)
         sum_Y_times_N_matrix = torch.sum(Y_times_N_matrix, dim=(2, 5))
-        exp_N_matrix = torch.exp(self.warped_factors)
+        exp_N_matrix = torch.exp(warped_factors)
         # sum_Y_term # K x C
         # logterm1  # K x C x L
         # logterm2  # L x M x N x C
@@ -256,56 +261,51 @@ class LikelihoodModel(nn.Module):
         alpha_expand = F.softplus(self.alpha).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
         theta_expand = F.softplus(self.theta).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
 
+        W_tensor = torch.permute(neuron_factor_access, (1, 2, 0)).unsqueeze(2).unsqueeze(3)
         # A_tensor # K x L x M x N x C
-        A_tensor = torch.einsum('kcl,lmnc->klmnc', logterm1, 1 / logterm2)
+        A_tensor = torch.einsum('kcl,ckl,lmnc->klmnc', logterm1, neuron_factor_access, 1 / logterm2).detach()
+        B_tensor = (torch.permute(torch.digamma(logterm1), (0, 2, 1))[:, :, None, None, :] -
+                    torch.log(logterm2[None, :, :, :, :])).detach()
 
         # Liklelihood Terms
-        elbo_term = (sum_Y_times_N_matrix - A_tensor * logterm2[None, :, :, :, :] - torch.lgamma(alpha_expand) + alpha_expand *
-                     (torch.log(theta_expand) + torch.permute(torch.digamma(logterm1), (0, 2, 1))[:, :, None, None, :] -
-                      torch.log(logterm2[None, :, :, :, :])) + logpi_expand)
-        # neuron_factor_access  #  C x K x L
+        elbo_term = (sum_Y_times_N_matrix - A_tensor * logterm2[None, :, :, :, :] - torch.lgamma(alpha_expand) +
+                     alpha_expand * (torch.log(theta_expand) + B_tensor) + logpi_expand)
+
         # elbo_term # K x L x M x N x C
-        elbo_term = torch.permute(neuron_factor_access, (1,2,0)).unsqueeze(2).unsqueeze(3) * elbo_term
-        elbo_term = torch.permute(elbo_term.squeeze(), (2, 0, 1))
-        # elbo_term # C x K x L
-        # neuron_factor_assignment  # C x K x L
-        self.neuron_factor_assignment = torch.where(elbo_term == torch.max(elbo_term, dim=2, keepdim=True).values, 1, 0)
+        elbo_term = W_tensor * elbo_term
 
-        # #debugging
-        anp = neuron_factor_access.detach().numpy()
-        enp = elbo_term.detach().numpy()
-        nnp = self.neuron_factor_assignment.detach().numpy()
-
-        return self.neuron_factor_assignment, enp
+        return elbo_term
 
 
     def compute_offset_entropy_terms(self):  # last 2 entropy terms
         # Entropy1 Terms
         dim = self.config_peak_offset_stdevs.shape[0]
 
-        Sigma1 = torch.diag(F.softplus(self.config_peak_offset_stdevs)) @ torch.diag(
-            F.softplus(self.config_peak_offset_stdevs)).t()
+        Sigma1 = torch.diag(F.softplus(self.config_peak_offset_stdevs)) @ torch.diag(F.softplus(self.config_peak_offset_stdevs)).t()
         det_Sigma1 = torch.linalg.det(Sigma1)
         inv_Sigma1 = torch.linalg.inv(Sigma1)
-        prod_term1 = torch.einsum('ncl,lj,ncj->nc', self.transformed_config_peak_offset_samples, inv_Sigma1,
-                                  self.transformed_config_peak_offset_samples)  # sum over l
+        prod_term1 = torch.einsum('ncl,lj,ncj->nc', self.transformed_config_peak_offset_samples, inv_Sigma1, self.transformed_config_peak_offset_samples)  # sum over l
         # entropy_term1  # N x C
         entropy_term1 = -0.5 * torch.sum(torch.log((2 * torch.pi) ** dim * det_Sigma1) + prod_term1)
 
         Sigma2 = self.trial_peak_offset_covar_ltri @ self.trial_peak_offset_covar_ltri.t()
         det_Sigma2 = torch.linalg.det(Sigma2)
         inv_Sigma2 = torch.linalg.inv(Sigma2)
-        prod_term2 = torch.einsum('mrcl,lj,mrcj->mrc', self.transformed_trial_peak_offset_samples, inv_Sigma2,
-                                  self.transformed_trial_peak_offset_samples)  # sum over l
+        prod_term2 = torch.einsum('mrcl,lj,mrcj->mrc', self.transformed_trial_peak_offset_samples, inv_Sigma2, self.transformed_trial_peak_offset_samples)  # sum over l
         # entropy_term2  # M x C
         entropy_term2 = -0.5 * torch.sum(torch.log((2 * torch.pi) ** dim * det_Sigma2) + prod_term2)
 
         entropy_term = entropy_term1 + entropy_term2
         return entropy_term
 
-    def compute_neuron_factor_assignment(self, Y, neuron_factor_access):
-        cluster_probs = self.compute_log_elbo_factor_assignments(Y, neuron_factor_access)
-        return cluster_probs
+
+    def compute_neuron_factor_assignment(self, Y, neuron_factor_access, warped_factors):
+        likelihoods = self.compute_log_elbo_factor_assignments(Y, neuron_factor_access, warped_factors)
+        # likelihoods # K x L x M x N x C
+        likelihoods = torch.permute(likelihoods.squeeze(), (2, 0, 1))
+        # likelihoods # C x K x L
+        self.neuron_factor_assignment = torch.where(likelihoods == torch.max(likelihoods, dim=2, keepdim=True).values, 1, 0)
+        return self.neuron_factor_assignment
 
 
     def forward(self, Y, neuron_factor_access):

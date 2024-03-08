@@ -48,11 +48,10 @@ class DataAnalyzer:
         self.theta = np.random.normal(size=n_factors)
         self.pi = np.random.normal(size=n_factors-1)
         self.config_peak_offset_stdevs = np.random.normal(size=2 * n_factors)
-        bounds = 0.05
         matrix = np.tril(np.random.normal(size=(2 * n_factors, 2 * n_factors)))
         # Ensure diagonal elements are positive
         for i in range(min(matrix.shape)):
-            matrix[i, i] += softplus(matrix[i, i])
+            matrix[i, i] += 2*softplus(matrix[i, i])
         # Make it a learnable parameter
         self.trial_peak_offset_covar_ltri = matrix
         # solely to check if the covariance matrix is positive semi-definite
@@ -100,16 +99,17 @@ class DataAnalyzer:
 
     def generate_neuron_gains_factor_assignments_condition_assignment_and_factor_access(self, num_neurons, num_areas, num_conditions):
 
-        num_factors = len(self.pi)+1
+        num_factors = len(self.config_peak_offset_stdevs)//2
+        factors_per_area = num_factors//num_areas
         ratio = softmax(np.hstack([np.zeros(1), self.pi]), axis=0)
         neuron_factor_assignments = np.random.choice(num_factors, num_neurons*num_conditions, p=ratio).reshape(num_conditions, -1)
         neuron_factor_access = np.zeros((num_conditions, num_neurons, num_factors))
         for a in range(num_areas):
-            area_start_indx = a * (num_factors//2)
-            neuron_factor_access[((area_start_indx<=neuron_factor_assignments)&((area_start_indx+2)>=neuron_factor_assignments)), (3*a):(3*a+3)] = 1
-        neuron_gains = (np.random.gamma(softplus(self.alpha[neuron_factor_assignments.flatten()]),
-                                        softplus(self.theta[neuron_factor_assignments.flatten()]))
-                        .reshape(neuron_factor_assignments.shape))
+            area_start_indx = a*factors_per_area
+            neuron_factor_access[((area_start_indx<=neuron_factor_assignments)&((area_start_indx+factors_per_area)>neuron_factor_assignments)),
+                                 area_start_indx:(area_start_indx+factors_per_area)] = 1
+        neuron_gains = np.random.gamma(softplus(self.alpha[neuron_factor_assignments]),
+                                       softplus(self.theta[neuron_factor_assignments]))
         self.neuron_gains = neuron_gains
         self.neuron_factor_assignments = neuron_factor_assignments
         self.neuron_factor_access = neuron_factor_access
@@ -224,7 +224,16 @@ class DataAnalyzer:
         trial_warped_factors = self.warp_all_latent_factors_for_all_trials().squeeze()
         self.generate_neuron_gains_factor_assignments_condition_assignment_and_factor_access(K, A, n_configs)
         self.generate_spike_trains(trial_warped_factors)
-        return self.Y, self.time, self.neuron_factor_access, self.neuron_intensities
+        indcs = np.indices(self.neuron_factor_assignments.shape)
+        neuron_factor_assignments = np.zeros((n_configs, K, n_factors))
+        neuron_factor_assignments[indcs[0].flatten(), indcs[1].flatten(), self.neuron_factor_assignments.flatten()] = 1
+        self.neuron_factor_assignments = neuron_factor_assignments
+        return self.Y, self.time, self.neuron_factor_access
+
+
+    def get_data_ground_truth(self):
+        return (self.neuron_intensities, self.neuron_factor_assignments, self.transformed_config_peak_offset_samples,
+                self.transformed_trial_peak_offset_samples)
 
     def compute_log_likelihood(self, Y, neuron_intensities):
         likelihood = np.sum(np.log(neuron_intensities) * Y - neuron_intensities * self.dt)

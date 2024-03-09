@@ -209,7 +209,7 @@ class LikelihoodELBOModel(nn.Module):
 
         # logsumexp_U_tensor # K x A x M x N x C
         logsumexp_U_tensor = torch.logsumexp(U_tensor, dim=2)
-        # neuron_factor_access  #  K x A x 1 x 1 x C
+        # neuron_area_access  #  K x A x 1 x 1 x C
         neuron_area_access = neuron_factor_access[:, [i * L_a for i in range(n_areas)], None, None, :]
         # sum_logsumexp_tensor #  M x N x C
         sum_logsumexp_U_tensor = torch.sum(neuron_area_access * logsumexp_U_tensor, dim=(0, 1))
@@ -219,6 +219,7 @@ class LikelihoodELBOModel(nn.Module):
         W_C_tensor = W_C_tensor.detach()
         self.W_C_tensor = W_C_tensor
 
+        # neuron_factor_access  # K x L x C
         # W_tensor # K x L x M x N x C
         W_tensor = (neuron_factor_access.unsqueeze(2).unsqueeze(3) * W_CMNK_tensor * W_C_tensor).detach()
 

@@ -139,8 +139,8 @@ if __name__ == "__main__":
         entropy_term = model.compute_offset_entropy_terms()
         likelihood_term = 0
         for Y, access in dataloader:
-            access = torch.permute(access, (1, 0, 2))
-            likelihood_term += model.compute_log_elbo_peak_times(Y, access, warped_factors)
+            access = torch.permute(access, (0, 2, 1))
+            likelihood_term += model.compute_log_elbo(Y, access, warped_factors, args.A)
         loss = -(likelihood_term + entropy_term)
         loss.backward()
         optimizer.step()
@@ -149,8 +149,7 @@ if __name__ == "__main__":
         if epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             model.eval()
             with torch.no_grad():
-                likelihood_term = model.compute_log_elbo_peak_times(torch.tensor(Y_test), torch.tensor(factor_access_test),
-                                                                    warped_factors)
+                likelihood_term = model.compute_log_elbo(torch.tensor(Y_test), torch.tensor(factor_access_test), warped_factors, args.A)
                 log_likelihoods_test.append((likelihood_term + entropy_term).item())
 
         if epoch % args.log_interval == 0 or epoch == start_epoch + args.num_epochs - 1:

@@ -85,11 +85,11 @@ else:
     with torch.no_grad():
         model.init_ground_truth(torch.tensor(config_offsets_train), torch.tensor(trial_offsets_train))
         likelihood_term_train, entropy_term_train = model.forward(torch.tensor(Y_train), torch.tensor(factor_access_train), args.A)
-        true_ELBO_train = likelihood_term_train + entropy_term_train
+        true_ELBO_train = (1/(Y_train.shape[0] * Y_train.shape[-1])) * likelihood_term_train + (1/Y_train.shape[-1]) * entropy_term_train
 
         model.init_ground_truth(torch.tensor(config_offsets_test), torch.tensor(trial_offsets_test))
         likelihood_term_test, entropy_term_test = model.forward(torch.tensor(Y_test), torch.tensor(factor_access_test), args.A)
-        true_ELBO_test = likelihood_term_test + entropy_term_test
+        true_ELBO_test = (1/(Y_test.shape[0] * Y_test.shape[-1])) * likelihood_term_test + (1/Y_test.shape[-1]) * entropy_term_test
 
     start_epoch = 0
 
@@ -156,8 +156,11 @@ if __name__ == "__main__":
         entropy_term = 0
         likelihood_term = 0
         for Y, access in dataloader:
-            likelihood_term += model.compute_log_elbo(Y, access, warped_factors, args.A)
-            entropy_term += model.compute_offset_entropy_terms()
+            likelihood_term += (1/(Y.shape[0]*Y.shape[-1])) * model.compute_log_elbo(Y, access, warped_factors, args.A)
+            batch_weights = Y_train.shape[0]//args.batch_size
+            batch_add = 1 if Y_train.shape[0] % args.batch_size > 0 else 0
+            entropy_term += (1/((batch_weights+batch_add)*Y.shape[-1])) * model.compute_offset_entropy_terms()
+            # because entropy term depends on W_C_tensor, which depends on Y_kc
         loss = -(likelihood_term + entropy_term + penalty_term)
         loss.backward()
         optimizer.step()
@@ -174,8 +177,8 @@ if __name__ == "__main__":
                 stdevs_mses.append(F.mse_loss(model.config_peak_offset_stdevs, torch.tensor(data.config_peak_offset_stdevs)).item())
                 ltri_mses.append(F.mse_loss(model.trial_peak_offset_covar_ltri, torch.tensor(data.trial_peak_offset_covar_ltri)).item())
 
-                likelihood_term = model.compute_log_elbo(torch.tensor(Y_test), torch.tensor(factor_access_test), warped_factors, args.A)
-                entropy_term = model.compute_offset_entropy_terms()
+                likelihood_term = (1/(Y_test.shape[0]*Y_test.shape[-1])) * model.compute_log_elbo(torch.tensor(Y_test), torch.tensor(factor_access_test), warped_factors, args.A)
+                entropy_term = (1/Y_test.shape[-1]) * model.compute_offset_entropy_terms()
                 losses_test.append((likelihood_term + entropy_term + penalty_term).item())
                 log_likelihoods_test.append((likelihood_term + entropy_term).item())
 

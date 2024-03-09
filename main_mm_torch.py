@@ -27,7 +27,7 @@ args.data_seed = np.random.randint(0, 2 ** 32 - 1)
 # args.folder_name = ''
 # args.load = True
 # args.load_epoch = 0
-# args.data_seed = 0
+# args.data_seed = 3259374874
 
 # args.notes = 'Full'
 # args.lr = 0.001
@@ -60,26 +60,34 @@ else:
     data = DataAnalyzer().initialize(A=args.A, intensity_mltply=args.intensity_mltply, intensity_bias=args.intensity_bias)
     # Training data
     Y_train, stim_time, factor_access_train = data.sample_data(K=args.K, A=args.A, n_configs=args.n_configs, n_trials=args.n_trials)
-    intensities_train, factor_assignment_train, config_offsets_train, trial_offsets_train = data.get_data_ground_truth()
+    (intensities_train, factor_assignment_train, factor_assignment_onehot_train, config_offsets_train,
+     trial_offsets_train) = data.get_data_ground_truth()
     # Validation data
     Y_test, _, factor_access_test = data.sample_data(K=args.K, A=args.A, n_configs=args.n_configs, n_trials=args.n_trials)
-    intensities_test, factor_assignment_test, config_offsets_test, trial_offsets_test = data.get_data_ground_truth()
+    (intensities_test, factor_assignment_test, factor_assignment_onehot_test, config_offsets_test,
+     trial_offsets_test) = data.get_data_ground_truth()
+
+    # true_likelihood_train = data.compute_log_likelihood(Y_train, intensities_train, factor_assignment_train,
+    #                                                     config_offsets_train, trial_offsets_train)
+    # true_likelihood_test = data.compute_log_likelihood(Y_test, intensities_test, factor_assignment_test,
+    #                                                    config_offsets_test, trial_offsets_test)
 
     # initialize the model with ground truth params
     model = LikelihoodModel(stim_time)
-    model.init_params(torch.tensor(data.beta).float(), torch.tensor(data.alpha).float(),
-                      torch.tensor(data.theta).float(), torch.tensor(data.pi).float(),
-                      torch.tensor(data.config_peak_offset_stdevs).float(),
-                      torch.tensor(data.trial_peak_offset_covar_ltri).float(),
+    model.init_params(torch.tensor(data.beta), torch.tensor(data.alpha),
+                      torch.tensor(data.theta), torch.tensor(data.pi),
+                      torch.tensor(data.config_peak_offset_stdevs),
+                      torch.tensor(data.trial_peak_offset_covar_ltri),
                       args.n_configs, args.K)
 
     model.eval()
     with torch.no_grad():
-        model.init_ground_truth(torch.tensor(config_offsets_train).float(), torch.tensor(trial_offsets_train).float())
-        likelihood_term_train, entropy_term_train = model.forward(torch.tensor(Y_train), torch.tensor(factor_access_train))
+        model.init_ground_truth(torch.tensor(config_offsets_train), torch.tensor(trial_offsets_train))
+        likelihood_term_train, entropy_term_train = model.forward(torch.tensor(Y_train), torch.tensor(factor_access_train), args.A)
         true_ELBO_train = likelihood_term_train + entropy_term_train
-        model.init_ground_truth(torch.tensor(config_offsets_test).float(), torch.tensor(trial_offsets_test).float())
-        likelihood_term_test, entropy_term_test = model.forward(torch.tensor(Y_test), torch.tensor(factor_access_test))
+
+        model.init_ground_truth(torch.tensor(config_offsets_test), torch.tensor(trial_offsets_test))
+        likelihood_term_test, entropy_term_test = model.forward(torch.tensor(Y_test), torch.tensor(factor_access_test), args.A)
         true_ELBO_test = likelihood_term_test + entropy_term_test
 
     start_epoch = 0
@@ -168,8 +176,3 @@ if __name__ == "__main__":
             log_likelihoods_test = []
             print(output_str)
             start_time = time.time()
-
-            with torch.no_grad():
-                mx, enp = model.compute_log_elbo_factor_assignments(torch.tensor(Y_train), torch.tensor(factor_access_train), factor_assignment_train)
-            a = mx.numpy()
-            factor_assignment_train

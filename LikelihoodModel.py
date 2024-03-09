@@ -165,14 +165,16 @@ class LikelihoodModel(nn.Module):
 
         # U_tensor # K x L x M x N x C
         U_tensor = sum_Y_times_N_matrix - logterm + alphalogtheta + sum_Y_times_logalpha + logpi_expand
-        U_tensor = U_tensor.reshape(U_tensor.shape[0], U_tensor.shape[1] // n_areas, U_tensor.shape[1] // n_areas,
-                                    U_tensor.shape[2], U_tensor.shape[3], U_tensor.shape[4])
+        # U_tensor # K x A x La x M x N x C
+        L_a = U_tensor.shape[1] // n_areas
+        U_tensor = U_tensor.reshape(U_tensor.shape[0], n_areas, L_a, U_tensor.shape[2], U_tensor.shape[3],
+                                    U_tensor.shape[4])
         # W_CMNK_tensor # K x L x M x N x C
         W_CMNK_tensor = F.softmax(U_tensor, dim=2).reshape(sum_Y_times_N_matrix.shape)
 
+        # neuron_factor_access  # K x L x C
         # W_tensor # K x L x M x N x C
-        # neuron_factor_access  #  C x K x L
-        W_tensor = (torch.permute(neuron_factor_access, (1, 2, 0)).unsqueeze(2).unsqueeze(3) * W_CMNK_tensor).detach()
+        W_tensor = (neuron_factor_access.unsqueeze(2).unsqueeze(3) * W_CMNK_tensor).detach()
         self.W_tensor = W_tensor
 
         # A_tensor # K x L x M x N x C

@@ -228,7 +228,8 @@ class DataAnalyzer:
         indcs = np.indices(self.neuron_factor_assignments.shape)
         neuron_factor_assignments = np.zeros((n_configs, K, n_factors))
         neuron_factor_assignments[indcs[0].flatten(), indcs[1].flatten(), self.neuron_factor_assignments.flatten()] = 1
-        self.neuron_factor_assignments_onehot = neuron_factor_assignments
+        self.neuron_factor_assignments_onehot = np.transpose(neuron_factor_assignments, (1, 2, 0))
+        self.neuron_factor_access = np.transpose(self.neuron_factor_access, (1, 2, 0))
         return self.Y, self.time, self.neuron_factor_access
 
 

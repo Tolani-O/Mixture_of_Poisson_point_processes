@@ -1,5 +1,6 @@
 import os
 import sys
+
 sys.path.append(os.path.abspath('.'))
 from src.EM_Torch.simulate_data_multitrial import DataAnalyzer
 from src.EM_Torch.LikelihoodModel import LikelihoodModel
@@ -11,7 +12,6 @@ import time
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-
 
 args = get_parser().parse_args()
 if args.param_seed == '':
@@ -84,11 +84,11 @@ else:
     with torch.no_grad():
         model.init_ground_truth(torch.tensor(config_offsets_train), torch.tensor(trial_offsets_train))
         likelihood_term_train, entropy_term_train = model.forward(torch.tensor(Y_train), torch.tensor(factor_access_train), args.A)
-        true_ELBO_train = likelihood_term_train + entropy_term_train
+        true_ELBO_train = (1/(Y_train.shape[0] * Y_train.shape[-1])) * likelihood_term_train + (1/Y_train.shape[-1]) * entropy_term_train
 
         model.init_ground_truth(torch.tensor(config_offsets_test), torch.tensor(trial_offsets_test))
         likelihood_term_test, entropy_term_test = model.forward(torch.tensor(Y_test), torch.tensor(factor_access_test), args.A)
-        true_ELBO_test = likelihood_term_test + entropy_term_test
+        true_ELBO_test = (1/(Y_test.shape[0] * Y_test.shape[-1])) * likelihood_term_test + (1/Y_test.shape[-1]) * entropy_term_test
 
     start_epoch = 0
 
@@ -136,10 +136,11 @@ if __name__ == "__main__":
         model.train()
         optimizer.zero_grad()
         warped_factors = model.warp_all_latent_factors_for_all_trials()
-        entropy_term = model.compute_offset_entropy_terms()
+        entropy_term = (1/Y_train.shape[-1]) * model.compute_offset_entropy_terms()
+        # There is no W_C_tensor (which depends on Y_kc) here
         likelihood_term = 0
         for Y, access in dataloader:
-            likelihood_term += model.compute_log_elbo(Y, access, warped_factors, args.A)
+            likelihood_term += (1/(Y.shape[0]*Y.shape[-1])) * model.compute_log_elbo(Y, access, warped_factors, args.A)
         loss = -(likelihood_term + entropy_term)
         loss.backward()
         optimizer.step()
@@ -148,7 +149,7 @@ if __name__ == "__main__":
         if epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             model.eval()
             with torch.no_grad():
-                likelihood_term = model.compute_log_elbo(torch.tensor(Y_test), torch.tensor(factor_access_test), warped_factors, args.A)
+                likelihood_term = (1/(Y_test.shape[0]*Y_test.shape[-1])) * model.compute_log_elbo(torch.tensor(Y_test), torch.tensor(factor_access_test), warped_factors, args.A)
                 log_likelihoods_test.append((likelihood_term + entropy_term).item())
 
         if epoch % args.log_interval == 0 or epoch == start_epoch + args.num_epochs - 1:

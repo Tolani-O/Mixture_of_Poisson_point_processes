@@ -52,7 +52,7 @@ def get_parser():
 class CustomDataset(Dataset):
     def __init__(self, Y, neuron_factor_access):
         # Y # K x T x R x C
-        # neuron_factor_access  #  C x K x L
+        # neuron_factor_access  #  K x L x C
         self.Y = Y
         self.neuron_factor_access = neuron_factor_access
 
@@ -60,7 +60,7 @@ class CustomDataset(Dataset):
         return self.Y.shape[0]
 
     def __getitem__(self, idx):
-        return self.Y[idx], self.neuron_factor_access[:,idx,:]
+        return self.Y[idx], self.neuron_factor_access[idx]
 
 
 def create_precision_matrix(P):

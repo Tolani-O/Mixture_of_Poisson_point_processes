@@ -139,7 +139,6 @@ if __name__ == "__main__":
         entropy_term = model.compute_offset_entropy_terms()
         likelihood_term = 0
         for Y, access in dataloader:
-            access = torch.permute(access, (0, 2, 1))
             likelihood_term += model.compute_log_elbo(Y, access, warped_factors, args.A)
         loss = -(likelihood_term + entropy_term)
         loss.backward()

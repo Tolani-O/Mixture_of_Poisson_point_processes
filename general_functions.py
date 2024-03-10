@@ -144,17 +144,13 @@ def plot_latent_coupling(latent_coupling, output_dir):
 def load_model_checkpoint(output_dir, load_epoch):
     load_model_dir = os.path.join(output_dir, 'models', f'model_{load_epoch}.pth')
     load_data_dir = os.path.join(output_dir, 'models', 'data.pkl')
-    load_text_dir = os.path.join(output_dir, 'log.txt')
     if os.path.isfile(load_model_dir):
         model = torch.load(load_model_dir)
-        with open(load_text_dir, 'r') as file:
-            output_str = [next(file) for _ in range(4)]
-        output_str = ''.join(output_str)
         with open(load_data_dir, 'rb') as data_file:
             data = pickle.load(data_file)
     else:
         raise Exception(f'No model_{load_epoch}.pth file found at {load_model_dir}')
-    return model, output_str, data
+    return model, data
 
 
 def reset_metric_checkpoint(output_dir, folder_name, sub_folder_name, metric_files, start_epoch):

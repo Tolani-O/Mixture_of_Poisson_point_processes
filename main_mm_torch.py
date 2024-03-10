@@ -47,13 +47,16 @@ if args.load:
     model, output_str, data = load_model_checkpoint(output_dir, args.load_epoch)
     # Training data
     Y_train, stim_time, factor_access_train = data.sample_data(K=args.K, A=args.A, n_configs=args.n_configs, n_trials=args.n_trials)
-    intensities_train, factor_assignment_train, config_offsets_train, trial_peak_offsets_train = data.get_data_ground_truth()
+    (intensities_train, factor_assignment_train, factor_assignment_onehot_train, config_offsets_train,
+     trial_offsets_train) = data.get_data_ground_truth()
     # Validation data
     Y_test, _, factor_access_test = data.sample_data(K=args.K, A=args.A, n_configs=args.n_configs, n_trials=args.n_trials)
-    intensities_test, factor_assignment_test, config_offsets_test, trial_peak_offsets_test = data.get_data_ground_truth()
+    (intensities_test, factor_assignment_test, factor_assignment_onehot_test, config_offsets_test,
+     trial_offsets_test) = data.get_data_ground_truth()
+
     output_str_split = output_str.split(':')
-    true_ELBO_train = float(output_str_split[3].split(',')[0].strip())
-    true_ELBO_test = float(output_str_split[4].split('\n')[0].strip())
+    true_ELBO_train = float(output_str_split[1].split(',')[0].strip())
+    true_ELBO_test = float(output_str_split[2].split('\n')[0].strip())
     start_epoch = args.load_epoch+1
 else:
     # Ground truth data

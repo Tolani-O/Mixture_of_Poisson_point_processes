@@ -47,7 +47,7 @@ class DataAnalyzer:
         # paremeters
         self.alpha = np.random.normal(size=n_factors)
         self.theta = np.random.normal(size=n_factors)
-        self.pi = np.random.normal(size=n_factors-1)
+        self.pi = np.zeros(n_factors-1)
         self.config_peak_offset_stdevs = np.random.normal(size=2 * n_factors)
         matrix = np.tril(np.random.normal(size=(2 * n_factors, 2 * n_factors)))
         # Ensure diagonal elements are positive

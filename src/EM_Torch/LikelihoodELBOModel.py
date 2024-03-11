@@ -40,11 +40,11 @@ class LikelihoodELBOModel(nn.Module):
         self.smoothness_budget = None  # L x 1
 
 
-    def init_random(self, n_factors):
+    def init_random(self, n_factors, n_areas):
         self.beta = nn.Parameter(torch.randn(n_factors, self.time.shape[0]))
         self.alpha = nn.Parameter(torch.randn(n_factors))
         self.theta = nn.Parameter(torch.randn(n_factors))
-        self.pi = nn.Parameter(torch.randn(n_factors-1))
+        self.pi = nn.Parameter(torch.randn(n_areas, n_factors//n_areas-1))
         self.config_peak_offset_stdevs = nn.Parameter(torch.randn(2 * n_factors))
         matrix = torch.tril(torch.randn(2 * n_factors, 2 * n_factors))
         # Ensure diagonal elements are positive
@@ -60,9 +60,9 @@ class LikelihoodELBOModel(nn.Module):
         # corr = np.diag(1/std_dev) @ trial_peak_offset_covar_matrix @ np.diag(1/std_dev)
 
 
-    def init_ground_truth(self, n_factors, beta=None, alpha=None, theta=None, pi=None,
+    def init_ground_truth(self, n_factors, n_areas, beta=None, alpha=None, theta=None, pi=None,
                           config_peak_offset_stdevs=None, trial_peak_offset_covar_ltri=None):
-        self.init_random(n_factors)
+        self.init_random(n_factors, n_areas)
         if beta is not None:
             self.beta = nn.Parameter(beta)
         if alpha is not None:
@@ -70,7 +70,9 @@ class LikelihoodELBOModel(nn.Module):
         if theta is not None:
             self.theta = nn.Parameter(theta)
         if pi is not None:
-            self.pi = nn.Parameter(pi)
+            nn_pi = pi.reshape(n_areas, -1)
+            nn_pi = (nn_pi - nn_pi[:, 0])[:, 1:]
+            self.pi = nn.Parameter(nn_pi)
         if config_peak_offset_stdevs is not None:
             self.config_peak_offset_stdevs = nn.Parameter(config_peak_offset_stdevs)
         if trial_peak_offset_covar_ltri is not None:
@@ -140,6 +142,7 @@ class LikelihoodELBOModel(nn.Module):
 
     def compute_warped_factors(self, warped_times):
         factors = F.softplus(self.beta)
+        factors = factors / torch.sum(factors, axis=1)[:, None]
         # warped_time  # 50 x M X N x R X C X 2L
         warped_indices = warped_times / self.dt
         floor_warped_indices = torch.floor(warped_indices).int()
@@ -195,7 +198,8 @@ class LikelihoodELBOModel(nn.Module):
         # sum_Y_times_logalpha # K x L x 1 x 1 x C
         sum_Y_times_logalpha = sum_Y_times_logalpha[:, :, None, None, :]
         # logpi # 1 x L x 1 x 1 x 1
-        logpi_expand = torch.log(F.softmax(torch.cat([torch.zeros(1), self.pi]), dim=0)).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
+        pi = F.softmax(torch.cat([torch.zeros(n_areas, 1), self.pi], dim=1), dim=1).flatten()
+        logpi_expand = torch.log(pi).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
         alpha_expand = F.softplus(self.alpha).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
         theta_expand = F.softplus(self.theta).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
 

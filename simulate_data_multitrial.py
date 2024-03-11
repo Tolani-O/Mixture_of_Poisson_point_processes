@@ -48,13 +48,13 @@ class DataAnalyzer:
         self.alpha = inv_softplus(20 * np.ones(n_factors, dtype=np.float64))
         self.theta = inv_softplus(1 + np.arange(n_factors, dtype=np.float64))
         self.pi = np.zeros(n_factors)
-        self.config_peak_offset_stdevs = np.random.normal(size=2 * n_factors)
+        self.config_peak_offset_stdevs = 0.01 * np.random.normal(size=2 * n_factors)
         matrix = np.tril(np.random.normal(size=(2 * n_factors, 2 * n_factors)))
         # Ensure diagonal elements are positive
         for i in range(min(matrix.shape)):
             matrix[i, i] += 2*softplus(matrix[i, i])
         # Make it a learnable parameter
-        self.trial_peak_offset_covar_ltri = matrix
+        self.trial_peak_offset_covar_ltri = 0.01 * matrix
         # solely to check if the covariance matrix is positive semi-definite
         # trial_peak_offset_covar_matrix = self.trial_peak_offset_covar_ltri @ self.trial_peak_offset_covar_ltri.T
         # bool((trial_peak_offset_covar_matrix == trial_peak_offset_covar_matrix.T).all() and (np.linalg.eigvals(trial_peak_offset_covar_matrix).real >= 0).all())
@@ -135,7 +135,7 @@ class DataAnalyzer:
         acceptance_probabilities = np.random.uniform(0, 1, neuron_intensities.shape)
         accepted_spikes = (acceptance_probabilities <= acceptance_threshold).astype(int)
         self.Y = accepted_spikes * homogeneous_poisson_process
-        # self.Y[:, :, 0] = 0
+        self.Y[:, :, 0] = 0
         self.neuron_intensities = neuron_intensities
 
 

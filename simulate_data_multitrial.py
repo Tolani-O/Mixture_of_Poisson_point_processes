@@ -45,9 +45,9 @@ class DataAnalyzer:
 
         n_factors = len(intensity_type) * A
         # paremeters
-        self.alpha = np.random.normal(size=n_factors)
-        self.theta = np.random.normal(size=n_factors)
-        self.pi = np.zeros(n_factors-1)
+        self.alpha = inv_softplus(20 * np.ones(n_factors, dtype=np.float64))
+        self.theta = inv_softplus(1 + np.arange(n_factors, dtype=np.float64))
+        self.pi = np.zeros(n_factors)
         self.config_peak_offset_stdevs = np.random.normal(size=2 * n_factors)
         matrix = np.tril(np.random.normal(size=(2 * n_factors, 2 * n_factors)))
         # Ensure diagonal elements are positive
@@ -62,7 +62,7 @@ class DataAnalyzer:
         # corr = np.diag(1/std_dev) @ trial_peak_offset_covar_matrix @ np.diag(1/std_dev)
         latent_factors = self.generate_latent_factors(intensity_type, intensity_mltply, intensity_bias)
         latent_factors = np.vstack([latent_factors] * A)
-        self.beta = inv_softplus(latent_factors)
+        self.beta = inv_softplus(latent_factors/np.sum(latent_factors, axis=1)[:,None])
         return self
 
     def generate_latent_factors(self, intensity_type, intensity_mltply, intensity_bias):
@@ -102,7 +102,7 @@ class DataAnalyzer:
 
         num_factors = len(self.config_peak_offset_stdevs)//2
         factors_per_area = num_factors//num_areas
-        ratio = softmax(np.hstack([np.zeros(1), self.pi]), axis=0)
+        ratio = softmax(self.pi, axis=0)
         neuron_factor_assignments = np.random.choice(num_factors, num_neurons*num_conditions, p=ratio).reshape(num_conditions, -1)
         neuron_factor_access = np.zeros((num_conditions, num_neurons, num_factors))
         for a in range(num_areas):
@@ -234,11 +234,11 @@ class DataAnalyzer:
 
 
     def get_data_ground_truth(self):
-        return (self.neuron_intensities, self.neuron_factor_assignments, self.neuron_factor_assignments_onehot,
+        return (self.neuron_intensities, self.neuron_factor_assignments, self.neuron_factor_assignments_onehot, self.neuron_gains,
                 self.transformed_config_peak_offset_samples, self.transformed_trial_peak_offset_samples)
 
     def compute_log_likelihood(self, Y, neuron_intensities, factor_assignment, config_offsets, trial_offset):
-        ratio = softmax(np.hstack([np.zeros(1), self.pi]), axis=0)[factor_assignment]
+        ratio = softmax(self.pi, axis=0)[factor_assignment]
         likelihood = np.sum(np.log(neuron_intensities) * Y - neuron_intensities * self.dt)
         gain_prior = gamma.logpdf(self.neuron_gains, a=softplus(self.alpha)[factor_assignment],
                                   scale=1/softplus(self.theta)[factor_assignment]).sum()

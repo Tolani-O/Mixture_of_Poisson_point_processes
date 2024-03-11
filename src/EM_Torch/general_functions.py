@@ -6,13 +6,12 @@ import torch
 from matplotlib.figure import figaspect
 import json
 import argparse
-import pickle
 from torch.utils.data import Dataset
 
 def get_parser():
     parser = argparse.ArgumentParser(description='Sequence Modeling - Polyphonic Music')
     parser.add_argument('--cuda', action='store_false', default=False, help='use CUDA (default: False)')
-    parser.add_argument('--n_trials', type=int, default=10, help='Number of trials per stimulus condition')
+    parser.add_argument('--n_trials', type=int, default=15, help='Number of trials per stimulus condition')
     parser.add_argument('--n_configs', type=int, default=3, help='Number of stimulus conditions')
     parser.add_argument('--A', type=int, default=3, help='Number of areas')
     parser.add_argument('--n_trial_samples', type=int, default=10, help='Number of trial samples for monte carlo integration')
@@ -143,14 +142,11 @@ def plot_latent_coupling(latent_coupling, output_dir):
 
 def load_model_checkpoint(output_dir, load_epoch):
     load_model_dir = os.path.join(output_dir, 'models', f'model_{load_epoch}.pth')
-    load_data_dir = os.path.join(output_dir, 'models', 'data.pkl')
     if os.path.isfile(load_model_dir):
         model = torch.load(load_model_dir)
-        with open(load_data_dir, 'rb') as data_file:
-            data = pickle.load(data_file)
     else:
         raise Exception(f'No model_{load_epoch}.pth file found at {load_model_dir}')
-    return model, data
+    return model
 
 
 def reset_metric_checkpoint(output_dir, folder_name, sub_folder_name, metric_files, start_epoch):
@@ -167,7 +163,7 @@ def reset_metric_checkpoint(output_dir, folder_name, sub_folder_name, metric_fil
             json.dump(file_contents, file, indent=4)
 
 
-def create_relevant_files(output_dir, args, output_str, data):
+def create_relevant_files(output_dir, args, output_str):
     with open(os.path.join(output_dir, 'log.txt'), 'w') as file:
         file.write(output_str)
 
@@ -218,8 +214,6 @@ def create_relevant_files(output_dir, args, output_str, data):
     models_file = os.path.join(output_dir, 'models')
     if not os.path.exists(models_file):
         os.makedirs(models_file)
-    with open(os.path.join(models_file, 'data.pkl'), 'wb') as data_file:
-        pickle.dump(data, data_file)
 
 
 def write_log_and_model(output_str, output_dir, epoch, model):

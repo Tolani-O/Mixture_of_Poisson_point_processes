@@ -41,8 +41,6 @@ class LikelihoodModel(nn.Module):
         self.pi = pi
         self.config_peak_offset_stdevs = config_peak_offset_stdevs
         self.trial_peak_offset_covar_ltri = trial_peak_offset_covar_ltri
-        n_factors = self.beta.shape[0]
-        self.neuron_factor_assignment = torch.zeros((n_neurons, n_factors, n_configs))
 
 
     def init_random(self, n_configs, n_trials):
@@ -104,6 +102,7 @@ class LikelihoodModel(nn.Module):
 
     def compute_warped_factors(self, warped_times):
         factors = F.softplus(self.beta)
+        factors = factors/torch.sum(factors, axis=1)[:,None]
         # warped_time  # 50 x M X N x R X C X 2L
         warped_indices = warped_times / self.dt
         floor_warped_indices = torch.floor(warped_indices).int()
@@ -159,7 +158,8 @@ class LikelihoodModel(nn.Module):
         # sum_Y_times_logalpha # K x L x 1 x 1 x C
         sum_Y_times_logalpha = sum_Y_times_logalpha[:, :, None, None, :]
         # logpi # 1 x L x 1 x 1 x 1
-        logpi_expand = torch.log(F.softmax(torch.cat([torch.zeros(1), self.pi]), dim=0)).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
+        pi = F.softmax(self.pi.reshape(n_areas, -1), dim=1).flatten()
+        logpi_expand = torch.log(pi).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
         alpha_expand = F.softplus(self.alpha).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
         theta_expand = F.softplus(self.theta).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
 
@@ -224,4 +224,5 @@ class LikelihoodModel(nn.Module):
         warped_factors = self.warp_all_latent_factors_for_all_trials()
         likelihood_term = self.compute_log_elbo(Y, neuron_factor_access, warped_factors, n_areas)
         entropy_term = self.compute_offset_entropy_terms()
-        return likelihood_term, entropy_term
+        factor_assignment = self.compute_neuron_factor_assignment(Y, neuron_factor_access, warped_factors, n_areas)
+        return likelihood_term, entropy_term, factor_assignment

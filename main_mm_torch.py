@@ -65,11 +65,11 @@ else:
 
 # Training data
 Y_train, stim_time, factor_access_train = data.sample_data(K=args.K, A=args.A, n_configs=args.n_configs, n_trials=args.n_trials)
-(intensities_train, factor_assignment_train, factor_assignment_onehot_train, config_offsets_train,
+(intensities_train, factor_assignment_train, factor_assignment_onehot_train, neuron_gains_train, config_offsets_train,
  trial_offsets_train) = data.get_data_ground_truth()
 # Validation data
 Y_test, _, factor_access_test = data.sample_data(K=args.K, A=args.A, n_configs=args.n_configs, n_trials=args.n_trials)
-(intensities_test, factor_assignment_test, factor_assignment_onehot_test, config_offsets_test,
+(intensities_test, factor_assignment_test, factor_assignment_onehot_test, neuron_gains_test, config_offsets_test,
  trial_offsets_test) = data.get_data_ground_truth()
 
 # true_likelihood_train = data.compute_log_likelihood(Y_train, intensities_train, factor_assignment_train,
@@ -88,11 +88,11 @@ true_model.init_params(torch.tensor(data.beta), torch.tensor(data.alpha),
 true_model.eval()
 with torch.no_grad():
     true_model.init_ground_truth(torch.tensor(config_offsets_train), torch.tensor(trial_offsets_train))
-    likelihood_term_train, entropy_term_train = true_model.forward(torch.tensor(Y_train), torch.tensor(factor_access_train), args.A)
+    likelihood_term_train, entropy_term_train, model_factor_assignment_train = true_model.forward(torch.tensor(Y_train), torch.tensor(factor_access_train), args.A)
     true_ELBO_train = (1/(Y_train.shape[0] * Y_train.shape[-1])) * likelihood_term_train + (1/Y_train.shape[-1]) * entropy_term_train
 
     true_model.init_ground_truth(torch.tensor(config_offsets_test), torch.tensor(trial_offsets_test))
-    likelihood_term_test, entropy_term_test = true_model.forward(torch.tensor(Y_test), torch.tensor(factor_access_test), args.A)
+    likelihood_term_test, entropy_term_test, model_factor_assignment_test = true_model.forward(torch.tensor(Y_test), torch.tensor(factor_access_test), args.A)
     true_ELBO_test = (1/(Y_test.shape[0] * Y_test.shape[-1])) * likelihood_term_test + (1/Y_test.shape[-1]) * entropy_term_test
 
 output_str = (

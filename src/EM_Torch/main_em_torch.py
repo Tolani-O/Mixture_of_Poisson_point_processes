@@ -52,13 +52,13 @@ else:
 
     num_factors = data.beta.shape[0]
     model = LikelihoodELBOModel(data.time, args.n_trial_samples, args.n_config_samples)
-    model.init_ground_truth(num_factors,
+    model.init_ground_truth(num_factors, args.A,
                             torch.tensor(data.beta), torch.tensor(data.alpha),
                             torch.tensor(data.theta), torch.tensor(data.pi),
                             torch.tensor(data.config_peak_offset_stdevs),
                             torch.tensor(data.trial_peak_offset_covar_ltri))
-    # model.init_ground_truth(num_factors, torch.zeros_like(torch.tensor(data.beta)).float())
-    # model.init_ground_truth(num_factors, torch.tensor(data.beta).float())
+    # model.init_ground_truth(num_factors, args.A, torch.zeros_like(torch.tensor(data.beta)).float())
+    # model.init_ground_truth(num_factors, args.A, torch.tensor(data.beta).float())
     # la = int(num_factors/args.A)
     # factor_indcs = [i*la for i in range(args.A)]
     # model.init_from_data(Y=torch.tensor(Y_train).float(), neuron_factor_access=torch.tensor(factor_access_train).float(),

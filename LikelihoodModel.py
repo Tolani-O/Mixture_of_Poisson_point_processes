@@ -102,7 +102,6 @@ class LikelihoodModel(nn.Module):
 
     def compute_warped_factors(self, warped_times):
         factors = F.softplus(self.beta)
-        factors = factors/torch.sum(factors, axis=1)[:,None]
         # warped_time  # 50 x M X N x R X C X 2L
         warped_indices = warped_times / self.dt
         floor_warped_indices = torch.floor(warped_indices).int()
@@ -207,9 +206,7 @@ class LikelihoodModel(nn.Module):
         prod_term2 = torch.einsum('mrcl,lj,mrcj->mrc', self.transformed_trial_peak_offset_samples, inv_Sigma2, self.transformed_trial_peak_offset_samples)  # sum over l
         # entropy_term2  # M x C
         entropy_term2 = -0.5 * torch.sum(torch.log((2 * torch.pi) ** dim * det_Sigma2) + prod_term2)
-
-        entropy_term = entropy_term1 + entropy_term2
-        return entropy_term
+        return entropy_term1, entropy_term2
 
 
     def compute_neuron_factor_assignment(self, Y, neuron_factor_access, warped_factors, n_areas):
@@ -222,7 +219,8 @@ class LikelihoodModel(nn.Module):
 
     def forward(self, Y, neuron_factor_access, n_areas):
         warped_factors = self.warp_all_latent_factors_for_all_trials()
-        likelihood_term = self.compute_log_elbo(Y, neuron_factor_access, warped_factors, n_areas)
-        entropy_term = self.compute_offset_entropy_terms()
+        likelihood_term = (1 / (Y.shape[0] * Y.shape[-2] * Y.shape[-1])) * self.compute_log_elbo(Y, neuron_factor_access, warped_factors, n_areas)
+        entropy_term1, entropy_term2 = self.compute_offset_entropy_terms()
+        entropy_term = (1 / (Y.shape[-1])) * entropy_term1 + (1 / (Y.shape[-2] * Y.shape[-1])) * entropy_term2
         factor_assignment = self.compute_neuron_factor_assignment(Y, neuron_factor_access, warped_factors, n_areas)
         return likelihood_term, entropy_term, factor_assignment

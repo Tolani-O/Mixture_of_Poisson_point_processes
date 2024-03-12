@@ -142,7 +142,6 @@ class LikelihoodELBOModel(nn.Module):
 
     def compute_warped_factors(self, warped_times):
         factors = F.softplus(self.beta)
-        factors = factors / torch.sum(factors, axis=1)[:, None]
         # warped_time  # 50 x M X N x R X C X 2L
         warped_indices = warped_times / self.dt
         floor_warped_indices = torch.floor(warped_indices).int()
@@ -264,8 +263,7 @@ class LikelihoodELBOModel(nn.Module):
         # entropy_term2  # 1 x 1 x M x 1 x C
         # W_C_tensor # 1 x 1 x M x N x C
         entropy_term2 = torch.sum(self.W_C_tensor * entropy_term2.unsqueeze(0).unsqueeze(1).unsqueeze(3))
-        entropy_term = entropy_term1 + entropy_term2
-        return entropy_term
+        return entropy_term1, entropy_term2
 
 
     def compute_penalty_terms(self, tau_beta, tau_budget, tau_sigma1, tau_sigma2):
@@ -286,10 +284,11 @@ class LikelihoodELBOModel(nn.Module):
         return penalty_term
 
 
-    # def forward(self, Y, neuron_factor_access, tau_beta, tau_budget, tau_sigma1, tau_sigma2):
-    #     _, _, n_trials, n_configs = Y.shape
-    #     warped_factors = self.warp_all_latent_factors_for_all_trials(n_configs, n_trials)
-    #     likelihood_term = self.compute_log_elbo(Y, neuron_factor_access, warped_factors)
-    #     entropy_term = self.compute_offset_entropy_terms()
-    #     penalty_term = self.compute_penalty_terms(tau_beta, tau_budget, tau_sigma1, tau_sigma2)
-    #     return likelihood_term, entropy_term, penalty_term, warped_factors
+    def forward(self, Y, neuron_factor_access, n_areas, tau_beta, tau_budget, tau_sigma1, tau_sigma2):
+        _, _, n_trials, n_configs = Y.shape
+        warped_factors = self.warp_all_latent_factors_for_all_trials(n_configs, n_trials)
+        likelihood_term = (1 / (Y.shape[0] * Y.shape[-2] * Y.shape[-1])) * self.compute_log_elbo(Y, neuron_factor_access, warped_factors, n_areas)
+        entropy_term1, entropy_term2 = self.compute_offset_entropy_terms()
+        entropy_term = (1 / (Y.shape[-1])) * entropy_term1 + (1 / (Y.shape[-2] * Y.shape[-1])) * entropy_term2
+        penalty_term = self.compute_penalty_terms(tau_beta, tau_budget, tau_sigma1, tau_sigma2)
+        return likelihood_term, entropy_term, penalty_term

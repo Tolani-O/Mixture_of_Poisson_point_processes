@@ -7,7 +7,7 @@ from scipy.ndimage import gaussian_filter1d
 
 
 class LikelihoodELBOModel(nn.Module):
-    def __init__(self, time, n_trial_samples, n_config_samples):
+    def __init__(self, time, n_factors, n_areas, n_configs, n_trial_samples):
         super(LikelihoodELBOModel, self).__init__()
 
         self.time = torch.tensor(time)
@@ -21,38 +21,41 @@ class LikelihoodELBOModel(nn.Module):
         self.left_landmark2 = 120
         self.mid_landmark2 = self.left_landmark2 + landmark_spread / 2
         self.right_landmark2 = self.left_landmark2 + landmark_spread
-        self.neuron_factor_access = None
-        self.transformed_trial_peak_offset_samples = None  # MCR x 2AL
-        self.transformed_config_peak_offset_samples = None  # NC x 2AL
-        self.n_config_samples = n_config_samples
+        self.n_factors = n_factors
+        self.n_areas = n_areas
         self.n_trial_samples = n_trial_samples
-        self.W_C_tensor = None  # 1 x 1 x M x N x C
+        self.n_configs = n_configs
         Delta2 = create_second_diff_matrix(T)
         self.Delta2TDelta2 = torch.tensor(Delta2.T @ Delta2).to_sparse()  # T x T # tikhonov regularization
+
+        # Storage for use in the forward pass
+        self.neuron_factor_access = None
+        self.trial_peak_offsets = None  # NRC x 2AL
+        self.W_CKL = None  # C x K x L
 
         # Parameters
         self.beta = None  # AL x P
         self.alpha = None  # 1 x AL
         self.theta = None  # 1 x AL
         self.pi = None  # 1 x AL
-        self.config_peak_offset_stdevs = None  # 2AL
+        self.config_peak_offsets = None  # C x 2AL
         self.trial_peak_offset_covar_ltri = None  # 2AL x 2AL
         self.smoothness_budget = None  # L x 1
 
 
-    def init_random(self, n_factors, n_areas):
-        self.beta = nn.Parameter(torch.randn(n_factors, self.time.shape[0]))
-        self.alpha = nn.Parameter(torch.randn(n_factors))
-        self.theta = nn.Parameter(torch.randn(n_factors))
-        self.pi = nn.Parameter(torch.randn(n_areas, n_factors//n_areas-1))
-        self.config_peak_offset_stdevs = nn.Parameter(torch.randn(2 * n_factors))
-        matrix = torch.tril(torch.randn(2 * n_factors, 2 * n_factors))
+    def init_random(self):
+        self.beta = nn.Parameter(torch.randn(self.n_factors, self.time.shape[0]))
+        self.alpha = nn.Parameter(torch.randn(self.n_factors))
+        self.theta = nn.Parameter(torch.randn(self.n_factors))
+        self.pi = nn.Parameter(torch.randn(self.n_areas, self.n_factors//self.n_areas-1))
+        self.config_peak_offsets = nn.Parameter(torch.randn(self.n_configs, 2 * self.n_factors))
+        matrix = torch.tril(torch.randn(2 * self.n_factors, 2 * self.n_factors))
         # Ensure diagonal elements are positive
         for i in range(min(matrix.size())):
-            matrix[i, i] += F.softplus(matrix[i, i])
+            matrix[i, i] += (2*self.n_factors + F.softplus(matrix[i, i]))
         # Make it a learnable parameter
         self.trial_peak_offset_covar_ltri = nn.Parameter(matrix)
-        self.smoothness_budget = nn.Parameter(torch.zeros(n_factors-1, dtype=torch.float64))
+        self.smoothness_budget = nn.Parameter(torch.zeros(self.n_factors-1, dtype=torch.float64))
         # solely to check if the covariance matrix is positive semi-definite
         # trial_peak_offset_covar_matrix = self.trial_peak_offset_covar_ltri @ self.trial_peak_offset_covar_ltri.T
         # bool((trial_peak_offset_covar_matrix == trial_peak_offset_covar_matrix.T).all() and (np.linalg.eigvals(trial_peak_offset_covar_matrix).real >= 0).all())
@@ -60,9 +63,9 @@ class LikelihoodELBOModel(nn.Module):
         # corr = np.diag(1/std_dev) @ trial_peak_offset_covar_matrix @ np.diag(1/std_dev)
 
 
-    def init_ground_truth(self, n_factors, n_areas, beta=None, alpha=None, theta=None, pi=None,
-                          config_peak_offset_stdevs=None, trial_peak_offset_covar_ltri=None):
-        self.init_random(n_factors, n_areas)
+    def init_ground_truth(self, beta=None, alpha=None, theta=None, pi=None,
+                          config_peak_offsets=None, trial_peak_offset_covar_ltri=None):
+        self.init_random()
         if beta is not None:
             self.beta = nn.Parameter(beta)
         if alpha is not None:
@@ -70,11 +73,11 @@ class LikelihoodELBOModel(nn.Module):
         if theta is not None:
             self.theta = nn.Parameter(theta)
         if pi is not None:
-            nn_pi = pi.reshape(n_areas, -1)
+            nn_pi = pi.reshape(self.n_areas, -1)
             nn_pi = (nn_pi - nn_pi[:, 0])[:, 1:]
             self.pi = nn.Parameter(nn_pi)
-        if config_peak_offset_stdevs is not None:
-            self.config_peak_offset_stdevs = nn.Parameter(config_peak_offset_stdevs)
+        if config_peak_offsets is not None:
+            self.config_peak_offsets = nn.Parameter(config_peak_offsets)
         if trial_peak_offset_covar_ltri is not None:
             self.trial_peak_offset_covar_ltri = nn.Parameter(trial_peak_offset_covar_ltri)
 
@@ -87,7 +90,7 @@ class LikelihoodELBOModel(nn.Module):
         averaged_neurons = np.einsum('ktrc,ckl->tl', Y, neuron_factor_access) / (K*C*R)
         latent_factors = np.apply_along_axis(gaussian_filter1d, axis=0, arr=averaged_neurons, sigma=4).T
         beta = torch.zeros((n_factors, T))
-        beta[factor_indcs] = torch.tensor(inv_softplus(latent_factors[factor_indcs]))
+        beta[factor_indcs] = torch.tensor(torch.log(latent_factors[factor_indcs]))
         props = torch.sum(neuron_factor_access, dim=(0, 1)) / (K*C)
         # true_props = props/torch.sum(props)
         tr_props = torch.log(props) + torch.logsumexp(props, dim=0)
@@ -96,13 +99,14 @@ class LikelihoodELBOModel(nn.Module):
         self.init_ground_truth(n_factors, beta=beta, pi=pi)
 
 
-    def warp_all_latent_factors_for_all_trials(self, n_configs, n_trials):
+    def sample_trial_offsets(self, n_configs, n_trials):
         n_factors = self.beta.shape[0]
-        config_peak_offset_samples = torch.randn(self.n_config_samples, n_configs, 2 * n_factors, dtype=torch.float64)
         trial_peak_offset_samples = torch.randn(self.n_trial_samples, n_trials * n_configs, 2 * n_factors, dtype=torch.float64).view(
             self.n_trial_samples, n_trials, n_configs, 2 * n_factors)
-        self.transformed_trial_peak_offset_samples = torch.einsum('lj,mrcj->mrcl', self.trial_peak_offset_covar_ltri, trial_peak_offset_samples)
-        self.transformed_config_peak_offset_samples = torch.einsum('l,ncl->ncl', F.softplus(self.config_peak_offset_stdevs), config_peak_offset_samples)
+        self.trial_peak_offsets = torch.einsum('lj,nrcj->nrcl', self.trial_peak_offset_covar_ltri, trial_peak_offset_samples)
+
+
+    def warp_all_latent_factors_for_all_trials(self):
         avg_peak_times, left_landmarks, right_landmarks, s_new = self.compute_offsets_and_landmarks()
         warped_times = self.compute_warped_times(avg_peak_times, left_landmarks, right_landmarks, s_new)
         warped_factors = self.compute_warped_factors(warped_times)
@@ -110,15 +114,18 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def compute_offsets_and_landmarks(self):
-        factors = F.softplus(self.beta)
+        factors = torch.exp(self.beta)
         avg_peak1_times = self.time[self.left_landmark1 + torch.argmax(factors[:, self.left_landmark1:self.right_landmark1], dim=1)]
         avg_peak2_times = self.time[self.left_landmark2 + torch.argmax(factors[:, self.left_landmark2:self.right_landmark2], dim=1)]
         avg_peak_times = torch.cat([avg_peak1_times, avg_peak2_times])
-        offsets = self.transformed_trial_peak_offset_samples.unsqueeze(1) + self.transformed_config_peak_offset_samples.unsqueeze(0).unsqueeze(2)
-        avg_peak_times = avg_peak_times.unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(3)
+        # avg_peak_times  # 2AL
+        # self.trial_peak_offsets  N x R x C x 2AL
+        # self.config_peak_offsets  # C x 2AL
+        offsets = self.trial_peak_offsets + self.config_peak_offsets.unsqueeze(0).unsqueeze(1)
+        avg_peak_times = avg_peak_times.unsqueeze(0).unsqueeze(1).unsqueeze(2)
         s_new = avg_peak_times + offsets
-        left_landmarks = (self.time[torch.repeat_interleave(torch.tensor([self.left_landmark1, self.left_landmark2]), s_new.shape[-1] // 2)]).unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(3)
-        right_landmarks = (self.time[torch.repeat_interleave(torch.tensor([self.right_landmark1, self.right_landmark2]), s_new.shape[-1] // 2)]).unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(3)
+        left_landmarks = (self.time[torch.repeat_interleave(torch.tensor([self.left_landmark1, self.left_landmark2]), s_new.shape[-1] // 2)]).unsqueeze(0).unsqueeze(1).unsqueeze(2)
+        right_landmarks = (self.time[torch.repeat_interleave(torch.tensor([self.right_landmark1, self.right_landmark2]), s_new.shape[-1] // 2)]).unsqueeze(0).unsqueeze(1).unsqueeze(2)
         s_new = torch.where(s_new <= left_landmarks, left_landmarks + self.dt, s_new)
         s_new = torch.where(s_new >= right_landmarks, right_landmarks - self.dt, s_new)
         return avg_peak_times, left_landmarks, right_landmarks, s_new
@@ -136,13 +143,13 @@ class LikelihoodELBOModel(nn.Module):
             warped_times[i] = torch.where(left_shifted_time[i] < left_shifted_peak_times, (left_shifted_time[i] * left_slope) + left_landmarks,
                                          ((left_shifted_time[i] - left_shifted_peak_times) * right_slope) + avg_peak_times)
         # landmark_spead = 50
-        # warped_time  # 50 x M X N x R X C X 2L
+        # warped_time  # 50 x N x R X C X 2AL
         return warped_times
 
 
     def compute_warped_factors(self, warped_times):
-        factors = F.softplus(self.beta)
-        # warped_time  # 50 x M X N x R X C X 2L
+        factors = torch.exp(self.beta)
+        # warped_time  # 50 x N x R X C X 2AL
         warped_indices = warped_times / self.dt
         floor_warped_indices = torch.floor(warped_indices).int()
         ceil_warped_indices = torch.ceil(warped_indices).int()
@@ -151,144 +158,182 @@ class LikelihoodELBOModel(nn.Module):
         weighted_floor_warped_factors = []
         weighted_ceil_warped_factors = []
         for l in range(factors.shape[0]):
-            floor_warped_factor_l = factors[l, floor_warped_indices[:,:,:,:,:,[l,(l+factors.shape[0])]]]
-            weighted_floor_warped_factor_l = floor_warped_factor_l * floor_weights[:,:,:,:,:,[l,(l+factors.shape[0])]]
-            ceil_warped_factor_l = factors[l, ceil_warped_indices[:,:,:,:,:,[l,(l+factors.shape[0])]]]
-            weighted_ceil_warped_factor_l = ceil_warped_factor_l * ceil_weights[:,:,:,:,:,[l,(l+factors.shape[0])]]
+            floor_warped_factor_l = factors[l, floor_warped_indices[:, :, :, :, [l, (l + factors.shape[0])]]]
+            weighted_floor_warped_factor_l = floor_warped_factor_l * floor_weights[:, :, :, :, [l, (l + factors.shape[0])]]
+            ceil_warped_factor_l = factors[l, ceil_warped_indices[:, :, :, :, [l, (l + factors.shape[0])]]]
+            weighted_ceil_warped_factor_l = ceil_warped_factor_l * ceil_weights[:, :, :, :, [l, (l + factors.shape[0])]]
             weighted_floor_warped_factors.append(weighted_floor_warped_factor_l)
             weighted_ceil_warped_factors.append(weighted_ceil_warped_factor_l)
         weighted_floor_warped_factors = torch.stack(weighted_floor_warped_factors)
         weighted_ceil_warped_factors = torch.stack(weighted_ceil_warped_factors)
         warped_factors = weighted_floor_warped_factors + weighted_ceil_warped_factors
 
+        # warped_factors  # L x 50 x N x R X C X 2
         early = factors[:, :self.left_landmark1]
-        early = early.unsqueeze(2).unsqueeze(3).unsqueeze(4).unsqueeze(5).expand(*early.shape,*warped_factors.shape[2:-1])
+        early = early.unsqueeze(2).unsqueeze(3).unsqueeze(4).expand(*early.shape,*warped_factors.shape[2:-1])
         mid = factors[:, self.right_landmark1:self.left_landmark2]
-        mid = mid.unsqueeze(2).unsqueeze(3).unsqueeze(4).unsqueeze(5).expand(*mid.shape,*warped_factors.shape[2:-1])
+        mid = mid.unsqueeze(2).unsqueeze(3).unsqueeze(4).expand(*mid.shape,*warped_factors.shape[2:-1])
         late = factors[:, self.right_landmark2:]
-        late = late.unsqueeze(2).unsqueeze(3).unsqueeze(4).unsqueeze(5).expand(*late.shape,*warped_factors.shape[2:-1])
-        warped_factors = torch.cat([early, warped_factors[:, :, :, :, :, :, 0], mid, warped_factors[:, :, :, :, :, :, 1], late], dim=1)
-
+        late = late.unsqueeze(2).unsqueeze(3).unsqueeze(4).expand(*late.shape,*warped_factors.shape[2:-1])
+        warped_factors = torch.cat([early, warped_factors[:, :, :, :, :, 0], mid, warped_factors[:, :, :, :, :, 1], late], dim=1)
         return warped_factors
 
 
     def compute_log_elbo(self, Y, neuron_factor_access, warped_factors, n_areas):  # and first 2 entropy terms
-        # Weight Matrices
-
-        # warped_factors # L x T x M x N x R x C
-        # Y # K x T x R x C
-        # Y_times_N_matrix  # K x L x T x M x N x R x C
-        # sum_Y_times_N_matrix  # K x L x M x N x C
-        Y_times_N_matrix = torch.einsum('ktrc,ltmnrc->kltmnrc', Y, warped_factors)
-        sum_Y_times_N_matrix = torch.sum(Y_times_N_matrix, dim=(2, 5))
-        exp_N_matrix = torch.exp(warped_factors)
-        # sum_Y_term # K x C
-        # logterm1  # K x L x C
-        # logterm2  # L x M x N x C
-        sum_Y_term = torch.sum(Y, dim=(1, 2))  # K x C
-        logterm1 = sum_Y_term[:, None, :] + F.softplus(self.alpha)[None, :, None]
-        logterm2 = self.dt * torch.sum(exp_N_matrix, dim=(1, 4)) + F.softplus(self.theta)[:, None, None, None]
-        # logterm # K x L x M x N x C
-        logterm = torch.einsum('klc,lmnc->klmnc', logterm1, torch.log(logterm2))
-        # alphalogtheta # 1 x L x 1 x 1 x 1
-        alphalogtheta = (F.softplus(self.alpha) * torch.log(F.softplus(self.theta))).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
-        # sum_Y_times_logalpha  # K x C x L
-        sum_Y_times_logalpha = torch.einsum('kc,l->klc', sum_Y_term, torch.log(F.softplus(self.alpha)))
-        # sum_Y_times_logalpha # K x L x 1 x 1 x C
-        sum_Y_times_logalpha = sum_Y_times_logalpha[:, :, None, None, :]
-        # logpi # 1 x L x 1 x 1 x 1
-        pi = F.softmax(torch.cat([torch.zeros(n_areas, 1), self.pi], dim=1), dim=1).flatten()
-        logpi_expand = torch.log(pi).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
-        alpha_expand = F.softplus(self.alpha).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
-        theta_expand = F.softplus(self.theta).unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4)
-
-        # U_tensor # K x L x M x N x C
-        U_tensor = sum_Y_times_N_matrix - logterm + alphalogtheta + sum_Y_times_logalpha + logpi_expand
-        # U_tensor # K x A x La x M x N x C
-        L_a = U_tensor.shape[1] // n_areas
-        U_tensor = U_tensor.reshape(U_tensor.shape[0], n_areas, L_a, U_tensor.shape[2], U_tensor.shape[3], U_tensor.shape[4])
-        # W_CMNK_tensor # K x L x M x N x C
-        W_CMNK_tensor = F.softmax(U_tensor, dim=2).reshape(sum_Y_times_N_matrix.shape)
-
-        # logsumexp_U_tensor # K x A x M x N x C
-        logsumexp_U_tensor = torch.logsumexp(U_tensor, dim=2)
-        # neuron_area_access  #  K x A x 1 x 1 x C
-        neuron_area_access = neuron_factor_access[:, [i * L_a for i in range(n_areas)], None, None, :]
-        # sum_logsumexp_tensor #  M x N x C
-        sum_logsumexp_U_tensor = torch.sum(neuron_area_access * logsumexp_U_tensor, dim=(0, 1))
-        # W_C_tensor # 1 x 1 x M x N x C
-        W_C_tensor = (F.softmax(sum_logsumexp_U_tensor.reshape(-1, sum_logsumexp_U_tensor.shape[-1]), dim=0).
-                      reshape(sum_logsumexp_U_tensor.shape)).unsqueeze(0).unsqueeze(1)
-        W_C_tensor = W_C_tensor.detach()
-        self.W_C_tensor = W_C_tensor
-
+        # output before summing: C x K x R x L x N
+        # factors # L x T
+        # warped_factors # L x T x N x R x C
         # neuron_factor_access  # K x L x C
-        # W_tensor # K x L x M x N x C
-        W_tensor = (neuron_factor_access.unsqueeze(2).unsqueeze(3) * W_CMNK_tensor * W_C_tensor).detach()
+        # Y # K x T x R x C
+        neuron_factor_access = neuron_factor_access.permute(2, 0, 1)  # C x K x L
+        warped_factors = warped_factors.permute(4,3,0,2,1)  # C x R x L x N x T
+        factors = torch.exp(self.beta)  # exp(beta)
+        log_warped_factors = torch.log(warped_factors)  # beta
+        Y_sum_t = torch.sum(Y, dim=1).permute(2, 0, 1)  # C x K x R
+        alpha = F.softplus(self.alpha)
+        theta = F.softplus(self.theta)
+        pi = F.softmax(torch.cat([torch.zeros(n_areas, 1), self.pi], dim=1), dim=1).flatten()
+        log_alpha = torch.log(alpha)
 
-        # A_tensor # K x L x M x N x C
-        A_tensor = torch.einsum('klc,lmnc->klmnc', logterm1, 1 / logterm2).detach()
-        B_tensor = (torch.digamma(logterm1)[:, :, None, None, :] - torch.log(logterm2[None, :, :, :, :])).detach()
+        # U tensor items:
+        # Y_times_beta  # C x K x R x L x T
+        Y_times_beta = torch.einsum('ktrc,lt->ckrlt', Y, self.beta)
+        # Y_times_beta  # C x K x L
+        Y_times_beta = torch.sum(Y_times_beta, dim=(2, 4))
+        # Y_sum_rt # C x K
+        Y_sum_rt = torch.sum(Y_sum_t, dim=-1)
+        # Y_sum_rt_plus_alpha  # C x K x L
+        Y_sum_rt_plus_alpha = Y_sum_rt.unsqueeze(2) + alpha.unsqueeze(0).unsqueeze(1)
+        # dt_exp_beta_plus_theta  # C x K x L
+        dt_exp_beta_plus_theta = (self.dt * Y.shape[2] * torch.sum(factors, dim=-1) + theta).unsqueeze(0).unsqueeze(1)
+        # log_dt_exp_beta_plus_theta  # C x K x L
+        log_dt_exp_beta_plus_theta = torch.log(dt_exp_beta_plus_theta)
+        # Y_sum_rt_plus_alpha_times_log_dt_exp_beta_plus_theta  # C x K x L
+        Y_sum_rt_plus_alpha_times_log_dt_exp_beta_plus_theta = Y_sum_rt_plus_alpha * log_dt_exp_beta_plus_theta
+        # Y_sum_rt_times_logalpha  # C x K x L
+        Y_sum_rt_times_logalpha = torch.einsum('ck,l->ckl', Y_sum_rt, log_alpha)
 
+        # V tensor items:
+        # Y_times_warped_beta  # C x K x R x L x N x T
+        Y_times_warped_beta = torch.einsum('ktrc,crlnt->ckrlnt', Y, log_warped_factors)
+        # Y_times_warped_beta  # C x K x R x L x N
+        Y_times_warped_beta = torch.sum(Y_times_warped_beta, dim=-1)
+        # Y_sum_t_plus_alpha  # C x K x R x L
+        Y_sum_t_plus_alpha = Y_sum_t.unsqueeze(3) + alpha.unsqueeze(0).unsqueeze(1).unsqueeze(2)
+        # dt_exp_warpedbeta_plus_theta  # C x R x L x N
+        dt_exp_warpedbeta_plus_theta = self.dt * torch.sum(warped_factors, dim=-1) + theta.unsqueeze(0).unsqueeze(1).unsqueeze(3)
+        # log_dt_exp_warpedbeta_plus_theta  # C x R x L x N
+        log_dt_exp_warpedbeta_plus_theta = torch.log(dt_exp_warpedbeta_plus_theta)
+        # Y_sum_t_plus_alpha_times_log_dt_exp_warpedbeta_plus_theta  # C x K x R x L x N
+        Y_sum_t_plus_alpha_times_log_dt_exp_warpedbeta_plus_theta = torch.einsum('ckrl,crln->ckrln', Y_sum_t_plus_alpha, log_dt_exp_warpedbeta_plus_theta)
+        # Y_sum_t_times_logalpha  # C x K x R x L
+        Y_sum_t_times_logalpha = torch.einsum('ckr,l->ckrl', Y_sum_t, log_alpha)
+
+        # shared items:
+        # log_theta  # L
+        log_theta = torch.log(theta)
+        # alpha_log_theta  # L
+        alpha_log_theta = alpha * log_theta
+        # log_pi  # L
+        log_pi = torch.log(pi)
+        L_a = factors.shape[0] // n_areas
+
+        # U_tensor # C x K x L
+        U_tensor = (Y_times_beta - Y_sum_rt_plus_alpha_times_log_dt_exp_beta_plus_theta +
+                    alpha_log_theta.unsqueeze(0).unsqueeze(1) + Y_sum_rt_times_logalpha +
+                    log_pi.unsqueeze(0).unsqueeze(1))
+        # U_tensor # C x K x A x La (need to implement it this way so the softmax operation doesn't include the zero terms)
+        U_tensor = U_tensor.reshape(*U_tensor.shape[:-1], n_areas, L_a)
+        # W_CKL # C x K x L
+        W_CKL = neuron_factor_access * F.softmax(U_tensor, dim=-1).reshape(*U_tensor.shape[:-2], factors.shape[0])
+        self.W_CKL = W_CKL.detach()  # for finding the posterior clustering probabilities
+
+        # V_tensor # C x K x R x L x N
+        V_tensor = (Y_times_warped_beta - Y_sum_t_plus_alpha_times_log_dt_exp_warpedbeta_plus_theta +
+                    alpha_log_theta.unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(4) +
+                    Y_sum_t_times_logalpha.unsqueeze(4) +
+                    log_pi.unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(4))
+        # V_tensor # C x K x R x A x La x N  (need to implement it this way so the softmax and logsumexp operations doesn't include the zero terms)
+        V_tensor = V_tensor.reshape(*V_tensor.shape[:3], n_areas, L_a, V_tensor.shape[-1])
+        # W_CRN # C x K x R x A x N
+        W_CRN = torch.logsumexp(V_tensor, dim=-2)
+        # neuron_area_access  #  C x K x 1 x A x 1
+        neuron_area_access = neuron_factor_access[:, :, [i * L_a for i in range(n_areas)]].unsqueeze(2).unsqueeze(4)
+        # W_CRN # C x R x N
+        W_CRN = F.softmax(torch.sum(W_CRN * neuron_area_access, dim=(1, 3)), dim=-1)
+
+        # W_CKL # C x K x 1 x L x 1
+        W_CKL = W_CKL.unsqueeze(2).unsqueeze(4)
+        # W_CRN # C x 1 x R x 1 x N
+        W_CRN = W_CRN.unsqueeze(1).unsqueeze(3)
+        # W_tensor # C x K x R x L x N
+        W_tensor = (W_CKL * W_CRN).detach()
+        scale = 1/torch.prod(torch.tensor(W_tensor.shape[:3]))
+
+        # a_KL  # C x K x L
+        a_KL = Y_sum_rt_plus_alpha/dt_exp_beta_plus_theta
+        # b_KL  # C x K x L
+        b_KL = torch.digamma(Y_sum_rt_plus_alpha) - log_dt_exp_beta_plus_theta
         # Liklelihood Terms
-        elbo_term = (sum_Y_times_N_matrix - A_tensor * logterm2[None, :, :, :, :] - torch.lgamma(alpha_expand) +
-                     alpha_expand * (torch.log(theta_expand) + B_tensor) + logpi_expand)
+        # a_KL_times_dt_exp_warpedbeta_plus_theta # C x K x R x L x N
+        a_KL_times_dt_exp_warpedbeta_plus_theta = torch.einsum('ckl,crln->ckrln', a_KL, dt_exp_warpedbeta_plus_theta)
+        # alpha_log_theta_plus_alpha_b_KL  # C x K x L
+        alpha_log_theta_plus_b_KL = (alpha_log_theta.unsqueeze(0).unsqueeze(1) + torch.einsum('l,ckl->ckl', alpha, b_KL)).unsqueeze(2).unsqueeze(4)
+        log_gamma_alpha = torch.lgamma(alpha).unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(4)
+        log_pi = log_pi.unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(4)
 
-        # elbo_term # K x L x M x N x C
-        elbo_term = torch.sum(W_tensor * elbo_term)
+        # trial_peak_offsets  # N x R x C x 2AL
+        d = self.trial_peak_offset_covar_ltri.shape[0]
+        Sigma = self.trial_peak_offset_covar_ltri @ self.trial_peak_offset_covar_ltri.t()
+        det_Sigma = torch.linalg.det(Sigma)
+        inv_Sigma = torch.linalg.inv(Sigma)
+        prod_term = torch.einsum('nrcl,lj,nrcj->crn', self.trial_peak_offsets, inv_Sigma, self.trial_peak_offsets)  # sum over l
+        normalizing_const = d*torch.log(torch.tensor(2*torch.pi)) + torch.log(det_Sigma)
+        entropy_term = 0.5 * (normalizing_const + prod_term)
+        entropy_term = entropy_term.unsqueeze(1).unsqueeze(3)
 
-        return elbo_term
+        elbo = Y_times_warped_beta - a_KL_times_dt_exp_warpedbeta_plus_theta - log_gamma_alpha + alpha_log_theta_plus_b_KL + log_pi - entropy_term
+        elbo = scale * W_tensor * elbo
 
-
-    def compute_offset_entropy_terms(self): # last 2 entropy terms
-        # Entropy1 Terms
-        dim = self.config_peak_offset_stdevs.shape[0]
-
-        Sigma1 = torch.diag(F.softplus(self.config_peak_offset_stdevs)) @ torch.diag(F.softplus(self.config_peak_offset_stdevs)).t()
-        det_Sigma1 = torch.linalg.det(Sigma1)
-        inv_Sigma1 = torch.linalg.inv(Sigma1)
-        prod_term1 = torch.einsum('ncl,lj,ncj->nc', self.transformed_config_peak_offset_samples, inv_Sigma1, self.transformed_config_peak_offset_samples)  # sum over l
-        # entropy_term1  # N x C
-        entropy_term1 = -0.5 * (torch.log((2 * torch.pi) ** dim * det_Sigma1) + prod_term1)
-        # entropy_term1  # 1 x 1 x 1 x N x C
-        # W_C_tensor # 1 x 1 x M x N x C
-        entropy_term1 = torch.sum(self.W_C_tensor * entropy_term1.unsqueeze(0).unsqueeze(1).unsqueeze(2))
-
-        Sigma2 = self.trial_peak_offset_covar_ltri @ self.trial_peak_offset_covar_ltri.t()
-        det_Sigma2 = torch.linalg.det(Sigma2)
-        inv_Sigma2 = torch.linalg.inv(Sigma2)
-        prod_term2 = torch.einsum('mrcl,lj,mrcj->mrc', self.transformed_trial_peak_offset_samples, inv_Sigma2, self.transformed_trial_peak_offset_samples) # sum over l
-        # entropy_term2  # M x C
-        entropy_term2 = -0.5 * torch.sum(torch.log((2 * torch.pi)**dim * det_Sigma2) + prod_term2, dim=1) # sum over r
-        # entropy_term2  # 1 x 1 x M x 1 x C
-        # W_C_tensor # 1 x 1 x M x N x C
-        entropy_term2 = torch.sum(self.W_C_tensor * entropy_term2.unsqueeze(0).unsqueeze(1).unsqueeze(3))
-        return entropy_term1, entropy_term2
+        return torch.sum(elbo)
 
 
-    def compute_penalty_terms(self, tau_beta, tau_budget, tau_sigma1, tau_sigma2):
+    def compute_penalty_terms(self, tau_beta, tau_budget, tau_config, tau_sigma):
         # Penalty Terms
-        sigma_Penalty1 = - tau_sigma1 * self.config_peak_offset_stdevs @ self.config_peak_offset_stdevs
+        config_Penalty = - tau_config * torch.sum(self.config_peak_offsets * self.config_peak_offsets)
 
         Sigma = self.trial_peak_offset_covar_ltri @ self.trial_peak_offset_covar_ltri.T
         inv_Sigma = torch.linalg.inv(Sigma)
-        sigma_Penalty2 = -tau_sigma2 * (torch.sum(torch.abs(inv_Sigma)) - torch.sum(torch.abs(torch.diag(inv_Sigma))))
+        sigma_Penalty = -tau_sigma * (torch.sum(torch.abs(inv_Sigma)) - torch.sum(torch.abs(torch.diag(inv_Sigma))))
 
-        latent_factors = F.softplus(self.beta)
+        latent_factors = torch.exp(self.beta)
         smoothness_budget_constrained = F.softmax(torch.cat([torch.zeros(1), self.smoothness_budget]), dim=0)
         beta_s2_penalty = - tau_beta * smoothness_budget_constrained.t() @ torch.sum((latent_factors @ self.Delta2TDelta2) * latent_factors, dim=1)
 
         smoothness_budget_penalty = - tau_budget * (self.smoothness_budget @ self.smoothness_budget)
 
-        penalty_term = sigma_Penalty1 + sigma_Penalty2 + beta_s2_penalty + smoothness_budget_penalty
+        penalty_term = config_Penalty + sigma_Penalty + beta_s2_penalty + smoothness_budget_penalty
         return penalty_term
 
 
-    def forward(self, Y, neuron_factor_access, n_areas, tau_beta, tau_budget, tau_sigma1, tau_sigma2):
+    def infer_neuron_factor_assignment(self):
+        # likelihoods # C x K x L
+        likelihoods = self.W_CKL
+        neuron_factor_assignment = torch.where(likelihoods == torch.max(likelihoods, dim=-1, keepdim=True).values, 1, 0)
+        return neuron_factor_assignment
+
+
+    def forward(self, Y, neuron_factor_access, n_areas, tau_beta, tau_budget, tau_config, tau_sigma):
         _, _, n_trials, n_configs = Y.shape
-        warped_factors = self.warp_all_latent_factors_for_all_trials(n_configs, n_trials)
-        likelihood_term = (1 / (Y.shape[0] * Y.shape[-2] * Y.shape[-1])) * self.compute_log_elbo(Y, neuron_factor_access, warped_factors, n_areas)
-        entropy_term1, entropy_term2 = self.compute_offset_entropy_terms()
-        entropy_term = (1 / (Y.shape[-1])) * entropy_term1 + (1 / (Y.shape[-2] * Y.shape[-1])) * entropy_term2
-        penalty_term = self.compute_penalty_terms(tau_beta, tau_budget, tau_sigma1, tau_sigma2)
-        return likelihood_term, entropy_term, penalty_term
+        self.sample_trial_offsets(n_configs, n_trials)
+        warped_factors = self.warp_all_latent_factors_for_all_trials()
+        likelihood_term = self.compute_log_elbo(Y, neuron_factor_access, warped_factors, n_areas)
+        penalty_term = self.compute_penalty_terms(tau_beta, tau_budget, tau_config, tau_sigma)
+        return likelihood_term, penalty_term
+
+
+    def evaluate(self, Y, neuron_factor_access, n_areas):
+        warped_factors = self.warp_all_latent_factors_for_all_trials()
+        likelihood_term = self.compute_log_elbo(Y, neuron_factor_access, warped_factors, n_areas)
+        factor_assignment = self.infer_neuron_factor_assignment()
+        return likelihood_term, factor_assignment

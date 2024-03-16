@@ -4,7 +4,6 @@ import sys
 sys.path.append(os.path.abspath('.'))
 from src.EM_Torch.simulate_data_multitrial import DataAnalyzer
 from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
-from src.EM_Torch.LikelihoodModel import LikelihoodModel
 from src.EM_Torch.general_functions import load_model_checkpoint, softplus, plot_spikes, \
     plot_intensity_and_latents, create_relevant_files, get_parser, plot_outputs, \
     write_log_and_model, write_losses, plot_losses, CustomDataset
@@ -21,9 +20,8 @@ args.data_seed = np.random.randint(0, 2 ** 32 - 1)
 outputs_folder = 'outputs'
 
 # args.n_trials = 5  # R
-# args.n_configs = 5  # C
-# args.n_trial_samples = 4  # M
-# args.n_config_samples = 4  # N
+# args.n_configs = 2  # C
+# args.n_trial_samples = 4  # N
 # args.K = 3  # K
 
 
@@ -43,12 +41,12 @@ outputs_folder = 'outputs'
 args.notes = 'Full_UnconstrainedGroundTruthFactors'
 args.batch_size = 'All'
 args.K = 60  # K
-args.lr = 0.001
+args.lr = 0.01
 args.param_seed = 'InitAllGroundTruth'
 args.num_epochs = 10000
-args.tau_beta = 50
-args.tau_sigma1 = 50
-# args.tau_sigma2 = 50
+args.tau_beta = 0.01
+args.tau_config = 0.01
+args.tau_sigma = 0.01
 
 
 print('Start')
@@ -58,38 +56,28 @@ np.random.seed(args.data_seed)
 # if args.param_seed != 'TRUTH':
 #     torch.manual_seed(args.param_seed)
 # Ground truth data
-data = DataAnalyzer().initialize(A=args.A, intensity_mltply=args.intensity_mltply, intensity_bias=args.intensity_bias)
+data = DataAnalyzer().initialize(configs=args.n_configs, A=args.A, intensity_mltply=args.intensity_mltply,
+                                 intensity_bias=args.intensity_bias)
 # Training data
-Y_train, stim_time, factor_access_train = data.sample_data(K=args.K, A=args.A, n_configs=args.n_configs, n_trials=args.n_trials)
-(intensities_train, factor_assignment_train, factor_assignment_onehot_train, neuron_gains_train, config_offsets_train,
- trial_offsets_train) = data.get_data_ground_truth()
+Y_train, stim_time, factor_access_train = data.sample_data(K=args.K, A=args.A, n_trials=args.n_trials)
+intensities_train, factor_assignment_train, factor_assignment_onehot_train, neuron_gains_train, trial_offsets_train = data.get_sample_ground_truth()
 # Validation data
-Y_test, _, factor_access_test = data.sample_data(K=args.K, A=args.A, n_configs=args.n_configs, n_trials=args.n_trials)
-(intensities_test, factor_assignment_test, factor_assignment_onehot_test, neuron_gains_test, config_offsets_test,
- trial_offsets_test) = data.get_data_ground_truth()
-
-# true_likelihood_train = data.compute_log_likelihood(Y_train, intensities_train, factor_assignment_train,
-#                                                     config_offsets_train, trial_offsets_train)
-# true_likelihood_test = data.compute_log_likelihood(Y_test, intensities_test, factor_assignment_test,
-#                                                    config_offsets_test, trial_offsets_test)
+Y_test, _, factor_access_test = data.sample_data(K=args.K, A=args.A, n_trials=args.n_trials)
+intensities_test, factor_assignment_test, factor_assignment_onehot_test, neuron_gains_test, trial_offsets_test = data.get_sample_ground_truth()
 
 # initialize the model with ground truth params
-true_model = LikelihoodModel(stim_time)
-true_model.init_params(torch.tensor(data.beta), torch.tensor(data.alpha),
-                       torch.tensor(data.theta), torch.tensor(data.pi),
-                       torch.tensor(data.config_peak_offset_stdevs),
-                       torch.tensor(data.trial_peak_offset_covar_ltri),
-                       args.n_configs, args.K)
+num_factors = data.beta.shape[0]
+model = LikelihoodELBOModel(data.time, num_factors, args.A, args.n_configs, args.n_trial_samples)
+model.init_ground_truth(torch.tensor(data.beta), torch.tensor(data.alpha), torch.tensor(data.theta), torch.tensor(data.pi),
+                        torch.tensor(data.config_peak_offsets), torch.tensor(data.trial_peak_offset_covar_ltri))
 
-true_model.eval()
+model.eval()
 with torch.no_grad():
-    true_model.init_ground_truth(torch.tensor(config_offsets_train), torch.tensor(trial_offsets_train))
-    likelihood_term_train, entropy_term_train, model_factor_assignment_train = true_model.forward(torch.tensor(Y_train), torch.tensor(factor_access_train), args.A)
-    true_ELBO_train = likelihood_term_train + entropy_term_train
+    model.trial_peak_offsets = torch.tensor(trial_offsets_train)
+    true_ELBO_train, model_factor_assignment_train = model.evaluate(torch.tensor(Y_train), torch.tensor(factor_access_train), args.A)
 
-    true_model.init_ground_truth(torch.tensor(config_offsets_test), torch.tensor(trial_offsets_test))
-    likelihood_term_test, entropy_term_test, model_factor_assignment_test = true_model.forward(torch.tensor(Y_test), torch.tensor(factor_access_test), args.A)
-    true_ELBO_test = likelihood_term_test + entropy_term_test
+    model.trial_peak_offsets = torch.tensor(trial_offsets_test)
+    true_ELBO_test, model_factor_assignment_test = model.evaluate(torch.tensor(Y_test), torch.tensor(factor_access_test), args.A)
 
 output_str = (
     f"True ELBO Training: {true_ELBO_train},\n"
@@ -104,7 +92,7 @@ else:
     start_epoch = 0
     args.folder_name = (
         f'{args.param_seed}_dataSeed{args.data_seed}_K{args.K}_R{args.n_trials}_A{args.A}_C{args.n_configs}'
-        f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauSigma1{args.tau_sigma1}_tauSigma2{args.tau_sigma2}'
+        f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}'
         f'_iters{args.num_epochs}_BatchSize{args.batch_size}_lr{args.lr}_notes-{args.notes}')
     output_dir = os.path.join(output_dir, args.folder_name)
     if not os.path.exists(output_dir):
@@ -112,16 +100,9 @@ else:
     create_relevant_files(output_dir, args, output_str)
     plot_spikes(Y_train, output_dir, data.dt, 'train')
     plot_spikes(Y_test, output_dir, data.dt, 'test')
-    plot_intensity_and_latents(data.time, softplus(data.beta), data.neuron_intensities, output_dir)
+    plot_intensity_and_latents(data.time, np.exp(data.beta), intensities_train, output_dir)
 
     # Initialize the model
-    num_factors = data.beta.shape[0]
-    model = LikelihoodELBOModel(data.time, args.n_trial_samples, args.n_config_samples)
-    model.init_ground_truth(num_factors, args.A,
-                            torch.tensor(data.beta), torch.tensor(data.alpha),
-                            torch.tensor(data.theta), torch.tensor(data.pi),
-                            torch.tensor(data.config_peak_offset_stdevs),
-                            torch.tensor(data.trial_peak_offset_covar_ltri))
     # model.init_ground_truth(num_factors, args.A, torch.zeros_like(torch.tensor(data.beta)).float())
     # model.init_ground_truth(num_factors, args.A, torch.tensor(data.beta).float())
     # la = int(num_factors/args.A)
@@ -150,7 +131,7 @@ if __name__ == "__main__":
     alpha_mses = []
     theta_mses = []
     pi_mses = []
-    stdevs_mses = []
+    config_mses = []
     ltri_mses = []
     total_time = 0
     # For debugging
@@ -160,15 +141,12 @@ if __name__ == "__main__":
         model.train()
         for Y, access in dataloader:
             optimizer.zero_grad()
-            # batch_weights = Y_train.shape[0] // args.batch_size
-            # batch_add = 1 if Y_train.shape[0] % args.batch_size > 0 else 0
-            # weight = (1 / ((batch_weights + batch_add)))
-            likelihood_term, entropy_term, penalty_term = model.forward(Y, access, args.A, args.tau_beta, args.tau_budget, args.tau_sigma1, args.tau_sigma2)
-            loss = -(likelihood_term + entropy_term + penalty_term)
+            likelihood_term, penalty_term = model.forward(Y, access, args.A, args.tau_beta, args.tau_budget, args.tau_config, args.tau_sigma)
+            loss = -(likelihood_term + penalty_term)
             loss.backward()
             optimizer.step()
-            losses_batch.append((likelihood_term + entropy_term + penalty_term).item())
-            log_likelihoods_batch.append((likelihood_term + entropy_term).item())
+            losses_batch.append((likelihood_term + penalty_term).item())
+            log_likelihoods_batch.append(likelihood_term.item())
 
         if epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             model.eval()
@@ -177,22 +155,22 @@ if __name__ == "__main__":
                 alpha_mses.append(F.mse_loss(model.alpha, torch.tensor(data.alpha)).item())
                 theta_mses.append(F.mse_loss(model.theta, torch.tensor(data.theta)).item())
                 pi_mses.append(F.mse_loss(model.pi, torch.tensor(data.pi).reshape(args.A, -1)[:, 1:]).item())
-                stdevs_mses.append(F.mse_loss(model.config_peak_offset_stdevs, torch.tensor(data.config_peak_offset_stdevs)).item())
+                config_mses.append(F.mse_loss(model.config_peak_offsets, torch.tensor(data.config_peak_offsets)).item())
                 ltri_mses.append(F.mse_loss(model.trial_peak_offset_covar_ltri, torch.tensor(data.trial_peak_offset_covar_ltri)).item())
 
-                likelihood_term_train, entropy_term_train, penalty_term_train = model.forward(torch.tensor(Y_train),
-                                                                                              torch.tensor(factor_access_train),
-                                                                                              args.A, args.tau_beta, args.tau_budget,
-                                                                                              args.tau_sigma1, args.tau_sigma2)
-                losses_train.append((likelihood_term_train + entropy_term_train + penalty_term_train).item())
-                log_likelihoods_train.append((likelihood_term_train + entropy_term_train).item())
+                likelihood_term_train, penalty_term_train = model.forward(torch.tensor(Y_train),
+                                                                          torch.tensor(factor_access_train),
+                                                                          args.A, args.tau_beta, args.tau_budget,
+                                                                          args.tau_config, args.tau_sigma)
+                losses_train.append((likelihood_term_train + penalty_term_train).item())
+                log_likelihoods_train.append(likelihood_term_train.item())
 
-                likelihood_term_test, entropy_term_test, penalty_term_test = model.forward(torch.tensor(Y_test),
-                                                                                           torch.tensor(factor_access_test),
-                                                                                           args.A, args.tau_beta, args.tau_budget,
-                                                                                           args.tau_sigma1, args.tau_sigma2)
-                losses_test.append((likelihood_term_test + entropy_term_test + penalty_term_test).item())
-                log_likelihoods_test.append((likelihood_term_test + entropy_term_test).item())
+                likelihood_term_test,penalty_term_test = model.forward(torch.tensor(Y_test),
+                                                                       torch.tensor(factor_access_test),
+                                                                       args.A, args.tau_beta, args.tau_budget,
+                                                                       args.tau_config, args.tau_sigma)
+                losses_test.append((likelihood_term_test + penalty_term_test).item())
+                log_likelihoods_test.append(likelihood_term_test.item())
 
         if epoch % args.log_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             end_time = time.time()  # Record the end time of the epoch
@@ -203,8 +181,8 @@ if __name__ == "__main__":
             cur_log_likelihood_test = log_likelihoods_test[-1]
             cur_loss_test = losses_test[-1]
             with torch.no_grad():
-                smoothness_budget_constrained = F.softmax(model.smoothness_budget, dim=0).numpy()
-                latent_factors = F.softplus(model.beta).numpy()
+                smoothness_budget_constrained = F.softmax(torch.cat([torch.zeros(1), model.smoothness_budget]), dim=0).numpy()
+                latent_factors = torch.exp(model.beta).numpy()
                 warped_factors = None  # model.warp_all_latent_factors_for_all_trials(args.n_configs, args.n_trials).numpy()
             output_str = (
                 f"Epoch: {epoch:2d}, Elapsed Time: {elapsed_time / 60:.2f} mins, Total Time: {total_time / (60 * 60):.2f} hrs,\n"
@@ -222,7 +200,7 @@ if __name__ == "__main__":
             write_losses(alpha_mses, 'Test', 'alpha_MSE', output_dir, is_empty)
             write_losses(theta_mses, 'Test', 'theta_MSE', output_dir, is_empty)
             write_losses(pi_mses, 'Test', 'pi_MSE', output_dir, is_empty)
-            write_losses(stdevs_mses, 'Test', 'stdevs_MSE', output_dir, is_empty)
+            write_losses(config_mses, 'Test', 'configoffset_MSE', output_dir, is_empty)
             write_losses(ltri_mses, 'Test', 'ltri_MSE', output_dir, is_empty)
             write_losses(log_likelihoods_batch, 'Batch', 'Likelihood', output_dir, is_empty)
             write_losses(losses_batch, 'Batch', 'Loss', output_dir, is_empty)
@@ -234,7 +212,7 @@ if __name__ == "__main__":
             plot_losses(None, output_dir, 'Test', 'alpha_MSE')
             plot_losses(None, output_dir, 'Test', 'theta_MSE')
             plot_losses(None, output_dir, 'Test', 'pi_MSE')
-            plot_losses(None, output_dir, 'Test', 'stdevs_MSE')
+            plot_losses(None, output_dir, 'Test', 'configoffset_MSE')
             plot_losses(None, output_dir, 'Test', 'ltri_MSE')
             plot_losses(true_ELBO_train, output_dir, 'Batch', 'Likelihood', 20)
             plot_losses(0, output_dir, 'Batch', 'Loss', 20)
@@ -248,7 +226,7 @@ if __name__ == "__main__":
             alpha_mses = []
             theta_mses = []
             pi_mses = []
-            stdevs_mses = []
+            config_mses = []
             ltri_mses = []
             print(output_str)
             start_time = time.time()

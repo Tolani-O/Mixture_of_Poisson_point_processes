@@ -3,10 +3,9 @@ import sys
 
 sys.path.append(os.path.abspath('.'))
 from src.EM_Torch.simulate_data_multitrial import DataAnalyzer
-from src.EM_Torch.LikelihoodModel import LikelihoodModel
+from src.discard.LikelihoodModel import LikelihoodModel
 from src.EM_Torch.general_functions import load_model_checkpoint, softplus, plot_spikes, \
-    plot_intensity_and_latents, create_relevant_files, get_parser, plot_outputs, \
-    write_log_and_model, write_losses, plot_losses, CustomDataset
+    plot_intensity_and_latents, create_relevant_files, get_parser, write_log_and_model, write_losses, plot_losses, CustomDataset
 import numpy as np
 import time
 import torch

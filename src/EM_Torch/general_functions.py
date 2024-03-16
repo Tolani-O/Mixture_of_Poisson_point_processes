@@ -15,13 +15,12 @@ def get_parser():
     parser.add_argument('--n_configs', type=int, default=3, help='Number of stimulus conditions')
     parser.add_argument('--A', type=int, default=3, help='Number of areas')
     parser.add_argument('--n_trial_samples', type=int, default=10, help='Number of trial samples for monte carlo integration')
-    parser.add_argument('--n_config_samples', type=int, default=10, help='Number of config samples for monte carlo integration')
     parser.add_argument('--lr', type=float, default=1e-3, help='initial learning rate (default: 1e-3)')
     parser.add_argument('--optim', type=str, default='Adam', help='optimizer to use (default: Adam)')
     parser.add_argument('--load', type=int, default=0, help='')
     parser.add_argument('--load_epoch', type=int, default=1500, help='Which epoch to load for init loss')
-    parser.add_argument('--tau_sigma1', type=int, default=0.5, help='Value for tau_sigma1')
-    parser.add_argument('--tau_sigma2', type=int, default=0.5, help='Value for tau_sigma2')
+    parser.add_argument('--tau_config', type=int, default=0.5, help='Value for tau_sigma1')
+    parser.add_argument('--tau_sigma', type=int, default=0.5, help='Value for tau_sigma2')
     parser.add_argument('--tau_beta', type=int, default=0.5, help='Value for tau_beta')
     parser.add_argument('--tau_budget', type=int, default=0.5, help='Value for tau_tau_budget')
     parser.add_argument('--num_epochs', type=int, default=5000, help='Number of training epochs')
@@ -197,17 +196,18 @@ def create_relevant_files(output_dir, args, output_str):
     with open(os.path.join(output_dir, 'pi_MSE_test.json'), 'w+b') as file:
         file.write(b'[]')
 
-    with open(os.path.join(output_dir, 'stdevs_MSE_test.json'), 'w+b') as file:
+    with open(os.path.join(output_dir, 'configoffset_MSE_test.json'), 'w+b') as file:
         file.write(b'[]')
 
     with open(os.path.join(output_dir, 'ltri_MSE_test.json'), 'w+b') as file:
         file.write(b'[]')
 
-    command_str = (f"python src/psplines_gradient_method/main.py "
-                   f"--K {args.K} --R {args.n_trials} --L {args.L} --intensity_mltply {args.intensity_mltply} "
-                   f"--intensity_bias {args.intensity_bias} --tau_beta {args.tau_beta} --tau_sigma1 {args.tau_sigma1} "
-                   f"--num_epochs {args.num_epochs} --notes {args.notes} "
-                   f"--data_seed {args.data_seed} --param_seed {args.param_seed} --load_and_train 1")
+    command_str = ''
+    # command_str = (f"python src/psplines_gradient_method/main.py "
+    #                f"--K {args.K} --R {args.n_trials} --L {args.L} --intensity_mltply {args.intensity_mltply} "
+    #                f"--intensity_bias {args.intensity_bias} --tau_beta {args.tau_beta} --tau_sigma1 {args.tau_sigma1} "
+    #                f"--num_epochs {args.num_epochs} --notes {args.notes} "
+    #                f"--data_seed {args.data_seed} --param_seed {args.param_seed} --load_and_train 1")
     with open(os.path.join(output_dir, 'command.txt'), 'w') as file:
         file.write(command_str)
 

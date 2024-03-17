@@ -46,12 +46,12 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def init_random(self):
-        self.beta = nn.Parameter(torch.randn(self.n_factors, self.time.shape[0]))
-        self.alpha = nn.Parameter(torch.randn(self.n_factors))
-        self.theta = nn.Parameter(torch.randn(self.n_factors))
-        self.pi = nn.Parameter(torch.randn(self.n_areas, self.n_factors//self.n_areas-1))
-        self.config_peak_offsets = nn.Parameter(torch.randn(self.n_configs, 2 * self.n_factors))
-        matrix = torch.tril(torch.randn(2 * self.n_factors, 2 * self.n_factors))
+        self.beta = nn.Parameter(torch.randn(self.n_factors, self.time.shape[0], dtype=torch.float64))
+        self.alpha = nn.Parameter(torch.randn(self.n_factors, dtype=torch.float64))
+        self.theta = nn.Parameter(torch.randn(self.n_factors, dtype=torch.float64))
+        self.pi = nn.Parameter(torch.randn(self.n_areas, self.n_factors//self.n_areas-1, dtype=torch.float64))
+        self.config_peak_offsets = nn.Parameter(torch.randn(self.n_configs, 2 * self.n_factors, dtype=torch.float64))
+        matrix = torch.tril(torch.randn(2 * self.n_factors, 2 * self.n_factors, dtype=torch.float64))
         # Ensure diagonal elements are positive
         for i in range(min(matrix.size())):
             matrix[i, i] += (2*self.n_factors + F.softplus(matrix[i, i]))

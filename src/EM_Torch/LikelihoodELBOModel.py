@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from src.EM_Torch.general_functions import create_second_diff_matrix, inv_softplus
+from src.EM_Torch.general_functions import create_second_diff_matrix
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
@@ -32,6 +32,8 @@ class LikelihoodELBOModel(nn.Module):
         self.neuron_factor_access = None
         self.trial_peak_offsets = None  # NRC x 2AL
         self.W_CKL = None  # C x K x L
+        self.W_CRN = None  # C x R x N
+        self.a_CKL = None  # C x K x L
 
         # Parameters
         self.beta = None  # AL x P
@@ -245,8 +247,8 @@ class LikelihoodELBOModel(nn.Module):
         # U_tensor # C x K x A x La (need to implement it this way so the softmax operation doesn't include the zero terms)
         U_tensor = U_tensor.reshape(*U_tensor.shape[:-1], n_areas, L_a)
         # W_CKL # C x K x L
-        W_CKL = neuron_factor_access * F.softmax(U_tensor, dim=-1).reshape(*U_tensor.shape[:-2], factors.shape[0])
-        self.W_CKL = W_CKL.detach()  # for finding the posterior clustering probabilities
+        W_CKL = (neuron_factor_access * F.softmax(U_tensor, dim=-1).reshape(*U_tensor.shape[:-2], factors.shape[0])).detach()
+        self.W_CKL = W_CKL  # for finding the posterior clustering probabilities
 
         # V_tensor # C x K x R x L x N
         V_tensor = (Y_times_warped_beta - Y_sum_t_plus_alpha_times_log_dt_exp_warpedbeta_plus_theta +
@@ -260,7 +262,8 @@ class LikelihoodELBOModel(nn.Module):
         # neuron_area_access  #  C x K x 1 x A x 1
         neuron_area_access = neuron_factor_access[:, :, [i * L_a for i in range(n_areas)]].unsqueeze(2).unsqueeze(4)
         # W_CRN # C x R x N
-        W_CRN = F.softmax(torch.sum(W_CRN * neuron_area_access, dim=(1, 3)), dim=-1)
+        W_CRN = (F.softmax(torch.sum(W_CRN * neuron_area_access, dim=(1, 3)), dim=-1)).detach()
+        self.W_CRN = W_CRN  # for finding the posterior trial offsets
 
         # W_CKL # C x K x 1 x L x 1
         W_CKL = W_CKL.unsqueeze(2).unsqueeze(4)
@@ -271,9 +274,10 @@ class LikelihoodELBOModel(nn.Module):
         scale = 1/torch.prod(torch.tensor(W_tensor.shape[:3]))
 
         # a_KL  # C x K x L
-        a_KL = Y_sum_rt_plus_alpha/dt_exp_beta_plus_theta
+        a_KL = (Y_sum_rt_plus_alpha/dt_exp_beta_plus_theta).detach()
+        self.a_CKL = a_KL  # for finding the posterior neuron firing rates
         # b_KL  # C x K x L
-        b_KL = torch.digamma(Y_sum_rt_plus_alpha) - log_dt_exp_beta_plus_theta
+        b_KL = (torch.digamma(Y_sum_rt_plus_alpha) - log_dt_exp_beta_plus_theta).detach()
         # Liklelihood Terms
         # a_KL_times_dt_exp_warpedbeta_plus_theta # C x K x R x L x N
         a_KL_times_dt_exp_warpedbeta_plus_theta = torch.einsum('ckl,crln->ckrln', a_KL, dt_exp_warpedbeta_plus_theta)
@@ -316,11 +320,13 @@ class LikelihoodELBOModel(nn.Module):
         return penalty_term
 
 
-    def infer_neuron_factor_assignment(self):
+    def infer_latent_variables(self):
+        # trial_offsets # C x R x 2AL
+        trial_offsets = torch.einsum('nrcl,crn->crl', self.trial_peak_offsets, self.W_CRN)
         # likelihoods # C x K x L
-        likelihoods = self.W_CKL
-        neuron_factor_assignment = torch.where(likelihoods == torch.max(likelihoods, dim=-1, keepdim=True).values, 1, 0)
-        return neuron_factor_assignment
+        neuron_factor_assignment = torch.where(self.W_CKL == torch.max(self.W_CKL, dim=-1, keepdim=True).values, 1, 0)
+        neuron_firing_rates = torch.sum(self.a_CKL * neuron_factor_assignment, dim=2)
+        return trial_offsets.numpy(), neuron_factor_assignment.numpy(), neuron_firing_rates.numpy()
 
 
     def forward(self, Y, neuron_factor_access, n_areas, tau_beta, tau_budget, tau_config, tau_sigma):
@@ -335,5 +341,5 @@ class LikelihoodELBOModel(nn.Module):
     def evaluate(self, Y, neuron_factor_access, n_areas):
         warped_factors = self.warp_all_latent_factors_for_all_trials()
         likelihood_term = self.compute_log_elbo(Y, neuron_factor_access, warped_factors, n_areas)
-        factor_assignment = self.infer_neuron_factor_assignment()
-        return likelihood_term, factor_assignment
+        trial_offsets, neuron_factor_assignment, neuron_firing_rates = self.infer_latent_variables()
+        return likelihood_term, trial_offsets, neuron_factor_assignment, neuron_firing_rates

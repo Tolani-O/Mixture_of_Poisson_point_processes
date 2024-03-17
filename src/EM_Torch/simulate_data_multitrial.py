@@ -108,7 +108,7 @@ class DataAnalyzer:
             neuron_factor_access[((area_start_indx<=neuron_factor_assignments)&((area_start_indx+factors_per_area)>neuron_factor_assignments)),
                                  area_start_indx:(area_start_indx+factors_per_area)] = 1
         neuron_gains = np.random.gamma(softplus(self.alpha[neuron_factor_assignments]),
-                                       softplus(self.theta[neuron_factor_assignments]))
+                                       softplus(self.theta[neuron_factor_assignments])**(-1))
         self.neuron_gains = neuron_gains
         self.neuron_factor_assignments = neuron_factor_assignments
         self.neuron_factor_access = neuron_factor_access
@@ -224,7 +224,7 @@ class DataAnalyzer:
         indcs = np.indices(self.neuron_factor_assignments.shape)
         neuron_factor_assignments = np.zeros((n_configs, K, n_factors))
         neuron_factor_assignments[indcs[0].flatten(), indcs[1].flatten(), self.neuron_factor_assignments.flatten()] = 1
-        self.neuron_factor_assignments_onehot = np.transpose(neuron_factor_assignments, (1, 2, 0))
+        self.neuron_factor_assignments_onehot = neuron_factor_assignments
         self.neuron_factor_access = np.transpose(self.neuron_factor_access, (1, 2, 0))
         return self.Y, self.time, self.neuron_factor_access
 

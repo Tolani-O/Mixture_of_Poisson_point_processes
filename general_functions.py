@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import torch
+import torch.nn.functional as F
 from matplotlib.figure import figaspect
 import json
 import argparse
@@ -166,54 +167,40 @@ def create_relevant_files(output_dir, args, output_str):
     with open(os.path.join(output_dir, 'log.txt'), 'w') as file:
         file.write(output_str)
 
-    with open(os.path.join(output_dir, 'log_likelihoods_batch.json'), 'w+b') as file:
-        file.write(b'[]')
+    # List of JSON files to be created
+    file_names = [
+        'log_likelihoods_batch',
+        'losses_batch',
+        'log_likelihoods_train',
+        'losses_train',
+        'log_likelihoods_test',
+        'losses_test',
+        'beta_MSE_test',
+        'alpha_MSE_test',
+        'theta_MSE_test',
+        'pi_MSE_test',
+        'configoffset_MSE_test',
+        'ltri_MSE_test',
+        'clusr_misses_train',
+        'clusr_misses_test',
+        'gains_MSE_train',
+        'gains_MSE_test',
+        'trialoffsets_MSE_train',
+        'trialoffsets_MSE_test',
+    ]
 
-    with open(os.path.join(output_dir, 'losses_batch.json'), 'w+b') as file:
-        file.write(b'[]')
+    # Iterate over the filenames and create each file
+    for file_name in file_names:
+        with open(os.path.join(output_dir, '.'.join([file_name, 'json'])), 'w+b') as file:
+            file.write(b'[]')
 
-    with open(os.path.join(output_dir, 'log_likelihoods_train.json'), 'w+b') as file:
-        file.write(b'[]')
-
-    with open(os.path.join(output_dir, 'losses_train.json'), 'w+b') as file:
-        file.write(b'[]')
-
-    with open(os.path.join(output_dir, 'log_likelihoods_test.json'), 'w+b') as file:
-        file.write(b'[]')
-
-    with open(os.path.join(output_dir, 'losses_test.json'), 'w+b') as file:
-        file.write(b'[]')
-
-    with open(os.path.join(output_dir, 'beta_MSE_test.json'), 'w+b') as file:
-        file.write(b'[]')
-
-    with open(os.path.join(output_dir, 'alpha_MSE_test.json'), 'w+b') as file:
-        file.write(b'[]')
-
-    with open(os.path.join(output_dir, 'theta_MSE_test.json'), 'w+b') as file:
-        file.write(b'[]')
-
-    with open(os.path.join(output_dir, 'pi_MSE_test.json'), 'w+b') as file:
-        file.write(b'[]')
-
-    with open(os.path.join(output_dir, 'configoffset_MSE_test.json'), 'w+b') as file:
-        file.write(b'[]')
-
-    with open(os.path.join(output_dir, 'ltri_MSE_test.json'), 'w+b') as file:
-        file.write(b'[]')
-
-    command_str = ''
     # command_str = (f"python src/psplines_gradient_method/main.py "
     #                f"--K {args.K} --R {args.n_trials} --L {args.L} --intensity_mltply {args.intensity_mltply} "
     #                f"--intensity_bias {args.intensity_bias} --tau_beta {args.tau_beta} --tau_sigma1 {args.tau_sigma1} "
     #                f"--num_epochs {args.num_epochs} --notes {args.notes} "
     #                f"--data_seed {args.data_seed} --param_seed {args.param_seed} --load_and_train 1")
-    with open(os.path.join(output_dir, 'command.txt'), 'w') as file:
-        file.write(command_str)
-
-    models_file = os.path.join(output_dir, 'models')
-    if not os.path.exists(models_file):
-        os.makedirs(models_file)
+    # with open(os.path.join(output_dir, 'command.txt'), 'w') as file:
+    #     file.write(command_str)
 
 
 def write_log_and_model(output_str, output_dir, epoch, model):
@@ -225,23 +212,73 @@ def write_log_and_model(output_str, output_dir, epoch, model):
     torch.save(model, os.path.join(models_path, f'model_{epoch}.pth'))
 
 
-def plot_outputs(latent_factors, warped_factors, stim_time, output_dir, folder, epoch, batch=10):
+def plot_outputs(model, warped_factors, n_areas, output_dir, folder, epoch, batch=10):
 
     output_dir = os.path.join(output_dir, folder)
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
+    beta_dir = os.path.join(output_dir, 'beta')
+    if not os.path.exists(beta_dir):
+        os.makedirs(beta_dir)
+    alpha_dir = os.path.join(output_dir, 'alpha')
+    if not os.path.exists(alpha_dir):
+        os.makedirs(alpha_dir)
+    theta_dir = os.path.join(output_dir, 'theta')
+    if not os.path.exists(theta_dir):
+        os.makedirs(theta_dir)
+    pi_dir = os.path.join(output_dir, 'pi')
+    if not os.path.exists(pi_dir):
+        os.makedirs(pi_dir)
+    configoffset_dir = os.path.join(output_dir, 'configoffset')
+    if not os.path.exists(configoffset_dir):
+        os.makedirs(configoffset_dir)
+    ltri_dir = os.path.join(output_dir, 'ltri')
+    if not os.path.exists(ltri_dir):
+        os.makedirs(ltri_dir)
+    with torch.no_grad():
+        latent_factors = torch.exp(model.beta).numpy()
+        L = latent_factors.shape[0]
+        global_max = np.max(latent_factors)
+        upper_limit = global_max + 0.01
+        plt.figure(figsize=(10, L*5))
+        for l in range(L):
+            plt.subplot(L, 1, l + 1)
+            plt.plot(latent_factors[l, :], label=f'Factor [{l}, :]')
+            plt.title(f'Factor [{l}, :]')
+            plt.ylim(bottom=0, top=upper_limit)
+        plt.tight_layout()
+        plt.savefig(os.path.join(beta_dir, f'LatentFactors_{epoch}.png'))
 
-    L = latent_factors.shape[0]
-    global_max = np.max(latent_factors)
-    upper_limit = global_max + 0.01
-    plt.figure(figsize=(10, L*5))
-    for l in range(L):
-        plt.subplot(L, 1, l + 1)
-        plt.plot(stim_time, latent_factors[l, :], label=f'Factor [{l}, :]')
-        plt.title(f'Factor [{l}, :]')
-        plt.ylim(bottom=0, top=upper_limit)
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, f'main_LatentFactors_{epoch}.png'))
+        alpha = F.softplus(model.alpha).numpy()
+        plt.figure(figsize=(10, 10))
+        plt.plot(alpha, label='Alpha')
+        plt.title('Alpha')
+        plt.savefig(os.path.join(alpha_dir, f'alpha_{epoch}.png'))
+
+        theta = F.softplus(model.theta).numpy()
+        plt.figure(figsize=(10, 10))
+        plt.plot(theta, label='Theta')
+        plt.title('Theta')
+        plt.savefig(os.path.join(theta_dir, f'theta_{epoch}.png'))
+
+        pi = F.softmax(torch.cat([torch.zeros(n_areas, 1), model.pi], dim=1), dim=1).flatten().numpy()
+        plt.figure(figsize=(10, 10))
+        plt.plot(pi, label='Pi')
+        plt.title('Pi')
+        plt.savefig(os.path.join(pi_dir, f'pi_{epoch}.png'))
+
+        configoffset = model.config_peak_offsets.flatten().numpy()
+        plt.figure(figsize=(10, 10))
+        plt.plot(configoffset, label='ConfigOffset')
+        plt.title('ConfigOffset')
+        plt.savefig(os.path.join(configoffset_dir, f'configoffset_{epoch}.png'))
+
+        ltri = model.trial_peak_offset_covar_ltri.flatten().numpy()
+        plt.figure(figsize=(10, 10))
+        plt.plot(ltri, label='Ltri')
+        plt.title('Ltri')
+        plt.savefig(os.path.join(ltri_dir, f'ltri_{epoch}.png'))
+
 
     # warped_intensities = warped_factors.reshape(-1, 200)
     #
@@ -256,6 +293,18 @@ def plot_outputs(latent_factors, warped_factors, stim_time, output_dir, folder, 
     #         plt.ylim(bottom=0, top=upper_limit)
     #     plt.tight_layout()
     #     plt.savefig(os.path.join(output_dir, f'warped_intensities_batch{i}.png'))
+
+
+def plot_factor_assignments(factor_assignment, output_dir, folder, epoch):
+    cluster_dir = os.path.join(output_dir, folder, 'Cluster')
+    if not os.path.exists(cluster_dir):
+        os.makedirs(cluster_dir)
+    neuron_factor_assignments = np.concatenate(factor_assignment, axis=0)
+    height, width = [a / b * 10 for a, b in zip(neuron_factor_assignments.shape, (5, 1))]
+    plt.figure(figsize=(20, 60))
+    sns.heatmap(neuron_factor_assignments, annot=True, fmt=".2f", annot_kws={"color": "blue"})
+    plt.title('Neuron factor cluster assignments')
+    plt.savefig(os.path.join(cluster_dir,  f'cluster_assn_{epoch}.png'))
 
 
 def write_losses(list, name, metric, output_dir, starts_out_empty):

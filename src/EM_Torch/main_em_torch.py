@@ -203,8 +203,8 @@ if __name__ == "__main__":
                 warped_factors = None  # model.warp_all_latent_factors_for_all_trials(args.n_configs, args.n_trials).numpy()
             output_str = (
                 f"Epoch: {epoch:2d}, Elapsed Time: {elapsed_time / 60:.2f} mins, Total Time: {total_time / (60 * 60):.2f} hrs,\n"
-                f"Loss train: {cur_loss_train:.5f}, Log Likelihood train: {cur_log_likelihood_train:.5f},\n"
-                f"Loss test: {cur_loss_test:.5f}, Log Likelihood test: {cur_log_likelihood_test:.5f},\n"
+                f"Log Likelihood train: {cur_log_likelihood_train:.5f},\n"
+                f"Log Likelihood test: {cur_log_likelihood_test:.5f},\n"
                 f"lr: {args.lr:.5f}, smoothness_budget: {smoothness_budget_constrained.T}\n\n")
             write_log_and_model(output_str, output_dir, epoch, model)
             plot_outputs(model, warped_factors, args.A, output_dir, 'Train', epoch)
@@ -238,7 +238,7 @@ if __name__ == "__main__":
             plot_losses(None, output_dir, 'Test', 'configoffset_MSE')
             plot_losses(None, output_dir, 'Test', 'ltri_MSE')
             plot_losses(true_ELBO_train, output_dir, 'Batch', 'Likelihood', 20)
-            plot_losses(0, output_dir, 'Batch', 'Loss', 20)
+            plot_losses(None, output_dir, 'Batch', 'Loss', 20)
             plot_losses(None, output_dir, 'Train', 'clusr_misses')
             plot_losses(None, output_dir, 'Test', 'clusr_misses')
             plot_losses(None, output_dir, 'Train', 'gains_MSE')

@@ -326,7 +326,7 @@ class LikelihoodELBOModel(nn.Module):
         # likelihoods # C x K x L
         neuron_factor_assignment = torch.where(self.W_CKL == torch.max(self.W_CKL, dim=-1, keepdim=True).values, 1, 0)
         neuron_firing_rates = torch.sum(self.a_CKL * neuron_factor_assignment, dim=2)
-        return trial_offsets.numpy(), neuron_factor_assignment.numpy(), neuron_firing_rates.numpy()
+        return trial_offsets, neuron_factor_assignment, neuron_firing_rates
 
 
     def forward(self, Y, neuron_factor_access, n_areas, tau_beta, tau_budget, tau_config, tau_sigma):

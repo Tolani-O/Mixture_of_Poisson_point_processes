@@ -11,7 +11,7 @@ from torch.utils.data import Dataset
 
 def get_parser():
     parser = argparse.ArgumentParser(description='Sequence Modeling - Polyphonic Music')
-    parser.add_argument('--cuda', action='store_false', default=False, help='use CUDA (default: False)')
+    parser.add_argument('--cuda', action='store_true', default=True, help='use CUDA (default: True)')
     parser.add_argument('--n_trials', type=int, default=15, help='Number of trials per stimulus condition')
     parser.add_argument('--n_configs', type=int, default=3, help='Number of stimulus conditions')
     parser.add_argument('--A', type=int, default=3, help='Number of areas')
@@ -351,6 +351,7 @@ def plot_losses(true_likelihood, output_dir, name, metric, cutoff=0):
     json_path = os.path.join(output_dir, file_name)
     with open(json_path, 'r') as file:
         metric_data = json.load(file)
+    metric_data = metric_data[cutoff:]
     plt.figure(figsize=(10, 6))
     plt.plot(metric_data, label=metric)
     if 'likelihood' in metric.lower():
@@ -360,19 +361,18 @@ def plot_losses(true_likelihood, output_dir, name, metric, cutoff=0):
     plt.ylabel(metric)
     plt.title('Plot of metric values')
     plt.legend()
-    plt.savefig(os.path.join(plt_path, f'{metric}_{name}_Trajectories.png'))
     if cutoff > 0:
-        metric_data = metric_data[cutoff:]
-        plt.figure(figsize=(10, 6))
-        plt.plot(metric_data, label=metric)
-        if 'likelihood' in metric.lower():
-            true_likelihood_vector = [true_likelihood] * len(metric_data)
-            plt.plot(true_likelihood_vector, label='True Log Likelihood')
-        plt.xlabel('Iterations')
-        plt.ylabel(metric)
-        plt.title('Plot of metric values')
-        plt.legend()
-        plt.savefig(os.path.join(plt_path, f'{metric}_{name}_Trajectories_cutoff{cutoff}.png'))
+        plt.savefig(os.path.join(plt_path, f'{metric}_{name}_Trajectories_Cutoff{cutoff}.png'))
+    else:
+        plt.savefig(os.path.join(plt_path, f'{metric}_{name}_Trajectories.png'))
+
+
+def load_tensors(numpys, is_cuda):
+    tensors = [torch.tensor(numpy) for numpy in numpys]
+    if is_cuda:
+        return tuple([tensor.cuda() for tensor in tensors])
+    else:
+        return tensors
 
 
 def softplus(x):
@@ -388,3 +388,77 @@ def int_or_str(value):
         return int(value)
     except ValueError:
         return value
+
+
+def remove_minimums(true_likelihood, output_dir, name, metric, min_cutoff=0, write=False, write_cutoff=0):
+    if 'likelihood' in metric.lower():
+        file_name = 'log_likelihoods'
+    elif 'loss' in metric.lower():
+        file_name = 'losses'
+    else:
+        file_name = metric
+    file_name = f'{file_name}_{name.lower()}.json'
+    json_path = os.path.join(output_dir, file_name)
+    with open(json_path, 'r') as file:
+        metric_data = json.load(file)
+
+    metric_data_plot = metric_data[min_cutoff:]
+    min_indx = np.min(np.where(metric_data_plot==np.min(metric_data_plot))) + min_cutoff
+    metric_data_plot = metric_data
+    metric_data_plot[min_indx] = metric_data_plot[min_indx + 1]
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(metric_data_plot, label=metric)
+    if 'likelihood' in metric.lower():
+        true_likelihood_vector = [true_likelihood] * len(metric_data_plot)
+        plt.plot(true_likelihood_vector, label='True Log Likelihood')
+    plt.xlabel('Iterations')
+    plt.ylabel(metric)
+    plt.title('Plot of metric values')
+    plt.legend()
+    plt.show()
+    if min_indx != 0:
+        print(f'Found minimum at index {min_indx}')
+        if write:
+            metric_data[min_indx] = metric_data[min_indx + 1]
+            with open(json_path, 'w') as file:
+                json.dump(metric_data, file)
+            plot_losses(true_likelihood, output_dir, name, metric, write_cutoff)
+            print(f'Removed minimum at index {min_indx}')
+    else:
+        print(f'No minimum found')
+
+
+def remove_chunk(true_likelihood, output_dir, name, metric, start, end, write=False, cutoff=0):
+    if 'likelihood' in metric.lower():
+        file_name = 'log_likelihoods'
+    elif 'loss' in metric.lower():
+        file_name = 'losses'
+    else:
+        file_name = metric
+    file_name = f'{file_name}_{name.lower()}.json'
+    json_path = os.path.join(output_dir, file_name)
+    with open(json_path, 'r') as file:
+        metric_data = json.load(file)
+    metric_data_plot = metric_data[cutoff:]
+    if end == -1:
+        end = len(metric_data_plot)
+    metric_data1 = metric_data_plot[:start]
+    metric_data2 = metric_data_plot[end:]
+    metric_data_plot = metric_data1 + metric_data2
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(metric_data_plot, label=metric)
+    if 'likelihood' in metric.lower():
+        true_likelihood_vector = [true_likelihood] * len(metric_data_plot)
+        plt.plot(true_likelihood_vector, label='True Log Likelihood')
+    plt.xlabel('Iterations')
+    plt.ylabel(metric)
+    plt.title('Plot of metric values')
+    plt.legend()
+    plt.show()
+    if write:
+        metric_data = metric_data_plot
+        with open(json_path, 'w') as file:
+            json.dump(metric_data, file)
+        plot_losses(true_likelihood, output_dir, name, metric, cutoff)

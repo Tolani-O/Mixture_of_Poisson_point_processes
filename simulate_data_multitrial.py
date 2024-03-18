@@ -226,7 +226,7 @@ class DataAnalyzer:
         neuron_factor_assignments[indcs[0].flatten(), indcs[1].flatten(), self.neuron_factor_assignments.flatten()] = 1
         self.neuron_factor_assignments_onehot = neuron_factor_assignments
         self.neuron_factor_access = np.transpose(self.neuron_factor_access, (1, 2, 0))
-        return self.Y, self.time, self.neuron_factor_access
+        return self.Y, self.neuron_factor_access
 
 
     def get_sample_ground_truth(self):

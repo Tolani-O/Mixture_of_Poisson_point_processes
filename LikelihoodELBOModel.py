@@ -10,6 +10,7 @@ class LikelihoodELBOModel(nn.Module):
     def __init__(self, time, n_factors, n_areas, n_configs, n_trial_samples):
         super(LikelihoodELBOModel, self).__init__()
 
+        self.device = 'cpu'
         self.time = torch.tensor(time)
         dt = round(time[1] - time[0], 3)
         self.dt = torch.tensor(dt)
@@ -101,10 +102,18 @@ class LikelihoodELBOModel(nn.Module):
         self.init_ground_truth(n_factors, beta=beta, pi=pi)
 
 
+    def cuda(self, device=None):
+        self.device = 'cuda'
+        self.time = self.time.cuda(device)
+        super(LikelihoodELBOModel, self).cuda(device)
+        return self
+
+
     def sample_trial_offsets(self, n_configs, n_trials):
         n_factors = self.beta.shape[0]
-        trial_peak_offset_samples = torch.randn(self.n_trial_samples, n_trials * n_configs, 2 * n_factors, dtype=torch.float64).view(
-            self.n_trial_samples, n_trials, n_configs, 2 * n_factors)
+        trial_peak_offset_samples = torch.randn(self.n_trial_samples, n_trials * n_configs, 2 * n_factors,
+                                                device=self.device, dtype=torch.float64).view(
+                                self.n_trial_samples, n_trials, n_configs, 2 * n_factors)
         self.trial_peak_offsets = torch.einsum('lj,nrcj->nrcl', self.trial_peak_offset_covar_ltri, trial_peak_offset_samples)
 
 
@@ -194,7 +203,7 @@ class LikelihoodELBOModel(nn.Module):
         Y_sum_t = torch.sum(Y, dim=1).permute(2, 0, 1)  # C x K x R
         alpha = F.softplus(self.alpha)
         theta = F.softplus(self.theta)
-        pi = F.softmax(torch.cat([torch.zeros(n_areas, 1), self.pi], dim=1), dim=1).flatten()
+        pi = F.softmax(torch.cat([torch.zeros(n_areas, 1, device=self.device), self.pi], dim=1), dim=1).flatten()
         log_alpha = torch.log(alpha)
 
         # U tensor items:
@@ -311,8 +320,9 @@ class LikelihoodELBOModel(nn.Module):
         sigma_Penalty = -tau_sigma * (torch.sum(torch.abs(inv_Sigma)) - torch.sum(torch.abs(torch.diag(inv_Sigma))))
 
         latent_factors = torch.exp(self.beta)
-        smoothness_budget_constrained = F.softmax(torch.cat([torch.zeros(1), self.smoothness_budget]), dim=0)
-        beta_s2_penalty = - tau_beta * smoothness_budget_constrained.t() @ torch.sum((latent_factors @ self.Delta2TDelta2) * latent_factors, dim=1)
+        smoothness_budget_constrained = F.softmax(torch.cat([torch.zeros(1, device=self.device), self.smoothness_budget]), dim=0)
+        beta_s2_penalty = (- tau_beta * smoothness_budget_constrained.t() @
+                           torch.sum((latent_factors @ self.Delta2TDelta2.to(self.device)) * latent_factors, dim=1))
 
         smoothness_budget_penalty = - tau_budget * (self.smoothness_budget @ self.smoothness_budget)
 

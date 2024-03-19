@@ -31,10 +31,10 @@ outputs_folder = 'outputs'
 
 
 
-args.folder_name = 'GroundTruthInit+MinorPenalty3+Full_dataSeed25201356_K60_R15_A3_C3_R15_tauBeta10_tauConfig1_tauSigma1_iters10000_BatchSizeAll_lr0.001_notes-Full'
-args.load = True
-args.load_epoch = 9999
-args.data_seed = 25201356
+# args.folder_name = 'GroundTruthInit+MinorPenalty3+Full_dataSeed25201356_K60_R15_A3_C3_R15_tauBeta10_tauConfig1_tauSigma1_iters10000_BatchSizeAll_lr0.001_notes-Full'
+# args.load = True
+# args.load_epoch = 9999
+# args.data_seed = 25201356
 # args.K = 60  # K
 # args.batch_size = 'All'
 # args.lr = 0.001
@@ -49,7 +49,7 @@ args.batch_size = 'All'
 args.K = 60  # K
 args.lr = 0.001
 args.param_seed = 'GroundTruthInit+MinorPenalty3+Full'
-args.num_epochs = 10000
+args.num_epochs = 50000
 args.tau_beta = 10
 args.tau_budget = 10000
 args.tau_config = 1
@@ -70,6 +70,8 @@ np.random.seed(args.data_seed)
 if torch.cuda.is_available():
     if not args.cuda:
         print("WARNING: You have a CUDA device, so you should probably run with --cuda")
+    else:
+        print("Using CUDA!")
 else:
     args.cuda = False
 data = DataAnalyzer().initialize(configs=args.n_configs, A=args.A, intensity_mltply=args.intensity_mltply,
@@ -90,14 +92,16 @@ model.init_ground_truth(torch.tensor(data.beta), torch.tensor(data.alpha), torch
 if args.cuda: model.cuda()
 model.eval()
 with (torch.no_grad()):
-    model.trial_peak_offsets = trial_offsets_train
+    model.trial_peak_offsets = trial_offsets_train.clone().detach()
     true_ELBO_train, model_trial_offsets_train, model_factor_assignment_train, model_neuron_gains_train = model.evaluate(Y_train, factor_access_train, args.A)
 
-    model.trial_peak_offsets = torch.tensor(trial_offsets_test)
+    model.trial_peak_offsets = trial_offsets_test.clone().detach()
     true_ELBO_test, model_trial_offsets_test, model_factor_assignment_test, model_neuron_gains_test = model.evaluate(Y_test, factor_access_test, args.A)
 
 trial_offsets_train = trial_offsets_train.squeeze().permute(1, 0, 2)
 trial_offsets_test = trial_offsets_test.squeeze().permute(1, 0, 2)
+true_ELBO_train = true_ELBO_train.item()
+true_ELBO_test = true_ELBO_test.item()
 output_str = (
     f"True ELBO Training: {true_ELBO_train},\n"
     f"True ELBO Test: {true_ELBO_test}\n\n")
@@ -119,7 +123,7 @@ else:
     create_relevant_files(output_dir, args, output_str)
     plot_spikes(Y_train.cpu().numpy(), output_dir, data.dt, 'train')
     plot_spikes(Y_test.cpu().numpy(), output_dir, data.dt, 'test')
-    plot_intensity_and_latents(data.time, np.exp(data.beta), intensities_train, output_dir)
+    plot_intensity_and_latents(data.time, np.exp(data.beta), intensities_train.cpu().numpy(), output_dir)
     # plot_factor_assignments(factor_assignment_onehot_train-model_factor_assignment_train, output_dir, 'Train', -1)
     # plot_factor_assignments(factor_assignment_onehot_test-model_factor_assignment_test, output_dir, 'Test', -1)
     plot_outputs(model.cpu(), None, args.A, output_dir, 'Train', -1)
@@ -167,6 +171,7 @@ if __name__ == "__main__":
     # torch.autograd.set_detect_anomaly(True)
     start_time = time.time()
     for epoch in range(start_epoch, start_epoch + args.num_epochs):
+        if args.cuda: model.cuda()
         model.train()
         for Y, access in dataloader:
             optimizer.zero_grad()
@@ -194,8 +199,8 @@ if __name__ == "__main__":
                 likelihood_term_test, model_trial_offsets_test, model_factor_assignment_test, model_neuron_gains_test = model.evaluate(Y_test, factor_access_test, args.A)
                 # losses_test.append((likelihood_term_test + penalty_term_test).item())
                 log_likelihoods_test.append(likelihood_term_test.item())
-                clusr_misses_train.append(torch.sum(torch.abs(factor_assignment_onehot_train - model_factor_assignment_train)))
-                clusr_misses_test.append(torch.sum(torch.abs(factor_assignment_onehot_test - model_factor_assignment_test)))
+                clusr_misses_train.append(torch.sum(torch.abs(factor_assignment_onehot_train - model_factor_assignment_train)).item())
+                clusr_misses_test.append(torch.sum(torch.abs(factor_assignment_onehot_test - model_factor_assignment_test)).item())
                 gains_train.append(F.mse_loss(neuron_gains_train, model_neuron_gains_train).item())
                 gains_test.append(F.mse_loss(neuron_gains_test, model_neuron_gains_test).item())
                 offsets_train.append(F.mse_loss(trial_offsets_train, model_trial_offsets_train).item())
@@ -210,7 +215,7 @@ if __name__ == "__main__":
             cur_log_likelihood_test = log_likelihoods_test[-1]
             cur_loss_test = 0 # losses_test[-1]
             with torch.no_grad():
-                smoothness_budget_constrained = F.softmax(torch.cat([torch.zeros(1), model.smoothness_budget]), dim=0).cpu().numpy()
+                smoothness_budget_constrained = F.softmax(torch.cat([torch.zeros(1, device=model.device), model.smoothness_budget]), dim=0).cpu().numpy()
                 warped_factors = None  # model.warp_all_latent_factors_for_all_trials(args.n_configs, args.n_trials).numpy()
             output_str = (
                 f"Epoch: {epoch:2d}, Elapsed Time: {elapsed_time / 60:.2f} mins, Total Time: {total_time / (60 * 60):.2f} hrs,\n"
@@ -218,7 +223,7 @@ if __name__ == "__main__":
                 f"Log Likelihood test: {cur_log_likelihood_test:.5f},\n"
                 f"lr: {args.lr:.5f}, smoothness_budget: {smoothness_budget_constrained.T}\n\n")
             write_log_and_model(output_str, output_dir, epoch, model)
-            plot_outputs(model, warped_factors, args.A, output_dir, 'Train', epoch)
+            plot_outputs(model.cpu(), warped_factors, args.A, output_dir, 'Train', epoch)
             is_empty = start_epoch == 0 and epoch == 0
             write_losses(log_likelihoods_train, 'Train', 'Likelihood', output_dir, is_empty)
             # write_losses(losses_train, 'Train', 'Loss', output_dir, is_empty)

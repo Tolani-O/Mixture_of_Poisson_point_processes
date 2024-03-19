@@ -31,14 +31,13 @@ outputs_folder = 'outputs'
 
 
 
-# args.folder_name = 'GroundTruthInit+MinorPenalty3+Full_dataSeed25201356_K60_R15_A3_C3_R15_tauBeta10_tauConfig1_tauSigma1_iters10000_BatchSizeAll_lr0.001_notes-Full'
+# args.folder_name = ''
 # args.load = True
-# args.load_epoch = 9999
+# args.load_epoch = 3670
+# args.load_run = 0
 # args.data_seed = 25201356
-# args.K = 60  # K
 # args.batch_size = 'All'
 # args.lr = 0.001
-# args.num_epochs = 10000
 # outputs_folder = '../../outputs'
 
 
@@ -46,18 +45,12 @@ outputs_folder = 'outputs'
 # args.batch_size = 10
 args.notes = 'Full'
 args.batch_size = 'All'
-args.K = 60  # K
 args.lr = 0.001
 args.param_seed = 'GroundTruthInit+MinorPenalty3+Full'
-args.num_epochs = 50000
 args.tau_beta = 10
 args.tau_budget = 10000
 args.tau_config = 1
 args.tau_sigma = 1
-# args.tau_beta = 0
-# args.tau_budget = 0
-# args.tau_config = 0
-# args.tau_sigma = 0
 
 
 print('Start')
@@ -109,25 +102,16 @@ output_str = (
 if args.load:
     start_epoch = args.load_epoch + 1
     output_dir = os.path.join(output_dir, args.folder_name)
-    # Load the model
-    model = load_model_checkpoint(output_dir, args.load_epoch)
+    model, optimizer = load_model_checkpoint(os.path.join(output_dir, f'Run_{args.load_run}'), args.load_epoch)
+    output_dir = os.path.join(output_dir, args.folder_name, f'Run_{args.load_run+1}')
 else:
     start_epoch = 0
     args.folder_name = (
         f'{args.param_seed}_dataSeed{args.data_seed}_K{args.K}_R{args.n_trials}_A{args.A}_C{args.n_configs}'
         f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}'
         f'_iters{args.num_epochs}_BatchSize{args.batch_size}_lr{args.lr}_notes-{args.notes}')
-    output_dir = os.path.join(output_dir, args.folder_name)
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    create_relevant_files(output_dir, args, output_str)
-    plot_spikes(Y_train.cpu().numpy(), output_dir, data.dt, 'train')
-    plot_spikes(Y_test.cpu().numpy(), output_dir, data.dt, 'test')
-    plot_intensity_and_latents(data.time, np.exp(data.beta), intensities_train.cpu().numpy(), output_dir)
-    # plot_factor_assignments(factor_assignment_onehot_train-model_factor_assignment_train, output_dir, 'Train', -1)
-    # plot_factor_assignments(factor_assignment_onehot_test-model_factor_assignment_test, output_dir, 'Test', -1)
-    plot_outputs(model.cpu(), None, args.A, output_dir, 'Train', -1)
-
+    output_dir = os.path.join(output_dir, args.folder_name, 'Run_0')
+    os.makedirs(output_dir)
     # Initialize the model
     # model.init_ground_truth(num_factors, args.A, torch.zeros_like(torch.tensor(data.beta)).float())
     # model.init_ground_truth(num_factors, args.A, torch.tensor(data.beta).float())
@@ -136,13 +120,21 @@ else:
     # model.init_from_data(Y=torch.tensor(Y_train).float(), neuron_factor_access=torch.tensor(factor_access_train).float(),
     #                      factor_indcs=factor_indcs)
     # model.init_random()
+    optimizer = getattr(torch.optim, args.optim)(model.parameters(), lr=args.lr)
+
+create_relevant_files(output_dir, output_str)
+plot_spikes(Y_train.cpu().numpy(), output_dir, data.dt, 'train')
+plot_spikes(Y_test.cpu().numpy(), output_dir, data.dt, 'test')
+plot_intensity_and_latents(data.time, np.exp(data.beta), intensities_train.cpu().numpy(), output_dir)
+# plot_factor_assignments(factor_assignment_onehot_train-model_factor_assignment_train, output_dir, 'Train', -1)
+# plot_factor_assignments(factor_assignment_onehot_test-model_factor_assignment_test, output_dir, 'Test', -1)
+plot_outputs(model.cpu(), args.A, output_dir, 'Train', -1)
 
 # Instantiate the dataset and dataloader
 dataset = CustomDataset(Y_train, factor_access_train)
 if args.batch_size == 'All':
     args.batch_size = Y_train.shape[0]
 dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
-optimizer = getattr(torch.optim, args.optim)(model.parameters(), lr=args.lr)
 print(f'folder_name: {args.folder_name}')
 print(output_str)
 
@@ -215,14 +207,13 @@ if __name__ == "__main__":
             cur_loss_test = 0 # losses_test[-1]
             with torch.no_grad():
                 smoothness_budget_constrained = F.softmax(torch.cat([torch.zeros(1, device=model.device), model.smoothness_budget]), dim=0).cpu().numpy()
-                warped_factors = None  # model.warp_all_latent_factors_for_all_trials(args.n_configs, args.n_trials).numpy()
             output_str = (
                 f"Epoch: {epoch:2d}, Elapsed Time: {elapsed_time / 60:.2f} mins, Total Time: {total_time / (60 * 60):.2f} hrs,\n"
                 f"Log Likelihood train: {cur_log_likelihood_train:.5f},\n"
                 f"Log Likelihood test: {cur_log_likelihood_test:.5f},\n"
                 f"lr: {args.lr:.5f}, smoothness_budget: {smoothness_budget_constrained.T}\n\n")
-            write_log_and_model(output_str, output_dir, epoch, model)
-            plot_outputs(model.cpu(), warped_factors, args.A, output_dir, 'Train', epoch)
+            write_log_and_model(output_str, output_dir, epoch, model, optimizer)
+            plot_outputs(model.cpu(), args.A, output_dir, 'Train', epoch)
             is_empty = start_epoch == 0 and epoch == 0
             write_losses(log_likelihoods_train, 'Train', 'Likelihood', output_dir, is_empty)
             # write_losses(losses_train, 'Train', 'Loss', output_dir, is_empty)

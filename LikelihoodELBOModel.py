@@ -77,7 +77,7 @@ class LikelihoodELBOModel(nn.Module):
             self.theta = nn.Parameter(theta)
         if pi is not None:
             nn_pi = pi.reshape(self.n_areas, -1)
-            nn_pi = (nn_pi - nn_pi[:, 0])[:, 1:]
+            nn_pi = (nn_pi - nn_pi[:, 0].reshape(self.n_areas, -1))[:, 1:]
             self.pi = nn.Parameter(nn_pi)
         if config_peak_offsets is not None:
             self.config_peak_offsets = nn.Parameter(config_peak_offsets)

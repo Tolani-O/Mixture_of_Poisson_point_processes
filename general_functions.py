@@ -12,14 +12,15 @@ from torch.utils.data import Dataset
 def get_parser():
     parser = argparse.ArgumentParser(description='Sequence Modeling - Polyphonic Music')
     parser.add_argument('--cuda', action='store_true', default=True, help='use CUDA (default: True)')
-    parser.add_argument('--n_trials', type=int, default=15, help='Number of trials per stimulus condition')
-    parser.add_argument('--n_configs', type=int, default=3, help='Number of stimulus conditions')
-    parser.add_argument('--A', type=int, default=3, help='Number of areas')
+    parser.add_argument('--n_trials', type=int, default=10, help='Number of trials per stimulus condition')
+    parser.add_argument('--n_configs', type=int, default=2, help='Number of stimulus conditions')
+    parser.add_argument('--A', type=int, default=2, help='Number of areas')
     parser.add_argument('--n_trial_samples', type=int, default=10, help='Number of trial samples for monte carlo integration')
     parser.add_argument('--lr', type=float, default=1e-3, help='initial learning rate (default: 1e-3)')
     parser.add_argument('--optim', type=str, default='Adam', help='optimizer to use (default: Adam)')
     parser.add_argument('--load', type=int, default=0, help='')
-    parser.add_argument('--load_epoch', type=int, default=1500, help='Which epoch to load for init loss')
+    parser.add_argument('--load_epoch', type=int, default=0, help='Which epoch to load model and optimizer from')
+    parser.add_argument('--load_run', type=int, default=0, help='Which run to load model and optimizer from')
     parser.add_argument('--tau_config', type=int, default=0.5, help='Value for tau_sigma1')
     parser.add_argument('--tau_sigma', type=int, default=0.5, help='Value for tau_sigma2')
     parser.add_argument('--tau_beta', type=int, default=0.5, help='Value for tau_beta')
@@ -31,8 +32,8 @@ def get_parser():
     parser.add_argument('--intensity_mltply', type=float, default=25, help='Latent factor intensity multiplier')
     parser.add_argument('--intensity_bias', type=float, default=1, help='Latent factor intensity bias')
     parser.add_argument('--param_seed', type=int_or_str, default='', help='options are: seed (int), Truth (str)')
-    parser.add_argument('--log_interval', type=int, default=10, metavar='N', help='report interval (default: 100')
-    parser.add_argument('--eval_interval', type=int, default=10, metavar='N', help='report interval (default: 10')
+    parser.add_argument('--log_interval', type=int, default=100, metavar='N', help='report interval (default: 100')
+    parser.add_argument('--eval_interval', type=int, default=100, metavar='N', help='report interval (default: 10')
     parser.add_argument('--batch_size', type=int_or_str, default=5, help='the batch size for training')
 
     parser.add_argument('--nhid', type=int, default=150, help='number of hidden units per layer (default: 150)')
@@ -142,11 +143,16 @@ def plot_latent_coupling(latent_coupling, output_dir):
 
 def load_model_checkpoint(output_dir, load_epoch):
     load_model_dir = os.path.join(output_dir, 'models', f'model_{load_epoch}.pth')
+    load_optimizer_dir = os.path.join(output_dir, 'models', f'optimizer_{load_epoch}.pth')
     if os.path.isfile(load_model_dir):
         model = torch.load(load_model_dir)
     else:
         raise Exception(f'No model_{load_epoch}.pth file found at {load_model_dir}')
-    return model
+    if os.path.isfile(load_optimizer_dir):
+        optimizer = torch.load(load_optimizer_dir)
+    else:
+        raise Exception(f'No optimizer_{load_epoch}.pth file found at {load_optimizer_dir}')
+    return model, optimizer
 
 
 def reset_metric_checkpoint(output_dir, folder_name, sub_folder_name, metric_files, start_epoch):
@@ -163,7 +169,7 @@ def reset_metric_checkpoint(output_dir, folder_name, sub_folder_name, metric_fil
             json.dump(file_contents, file, indent=4)
 
 
-def create_relevant_files(output_dir, args, output_str):
+def create_relevant_files(output_dir, output_str):
     with open(os.path.join(output_dir, 'log.txt'), 'w') as file:
         file.write(output_str)
 
@@ -203,16 +209,17 @@ def create_relevant_files(output_dir, args, output_str):
     #     file.write(command_str)
 
 
-def write_log_and_model(output_str, output_dir, epoch, model):
+def write_log_and_model(output_str, output_dir, epoch, model, optimizer):
     with open(os.path.join(output_dir, 'log.txt'), 'a') as file:
         file.write(output_str)
     models_path = os.path.join(output_dir, 'models')
     if not os.path.exists(models_path):
         os.makedirs(models_path)
     torch.save(model, os.path.join(models_path, f'model_{epoch}.pth'))
+    torch.save(optimizer, os.path.join(models_path, f'optimizer_{epoch}.pth'))
 
 
-def plot_outputs(model, warped_factors, n_areas, output_dir, folder, epoch, batch=10):
+def plot_outputs(model, n_areas, output_dir, folder, epoch):
 
     output_dir = os.path.join(output_dir, folder)
     if not os.path.exists(output_dir):

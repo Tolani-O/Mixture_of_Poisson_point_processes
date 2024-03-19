@@ -215,8 +215,8 @@ def write_log_and_model(output_str, output_dir, epoch, model, optimizer):
     models_path = os.path.join(output_dir, 'models')
     if not os.path.exists(models_path):
         os.makedirs(models_path)
-    torch.save(model, os.path.join(models_path, f'model_{epoch}.pth'))
-    torch.save(optimizer, os.path.join(models_path, f'optimizer_{epoch}.pth'))
+    torch.save(model.state_dict(), os.path.join(models_path, f'model_{epoch}.pth'))
+    torch.save(optimizer.state_dict(), os.path.join(models_path, f'optimizer_{epoch}.pth'))
 
 
 def plot_outputs(model, n_areas, output_dir, folder, epoch):

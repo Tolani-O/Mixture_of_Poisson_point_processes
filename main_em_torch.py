@@ -30,15 +30,18 @@ outputs_folder = 'outputs'
 # args.tau_sigma = 0
 
 
-
 # args.folder_name = ''
 # args.load = True
-# args.load_epoch = 3670
+# args.load_epoch = 0
 # args.load_run = 0
-# args.data_seed = 25201356
+# args.data_seed = 0
+# args.num_epochs = 50000
+# args.notes = 'Full'
 # args.batch_size = 'All'
-# args.lr = 0.001
-# outputs_folder = '../../outputs'
+# args.tau_beta = 10
+# args.tau_budget = 10000
+# args.tau_config = 1
+# args.tau_sigma = 1
 
 
 # args.notes = 'Batch'
@@ -47,12 +50,14 @@ args.notes = 'Full'
 args.batch_size = 'All'
 args.lr = 0.001
 args.param_seed = 'GroundTruthInit+MinorPenalty3+Full'
+args.num_epochs = 50000
 args.tau_beta = 10
 args.tau_budget = 10000
 args.tau_config = 1
 args.tau_sigma = 1
 
 
+# outputs_folder = '../../outputs'
 print('Start')
 output_dir = os.path.join(os.getcwd(), outputs_folder)
 # Set the random seed manually for reproducibility.
@@ -98,12 +103,16 @@ true_ELBO_test = true_ELBO_test.item()
 output_str = (
     f"True ELBO Training: {true_ELBO_train},\n"
     f"True ELBO Test: {true_ELBO_test}\n\n")
-
 if args.load:
     start_epoch = args.load_epoch + 1
     output_dir = os.path.join(output_dir, args.folder_name)
-    model, optimizer = load_model_checkpoint(os.path.join(output_dir, f'Run_{args.load_run}'), args.load_epoch)
-    output_dir = os.path.join(output_dir, args.folder_name, f'Run_{args.load_run+1}')
+    model_state, optimizer_state = load_model_checkpoint(os.path.join(output_dir, f'Run_{args.load_run}'), args.load_epoch)
+    # model_state, optimizer_state = model_state.state_dict(), optimizer_state.state_dict()
+    model.load_state_dict(model_state)
+    optimizer = getattr(torch.optim, args.optim)(model.parameters(), lr=args.lr)
+    optimizer.load_state_dict(optimizer_state)
+    # output_dir = os.path.join(output_dir, f'Run_{args.load_run+1}')
+    output_dir = os.path.join(output_dir, f'Run_{args.load_run}')
 else:
     start_epoch = 0
     args.folder_name = (
@@ -121,14 +130,13 @@ else:
     #                      factor_indcs=factor_indcs)
     # model.init_random()
     optimizer = getattr(torch.optim, args.optim)(model.parameters(), lr=args.lr)
-
-create_relevant_files(output_dir, output_str)
-plot_spikes(Y_train.cpu().numpy(), output_dir, data.dt, 'train')
-plot_spikes(Y_test.cpu().numpy(), output_dir, data.dt, 'test')
-plot_intensity_and_latents(data.time, np.exp(data.beta), intensities_train.cpu().numpy(), output_dir)
-# plot_factor_assignments(factor_assignment_onehot_train-model_factor_assignment_train, output_dir, 'Train', -1)
-# plot_factor_assignments(factor_assignment_onehot_test-model_factor_assignment_test, output_dir, 'Test', -1)
-plot_outputs(model.cpu(), args.A, output_dir, 'Train', -1)
+    create_relevant_files(output_dir, output_str)
+    plot_spikes(Y_train.cpu().numpy(), output_dir, data.dt, 'train')
+    plot_spikes(Y_test.cpu().numpy(), output_dir, data.dt, 'test')
+    plot_intensity_and_latents(data.time, np.exp(data.beta), intensities_train.cpu().numpy(), output_dir)
+    # plot_factor_assignments(factor_assignment_onehot_train-model_factor_assignment_train, output_dir, 'Train', -1)
+    # plot_factor_assignments(factor_assignment_onehot_test-model_factor_assignment_test, output_dir, 'Test', -1)
+    plot_outputs(model.cpu(), args.A, output_dir, 'Train', -1)
 
 # Instantiate the dataset and dataloader
 dataset = CustomDataset(Y_train, factor_access_train)
@@ -158,8 +166,6 @@ if __name__ == "__main__":
     offsets_train = []
     offsets_test = []
     total_time = 0
-    # For debugging
-    # torch.autograd.set_detect_anomaly(True)
     start_time = time.time()
     for epoch in range(start_epoch, start_epoch + args.num_epochs):
         if args.cuda: model.cuda()
@@ -214,7 +220,7 @@ if __name__ == "__main__":
                 f"lr: {args.lr:.5f}, smoothness_budget: {smoothness_budget_constrained.T}\n\n")
             write_log_and_model(output_str, output_dir, epoch, model, optimizer)
             plot_outputs(model.cpu(), args.A, output_dir, 'Train', epoch)
-            is_empty = start_epoch == 0 and epoch == 0
+            is_empty = epoch == 0
             write_losses(log_likelihoods_train, 'Train', 'Likelihood', output_dir, is_empty)
             # write_losses(losses_train, 'Train', 'Loss', output_dir, is_empty)
             write_losses(log_likelihoods_test, 'Test', 'Likelihood', output_dir, is_empty)

@@ -143,7 +143,6 @@ if args.batch_size == 'All':
     args.batch_size = Y_train.shape[0]
 dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 optimizer = getattr(torch.optim, args.optim)(model.parameters(), lr=args.lr)
-if args.cuda: model.cuda()
 print(f'folder_name: {args.folder_name}')
 print(output_str)
 
@@ -185,12 +184,12 @@ if __name__ == "__main__":
         if epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             model.eval()
             with torch.no_grad():
-                beta_mses.append(F.mse_loss(model.beta, torch.tensor(data.beta).cuda()).item())
-                alpha_mses.append(F.mse_loss(model.alpha, torch.tensor(data.alpha).cuda()).item())
-                theta_mses.append(F.mse_loss(model.theta, torch.tensor(data.theta).cuda()).item())
-                pi_mses.append(F.mse_loss(model.pi, torch.tensor(data.pi).reshape(args.A, -1)[:, 1:].cuda()).item())
-                config_mses.append(F.mse_loss(model.config_peak_offsets, torch.tensor(data.config_peak_offsets).cuda()).item())
-                ltri_mses.append(F.mse_loss(model.trial_peak_offset_covar_ltri, torch.tensor(data.trial_peak_offset_covar_ltri).cuda()).item())
+                beta_mses.append(F.mse_loss(model.beta, torch.tensor(data.beta).to(model.device)).item())
+                alpha_mses.append(F.mse_loss(model.alpha, torch.tensor(data.alpha).to(model.device)).item())
+                theta_mses.append(F.mse_loss(model.theta, torch.tensor(data.theta).to(model.device)).item())
+                pi_mses.append(F.mse_loss(model.pi, torch.tensor(data.pi).reshape(args.A, -1)[:, 1:].to(model.device)).item())
+                config_mses.append(F.mse_loss(model.config_peak_offsets, torch.tensor(data.config_peak_offsets).to(model.device)).item())
+                ltri_mses.append(F.mse_loss(model.trial_peak_offset_covar_ltri, torch.tensor(data.trial_peak_offset_covar_ltri).to(model.device)).item())
 
                 likelihood_term_train, model_trial_offsets_train, model_factor_assignment_train, model_neuron_gains_train = model.evaluate(Y_train, factor_access_train, args.A)
                 # losses_train.append((likelihood_term_train + penalty_term_train).item())

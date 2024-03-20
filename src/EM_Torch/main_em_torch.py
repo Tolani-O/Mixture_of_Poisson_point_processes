@@ -44,13 +44,14 @@ outputs_folder = 'outputs'
 # args.tau_sigma = 1
 
 
-# args.batch_size = 15
-# args.param_seed = 'TrueInit+MinorPenalty1+Batch'
-args.batch_size = 'All'
-args.param_seed = 'TrueInit+MinorPenalty1+Full'
+args.batch_size = 15
+args.param_seed = 'TrueInit+MinorPenalty1+Batch'
+# args.batch_size = 'All'
+# args.param_seed = 'TrueInit+MinorPenalty1+Full'
 args.notes = 'alpha=1(low-firing-rates)'
-args.scheduler_patience = 200
+args.scheduler_patience = 100
 args.scheduler_factor = 0.9
+args.scheduler_threshold = 10
 args.lr = 0.001
 args.num_epochs = 50000
 args.tau_beta = 1
@@ -115,7 +116,7 @@ if args.load:
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     optimizer.load_state_dict(optimizer_state)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=args.scheduler_factor,
-                                                           patience=patience, threshold=1e-3)
+                                                           patience=patience, threshold=args.scheduler_threshold)
     scheduler.load_state_dict(scheduler_state)
     # output_dir = os.path.join(output_dir, f'Run_{args.load_run+1}')
     output_dir = os.path.join(output_dir, f'Run_{args.load_run}')
@@ -135,7 +136,7 @@ else:
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=args.scheduler_factor,
-                                                           patience=patience, threshold=1e-3)
+                                                           patience=patience, threshold=args.scheduler_threshold)
     create_relevant_files(output_dir, output_str)
     plot_spikes(Y_train.cpu().numpy(), output_dir, data.dt, 'train')
     plot_spikes(Y_test.cpu().numpy(), output_dir, data.dt, 'test')
@@ -202,7 +203,7 @@ if __name__ == "__main__":
                 likelihood_term_test, model_trial_offsets_test, model_factor_assignment_test, model_neuron_gains_test = model.evaluate(Y_test, factor_access_test, args.A)
                 losses_test.append((likelihood_term_test + penalty_term).item())
                 log_likelihoods_test.append(likelihood_term_test.item())
-                scheduler.step(losses_test[-1])
+                scheduler.step(log_likelihoods_test[-1])
                 clusr_misses_train.append(torch.sum(torch.abs(factor_assignment_onehot_train - model_factor_assignment_train)).item())
                 clusr_misses_test.append(torch.sum(torch.abs(factor_assignment_onehot_test - model_factor_assignment_test)).item())
                 gains_train.append(F.mse_loss(neuron_gains_train, model_neuron_gains_train).item())
@@ -215,15 +216,15 @@ if __name__ == "__main__":
             elapsed_time = end_time - start_time  # Calculate the elapsed time for the epoch
             total_time += elapsed_time  # Calculate the total time for training
             cur_log_likelihood_train = log_likelihoods_train[-1]
-            cur_loss_train = 0 # losses_train[-1]
+            cur_loss_train = losses_train[-1]
             cur_log_likelihood_test = log_likelihoods_test[-1]
-            cur_loss_test = 0 # losses_test[-1]
+            cur_loss_test = losses_test[-1]
             with torch.no_grad():
                 smoothness_budget_constrained = F.softmax(torch.cat([torch.zeros(1, device=model.device), model.smoothness_budget]), dim=0).cpu().numpy()
             output_str = (
                 f"Epoch: {epoch:2d}, Elapsed Time: {elapsed_time / 60:.2f} mins, Total Time: {total_time / (60 * 60):.2f} hrs,\n"
-                f"Log Likelihood train: {cur_log_likelihood_train:.5f},\n"
-                f"Log Likelihood test: {cur_log_likelihood_test:.5f},\n"
+                f"Loss train: {cur_loss_train:.5f}, Log Likelihood train: {cur_log_likelihood_train:.5f},\n"
+                f"Loss test: {cur_loss_test:.5f}, Log Likelihood test: {cur_log_likelihood_test:.5f},\n"
                 f"smoothness_budget: {smoothness_budget_constrained.T},\n"
                 f"lr: {args.lr:.5f}, scheduler_lr: {scheduler._last_lr[0]:.5f}\n\n")
             write_log_and_model(output_str, output_dir, epoch, model, optimizer, scheduler)

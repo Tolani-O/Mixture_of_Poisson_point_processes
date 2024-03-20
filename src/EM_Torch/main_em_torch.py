@@ -30,11 +30,11 @@ outputs_folder = 'outputs'
 # args.tau_sigma = 0
 
 
-# args.folder_name = ''
-# args.load = True
-# args.load_epoch = 0
-# args.load_run = 0
-# args.data_seed = 0
+args.folder_name = 'TrueInit+MinorPenalty1+Full_dataSeed2738376929_K30_R10_A2_C2_R10_tauBeta1_tauConfig1_tauSigma1_iters50000_BatchSizeAll_lr0.001_notes-Full'
+args.load = True
+args.load_epoch = 10700
+args.load_run = 0
+args.data_seed = 2738376929
 # args.num_epochs = 50000
 # args.notes = 'Full'
 # args.batch_size = 'All'
@@ -45,16 +45,19 @@ outputs_folder = 'outputs'
 
 
 # args.notes = 'Batch'
-# args.batch_size = 10
-args.notes = 'Full'
-args.batch_size = 'All'
-args.lr = 0.001
-args.param_seed = 'GroundTruthInit+MinorPenalty3+Full'
-args.num_epochs = 50000
-args.tau_beta = 10
-args.tau_budget = 10000
-args.tau_config = 1
-args.tau_sigma = 1
+# args.batch_size = 8
+# args.param_seed = 'DataAndRandomBetaInit+MinorPenalty1+Batch'
+# # args.notes = 'Full'
+# # args.batch_size = 'All'
+# # args.param_seed = 'DataAndRandomBetaInit+MinorPenalty1+Full'
+# args.scheduler_patience = 500
+# args.scheduler_factor = 0.9
+# args.lr = 0.01
+# args.num_epochs = 50000
+# args.tau_beta = 1
+# args.tau_budget = 10
+# args.tau_config = 1
+# args.tau_sigma = 1
 
 
 # outputs_folder = '../../outputs'
@@ -103,14 +106,18 @@ true_ELBO_test = true_ELBO_test.item()
 output_str = (
     f"True ELBO Training: {true_ELBO_train},\n"
     f"True ELBO Test: {true_ELBO_test}\n\n")
+patience = args.scheduler_patience//args.eval_interval
 if args.load:
     start_epoch = args.load_epoch + 1
     output_dir = os.path.join(output_dir, args.folder_name)
-    model_state, optimizer_state = load_model_checkpoint(os.path.join(output_dir, f'Run_{args.load_run}'), args.load_epoch)
+    model_state, optimizer_state, scheduler_state = load_model_checkpoint(os.path.join(output_dir, f'Run_{args.load_run}'), args.load_epoch)
     # model_state, optimizer_state = model_state.state_dict(), optimizer_state.state_dict()
     model.load_state_dict(model_state)
-    optimizer = getattr(torch.optim, args.optim)(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     optimizer.load_state_dict(optimizer_state)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=args.scheduler_factor,
+                                                           patience=patience, threshold=1e-3)
+    scheduler.load_state_dict(scheduler_state)
     # output_dir = os.path.join(output_dir, f'Run_{args.load_run+1}')
     output_dir = os.path.join(output_dir, f'Run_{args.load_run}')
 else:
@@ -122,14 +129,14 @@ else:
     output_dir = os.path.join(output_dir, args.folder_name, 'Run_0')
     os.makedirs(output_dir)
     # Initialize the model
-    # model.init_ground_truth(num_factors, args.A, torch.zeros_like(torch.tensor(data.beta)).float())
     # model.init_ground_truth(num_factors, args.A, torch.tensor(data.beta).float())
-    # la = int(num_factors/args.A)
-    # factor_indcs = [i*la for i in range(args.A)]
-    # model.init_from_data(Y=torch.tensor(Y_train).float(), neuron_factor_access=torch.tensor(factor_access_train).float(),
-    #                      factor_indcs=factor_indcs)
+    model.init_from_data(Y=Y_train, factor_access=factor_access_train)
     # model.init_random()
-    optimizer = getattr(torch.optim, args.optim)(model.parameters(), lr=args.lr)
+    # model.init_zero()
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=args.scheduler_factor,
+                                                           patience=patience, threshold=1e-3)
     create_relevant_files(output_dir, output_str)
     plot_spikes(Y_train.cpu().numpy(), output_dir, data.dt, 'train')
     plot_spikes(Y_test.cpu().numpy(), output_dir, data.dt, 'test')
@@ -196,6 +203,7 @@ if __name__ == "__main__":
                 likelihood_term_test, model_trial_offsets_test, model_factor_assignment_test, model_neuron_gains_test = model.evaluate(Y_test, factor_access_test, args.A)
                 # losses_test.append((likelihood_term_test + penalty_term_test).item())
                 log_likelihoods_test.append(likelihood_term_test.item())
+                scheduler.step(likelihood_term_test)
                 clusr_misses_train.append(torch.sum(torch.abs(factor_assignment_onehot_train - model_factor_assignment_train)).item())
                 clusr_misses_test.append(torch.sum(torch.abs(factor_assignment_onehot_test - model_factor_assignment_test)).item())
                 gains_train.append(F.mse_loss(neuron_gains_train, model_neuron_gains_train).item())
@@ -217,8 +225,9 @@ if __name__ == "__main__":
                 f"Epoch: {epoch:2d}, Elapsed Time: {elapsed_time / 60:.2f} mins, Total Time: {total_time / (60 * 60):.2f} hrs,\n"
                 f"Log Likelihood train: {cur_log_likelihood_train:.5f},\n"
                 f"Log Likelihood test: {cur_log_likelihood_test:.5f},\n"
-                f"lr: {args.lr:.5f}, smoothness_budget: {smoothness_budget_constrained.T}\n\n")
-            write_log_and_model(output_str, output_dir, epoch, model, optimizer)
+                f"smoothness_budget: {smoothness_budget_constrained.T},\n"
+                f"lr: {args.lr:.5f}, scheduler_lr: {scheduler._last_lr[0]:.5f}\n\n")
+            write_log_and_model(output_str, output_dir, epoch, model, optimizer, scheduler)
             plot_outputs(model.cpu(), args.A, output_dir, 'Train', epoch)
             is_empty = epoch == 0
             write_losses(log_likelihoods_train, 'Train', 'Likelihood', output_dir, is_empty)
@@ -277,3 +286,6 @@ if __name__ == "__main__":
             offsets_test = []
             print(output_str)
             start_time = time.time()
+            if scheduler._last_lr[0] < 1e-5:
+                print('Learning rate is too low. Stopping training.')
+                break

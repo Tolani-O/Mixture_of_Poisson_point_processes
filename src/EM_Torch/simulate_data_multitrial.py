@@ -34,7 +34,7 @@ class DataAnalyzer:
         self.neuron_intensities = None  # unobserved
 
     def initialize(self, configs=3, A=2, T=200, intensity_type=('constant', '1peak', '2peaks'),
-                   intensity_mltply=15, intensity_bias=5):
+                   intensity_mltply=15, intensity_bias=1):
         degree = 3
         time = np.arange(0, T, 1) / 100
         self.time = time
@@ -42,16 +42,19 @@ class DataAnalyzer:
 
         n_factors = len(intensity_type) * A
         # paremeters
-        self.alpha = inv_softplus(np.ones(n_factors, dtype=np.float64))
-        self.theta = inv_softplus((1 + np.arange(n_factors, dtype=np.float64))**(-1))
+        self.alpha = inv_softplus(2*np.ones(n_factors, dtype=np.float64))
+        self.theta = inv_softplus((1+np.arange(n_factors, dtype=np.float64))**(-1))
         self.pi = np.zeros(n_factors)
         self.config_peak_offsets = 0.01 * np.random.normal(size=(configs, 2 * n_factors))
         matrix = np.tril(np.random.normal(size=(2 * n_factors, 2 * n_factors)))
-        # Ensure diagonal elements are positive
-        for i in range(min(matrix.shape)):
-            matrix[i, i] += (2*n_factors + softplus(matrix[i, i]))
-        # Make it a learnable parameter
-        self.trial_peak_offset_covar_ltri = 0.01 * matrix
+        cov = matrix @ matrix.T
+        stdevs = np.sqrt(np.diag(cov))
+        corr = cov / (stdevs[:, None] * stdevs[None, :])
+        sdevs_scaled = stdevs / (max(np.max(stdevs), 2))
+        # mask = np.tril(np.random.binomial(1, 0.9*np.ones_like(corr)), k=-1)
+        # mask = mask + mask.T + np.eye(mask.shape[0])
+        cov_scaled = corr * (sdevs_scaled[:, None] * sdevs_scaled[None, :])
+        self.trial_peak_offset_covar_ltri = np.linalg.cholesky(cov_scaled)
         # solely to check if the covariance matrix is positive semi-definite
         # trial_peak_offset_covar_matrix = self.trial_peak_offset_covar_ltri @ self.trial_peak_offset_covar_ltri.T
         # bool((trial_peak_offset_covar_matrix == trial_peak_offset_covar_matrix.T).all() and (np.linalg.eigvals(trial_peak_offset_covar_matrix).real >= 0).all())
@@ -100,13 +103,20 @@ class DataAnalyzer:
         n_factors = self.beta.shape[0]
         n_configs = self.config_peak_offsets.shape[0]
         factors_per_area = n_factors//n_areas
-        ratio = softmax(self.pi, axis=0)
-        neuron_factor_assignments = np.random.choice(n_factors, n_neurons*n_configs, p=ratio).reshape(n_configs, -1)
+        ratio = softmax(self.pi.reshape(n_areas, -1), axis=1)
         neuron_factor_access = np.zeros((n_configs, n_neurons, n_factors))
+        neuron_factor_assignments = []
+        neurons_assigned = 0
+        neurons_per_area = n_neurons // n_areas
         for a in range(n_areas):
-            area_start_indx = a*factors_per_area
-            neuron_factor_access[((area_start_indx<=neuron_factor_assignments)&((area_start_indx+factors_per_area)>neuron_factor_assignments)),
-                                 area_start_indx:(area_start_indx+factors_per_area)] = 1
+            area_start_indx = a * factors_per_area
+            if a == n_areas-1:
+                neurons_per_area = n_neurons - neurons_assigned
+            neuron_factor_assignments.append(np.random.choice(factors_per_area, neurons_per_area*n_configs, p=ratio[a]).
+                                              reshape(n_configs, -1) + area_start_indx)
+            neurons_assigned += neurons_per_area
+            neuron_factor_access[:, (a * neurons_per_area):((a + 1) * neurons_per_area), area_start_indx:(area_start_indx + factors_per_area)] = 1
+        neuron_factor_assignments = np.concatenate(neuron_factor_assignments, axis=1)
         neuron_gains = np.random.gamma(softplus(self.alpha[neuron_factor_assignments]),
                                        softplus(self.theta[neuron_factor_assignments])**(-1))
         self.neuron_gains = neuron_gains

@@ -30,11 +30,11 @@ outputs_folder = 'outputs'
 # args.tau_sigma = 0
 
 
-args.folder_name = 'TrueInit+MinorPenalty1+Full_dataSeed4198318570_K30_R10_A2_C2_R10_tauBeta1_tauConfig1_tauSigma1_iters50000_BatchSizeAll_lr0.001_patience100_factor0.9_notes-alpha=1(low-firing-rates)'
-args.load = True
-args.load_epoch = 10000
-args.load_run = 0
-args.data_seed = 4198318570
+# args.folder_name = ''
+# args.load = True
+# args.load_epoch = 10000
+# args.load_run = 0
+# args.data_seed = 4198318570
 # args.num_epochs = 50000
 # args.notes = 'Full'
 # args.batch_size = 'All'
@@ -44,12 +44,12 @@ args.data_seed = 4198318570
 # args.tau_sigma = 1
 
 
-args.batch_size = 8
-args.param_seed = 'TrueInit+MinorPenalty1+Batch'
-# args.batch_size = 'All'
-# args.param_seed = 'TrueInit+MinorPenalty1+Full'
+# args.batch_size = 15
+# args.param_seed = 'TrueInit+MinorPenalty1+Batch'
+args.batch_size = 'All'
+args.param_seed = 'TrueInit+MinorPenalty1+Full'
 args.notes = 'alpha=1(low-firing-rates)'
-args.scheduler_patience = 100
+args.scheduler_patience = 200
 args.scheduler_factor = 0.9
 args.lr = 0.001
 args.num_epochs = 50000
@@ -156,9 +156,9 @@ if __name__ == "__main__":
     log_likelihoods_batch = []
     losses_batch = []
     log_likelihoods_train = []
-    # losses_train = []
+    losses_train = []
     log_likelihoods_test = []
-    # losses_test = []
+    losses_test = []
     beta_mses = []
     alpha_mses = []
     theta_mses = []
@@ -196,13 +196,13 @@ if __name__ == "__main__":
                 ltri_mses.append(F.mse_loss(model.trial_peak_offset_covar_ltri, torch.tensor(data.trial_peak_offset_covar_ltri).to(model.device)).item())
 
                 likelihood_term_train, model_trial_offsets_train, model_factor_assignment_train, model_neuron_gains_train = model.evaluate(Y_train, factor_access_train, args.A)
-                # losses_train.append((likelihood_term_train + penalty_term_train).item())
+                losses_train.append((likelihood_term_train + penalty_term).item())
                 log_likelihoods_train.append(likelihood_term_train.item())
 
                 likelihood_term_test, model_trial_offsets_test, model_factor_assignment_test, model_neuron_gains_test = model.evaluate(Y_test, factor_access_test, args.A)
-                # losses_test.append((likelihood_term_test + penalty_term_test).item())
+                losses_test.append((likelihood_term_test + penalty_term).item())
                 log_likelihoods_test.append(likelihood_term_test.item())
-                scheduler.step(likelihood_term_test)
+                scheduler.step(losses_test[-1])
                 clusr_misses_train.append(torch.sum(torch.abs(factor_assignment_onehot_train - model_factor_assignment_train)).item())
                 clusr_misses_test.append(torch.sum(torch.abs(factor_assignment_onehot_test - model_factor_assignment_test)).item())
                 gains_train.append(F.mse_loss(neuron_gains_train, model_neuron_gains_train).item())
@@ -230,9 +230,9 @@ if __name__ == "__main__":
             plot_outputs(model.cpu(), args.A, output_dir, 'Train', epoch)
             is_empty = epoch == 0
             write_losses(log_likelihoods_train, 'Train', 'Likelihood', output_dir, is_empty)
-            # write_losses(losses_train, 'Train', 'Loss', output_dir, is_empty)
+            write_losses(losses_train, 'Train', 'Loss', output_dir, is_empty)
             write_losses(log_likelihoods_test, 'Test', 'Likelihood', output_dir, is_empty)
-            # write_losses(losses_test, 'Test', 'Loss', output_dir, is_empty)
+            write_losses(losses_test, 'Test', 'Loss', output_dir, is_empty)
             write_losses(beta_mses, 'Test', 'beta_MSE', output_dir, is_empty)
             write_losses(alpha_mses, 'Test', 'alpha_MSE', output_dir, is_empty)
             write_losses(theta_mses, 'Test', 'theta_MSE', output_dir, is_empty)
@@ -248,9 +248,9 @@ if __name__ == "__main__":
             write_losses(offsets_test, 'Test', 'trialoffsets_MSE', output_dir, is_empty)
             write_losses(losses_batch, 'Batch', 'Loss', output_dir, is_empty)
             plot_losses(true_ELBO_train, output_dir, 'Train', 'Likelihood')
-            # plot_losses(None, output_dir, 'Train', 'Loss', 20)
+            plot_losses(None, output_dir, 'Train', 'Loss', 1)
             plot_losses(true_ELBO_test, output_dir, 'Test', 'Likelihood')
-            # plot_losses(None, output_dir, 'Test', 'Loss', 1)
+            plot_losses(None, output_dir, 'Test', 'Loss', 1)
             plot_losses(None, output_dir, 'Test', 'beta_MSE')
             plot_losses(None, output_dir, 'Test', 'alpha_MSE')
             plot_losses(None, output_dir, 'Test', 'theta_MSE')
@@ -268,9 +268,9 @@ if __name__ == "__main__":
             log_likelihoods_batch = []
             losses_batch = []
             log_likelihoods_train = []
-            # losses_train = []
+            losses_train = []
             log_likelihoods_test = []
-            # losses_test = []
+            losses_test = []
             beta_mses = []
             alpha_mses = []
             theta_mses = []

@@ -30,11 +30,11 @@ outputs_folder = 'outputs'
 # args.tau_sigma = 0
 
 
-args.folder_name = 'TrueInit+MinorPenalty1+Full_dataSeed2738376929_K30_R10_A2_C2_R10_tauBeta1_tauConfig1_tauSigma1_iters50000_BatchSizeAll_lr0.001_notes-Full'
+args.folder_name = 'TrueInit+MinorPenalty1+Full_dataSeed4198318570_K30_R10_A2_C2_R10_tauBeta1_tauConfig1_tauSigma1_iters50000_BatchSizeAll_lr0.001_patience100_factor0.9_notes-alpha=1(low-firing-rates)'
 args.load = True
-args.load_epoch = 10700
+args.load_epoch = 10000
 args.load_run = 0
-args.data_seed = 2738376929
+args.data_seed = 4198318570
 # args.num_epochs = 50000
 # args.notes = 'Full'
 # args.batch_size = 'All'
@@ -44,20 +44,19 @@ args.data_seed = 2738376929
 # args.tau_sigma = 1
 
 
-# args.notes = 'Batch'
-# args.batch_size = 8
-# args.param_seed = 'DataAndRandomBetaInit+MinorPenalty1+Batch'
-# # args.notes = 'Full'
-# # args.batch_size = 'All'
-# # args.param_seed = 'DataAndRandomBetaInit+MinorPenalty1+Full'
-# args.scheduler_patience = 500
-# args.scheduler_factor = 0.9
-# args.lr = 0.01
-# args.num_epochs = 50000
-# args.tau_beta = 1
-# args.tau_budget = 10
-# args.tau_config = 1
-# args.tau_sigma = 1
+args.batch_size = 8
+args.param_seed = 'TrueInit+MinorPenalty1+Batch'
+# args.batch_size = 'All'
+# args.param_seed = 'TrueInit+MinorPenalty1+Full'
+args.notes = 'alpha=1(low-firing-rates)'
+args.scheduler_patience = 100
+args.scheduler_factor = 0.9
+args.lr = 0.001
+args.num_epochs = 50000
+args.tau_beta = 1
+args.tau_budget = 10
+args.tau_config = 1
+args.tau_sigma = 1
 
 
 # outputs_folder = '../../outputs'
@@ -125,12 +124,12 @@ else:
     args.folder_name = (
         f'{args.param_seed}_dataSeed{args.data_seed}_K{args.K}_R{args.n_trials}_A{args.A}_C{args.n_configs}'
         f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}'
-        f'_iters{args.num_epochs}_BatchSize{args.batch_size}_lr{args.lr}_notes-{args.notes}')
+        f'_iters{args.num_epochs}_BatchSize{args.batch_size}_lr{args.lr}_patience{args.scheduler_patience}'
+        f'_factor{args.scheduler_factor}_notes-{args.notes}')
     output_dir = os.path.join(output_dir, args.folder_name, 'Run_0')
     os.makedirs(output_dir)
     # Initialize the model
-    # model.init_ground_truth(num_factors, args.A, torch.tensor(data.beta).float())
-    model.init_from_data(Y=Y_train, factor_access=factor_access_train)
+    # model.init_from_data(Y=Y_train, factor_access=factor_access_train)
     # model.init_random()
     # model.init_zero()
 

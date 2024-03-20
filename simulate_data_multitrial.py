@@ -42,7 +42,7 @@ class DataAnalyzer:
 
         n_factors = len(intensity_type) * A
         # paremeters
-        self.alpha = inv_softplus(2*np.ones(n_factors, dtype=np.float64))
+        self.alpha = inv_softplus(1*np.ones(n_factors, dtype=np.float64))
         self.theta = inv_softplus((1+np.arange(n_factors, dtype=np.float64))**(-1))
         self.pi = np.zeros(n_factors)
         self.config_peak_offsets = 0.01 * np.random.normal(size=(configs, 2 * n_factors))
@@ -130,6 +130,8 @@ class DataAnalyzer:
             neuron_trial_warped_factors.append(trial_warped_factors[self.neuron_factor_assignments[i,:], :, :, i])
         neuron_trial_warped_factors = np.stack(neuron_trial_warped_factors, axis=3)
         neuron_intensities = self.neuron_gains.T[:,None,None,:] * neuron_trial_warped_factors
+        # padding
+        neuron_intensities = np.concatenate([np.zeros((neuron_intensities.shape[0], 1, neuron_intensities.shape[2], neuron_intensities.shape[3])), neuron_intensities], axis=1)
         rates = np.max(neuron_intensities, axis=1)
         arrival_times = np.zeros_like(rates)
         homogeneous_poisson_process = np.zeros_like(neuron_intensities)
@@ -142,9 +144,9 @@ class DataAnalyzer:
         acceptance_threshold = neuron_intensities / rates[:, None, :, :]
         acceptance_probabilities = np.random.uniform(0, 1, neuron_intensities.shape)
         accepted_spikes = (acceptance_probabilities <= acceptance_threshold).astype(int)
-        self.Y = accepted_spikes * homogeneous_poisson_process
-        self.Y[:, 0, :, :] = 0
-        self.neuron_intensities = neuron_intensities
+        Y = accepted_spikes * homogeneous_poisson_process
+        self.Y = Y[:, 1:, :, :]
+        self.neuron_intensities = neuron_intensities[:, 1:, :, :]
 
 
     def warp_all_latent_factors_for_all_trials(self, n_trials):

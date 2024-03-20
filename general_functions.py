@@ -17,7 +17,6 @@ def get_parser():
     parser.add_argument('--A', type=int, default=2, help='Number of areas')
     parser.add_argument('--n_trial_samples', type=int, default=10, help='Number of trial samples for monte carlo integration')
     parser.add_argument('--lr', type=float, default=1e-3, help='initial learning rate (default: 1e-3)')
-    parser.add_argument('--optim', type=str, default='Adam', help='optimizer to use (default: Adam)')
     parser.add_argument('--load', type=int, default=0, help='')
     parser.add_argument('--load_epoch', type=int, default=0, help='Which epoch to load model and optimizer from')
     parser.add_argument('--load_run', type=int, default=0, help='Which run to load model and optimizer from')
@@ -26,6 +25,8 @@ def get_parser():
     parser.add_argument('--tau_beta', type=int, default=0.5, help='Value for tau_beta')
     parser.add_argument('--tau_budget', type=int, default=0.5, help='Value for tau_tau_budget')
     parser.add_argument('--num_epochs', type=int, default=5000, help='Number of training epochs')
+    parser.add_argument('--scheduler_patience', type=int, default=1000, help='Number of epochs before scheduler step')
+    parser.add_argument('--scheduler_factor', type=int, default=0.8, help='Value for tau_tau_budget')
     parser.add_argument('--notes', type=str, default='empty', help='Run notes')
     parser.add_argument('--K', type=int, default=30, help='Number of neurons')
     parser.add_argument('--L', type=int, default=3, help='Number of latent factors')
@@ -144,6 +145,7 @@ def plot_latent_coupling(latent_coupling, output_dir):
 def load_model_checkpoint(output_dir, load_epoch):
     load_model_dir = os.path.join(output_dir, 'models', f'model_{load_epoch}.pth')
     load_optimizer_dir = os.path.join(output_dir, 'models', f'optimizer_{load_epoch}.pth')
+    scheduler_dir = os.path.join(output_dir, 'models', f'scheduler_{load_epoch}.pth')
     if os.path.isfile(load_model_dir):
         model = torch.load(load_model_dir)
     else:
@@ -152,7 +154,11 @@ def load_model_checkpoint(output_dir, load_epoch):
         optimizer = torch.load(load_optimizer_dir)
     else:
         raise Exception(f'No optimizer_{load_epoch}.pth file found at {load_optimizer_dir}')
-    return model, optimizer
+    if os.path.isfile(scheduler_dir):
+        scheduler = torch.load(scheduler_dir)
+    else:
+        raise Exception(f'No scheduler_{load_epoch}.pth file found at {scheduler_dir}')
+    return model, optimizer, scheduler
 
 
 def reset_metric_checkpoint(output_dir, folder_name, sub_folder_name, metric_files, start_epoch):
@@ -209,7 +215,7 @@ def create_relevant_files(output_dir, output_str):
     #     file.write(command_str)
 
 
-def write_log_and_model(output_str, output_dir, epoch, model, optimizer):
+def write_log_and_model(output_str, output_dir, epoch, model, optimizer, scheduler):
     with open(os.path.join(output_dir, 'log.txt'), 'a') as file:
         file.write(output_str)
     models_path = os.path.join(output_dir, 'models')
@@ -217,6 +223,7 @@ def write_log_and_model(output_str, output_dir, epoch, model, optimizer):
         os.makedirs(models_path)
     torch.save(model.state_dict(), os.path.join(models_path, f'model_{epoch}.pth'))
     torch.save(optimizer.state_dict(), os.path.join(models_path, f'optimizer_{epoch}.pth'))
+    torch.save(scheduler.state_dict(), os.path.join(models_path, f'scheduler_{epoch}.pth'))
 
 
 def plot_outputs(model, n_areas, output_dir, folder, epoch):

@@ -114,7 +114,7 @@ class LikelihoodELBOModel(nn.Module):
 
         latent_factors = torch.log(torch.tensor(latent_factors))
         beta = torch.randn((6, T), dtype=torch.float64)
-        beta[[0,3]] = latent_factors[[0,3]]
+        beta[[2,5]] = latent_factors[[2,5]]
 
         self.init_ground_truth(beta, zeros=zeros)
 

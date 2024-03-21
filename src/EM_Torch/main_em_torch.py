@@ -44,15 +44,17 @@ outputs_folder = 'outputs'
 # args.tau_sigma = 1
 
 
-args.batch_size = 15
-args.param_seed = 'TrueInit+MinorPenalty1+Batch'
-# args.batch_size = 'All'
-# args.param_seed = 'TrueInit+MinorPenalty1+Full'
+# args.init = 'Rand'
+args.init = 'Zero'
+# args.init = 'DataAndRandBeta'
+# args.batch_size = 15
+args.batch_size = 'All'
+args.param_seed = f'{args.init}Init+MinorPenalty1+Size{args.batch_size}'
 args.notes = 'alpha=1(low-firing-rates)'
-args.scheduler_patience = 100
+args.scheduler_patience = 500
 args.scheduler_factor = 0.9
-args.scheduler_threshold = 10
-args.lr = 0.001
+args.scheduler_threshold = 2
+args.lr = 0.01
 args.num_epochs = 50000
 args.tau_beta = 1
 args.tau_budget = 10
@@ -116,7 +118,8 @@ if args.load:
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     optimizer.load_state_dict(optimizer_state)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=args.scheduler_factor,
-                                                           patience=patience, threshold=args.scheduler_threshold)
+                                                           patience=patience, threshold_mode='abs',
+                                                           threshold=args.scheduler_threshold)
     scheduler.load_state_dict(scheduler_state)
     # output_dir = os.path.join(output_dir, f'Run_{args.load_run+1}')
     output_dir = os.path.join(output_dir, f'Run_{args.load_run}')
@@ -124,19 +127,26 @@ else:
     start_epoch = 0
     args.folder_name = (
         f'{args.param_seed}_dataSeed{args.data_seed}_K{args.K}_R{args.n_trials}_A{args.A}_C{args.n_configs}'
-        f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}'
+        f'_R{args.n_trials}_tauBeta{args.tau_beta_roughness}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}'
         f'_iters{args.num_epochs}_BatchSize{args.batch_size}_lr{args.lr}_patience{args.scheduler_patience}'
-        f'_factor{args.scheduler_factor}_notes-{args.notes}')
+        f'_factor{args.scheduler_factor}_threshold{args.scheduler_threshold}_notes-{args.notes}')
     output_dir = os.path.join(output_dir, args.folder_name, 'Run_0')
     os.makedirs(output_dir)
     # Initialize the model
-    # model.init_from_data(Y=Y_train, factor_access=factor_access_train)
-    # model.init_random()
-    # model.init_zero()
+    if args.init == 'Rand':
+        model.init_random()
+    elif args.init == 'Zero':
+        model.init_zero()
+    elif 'Data' in args.init:
+        if 'Rand' in args.init:
+            model.init_from_data(Y=Y_train, factor_access=factor_access_train)
+        elif 'Zero' in args.init:
+            model.init_from_data(Y=Y_train, factor_access=factor_access_train, zeros=True)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=args.scheduler_factor,
-                                                           patience=patience, threshold=args.scheduler_threshold)
+                                                           patience=patience, threshold_mode='abs',
+                                                           threshold=args.scheduler_threshold)
     create_relevant_files(output_dir, output_str)
     plot_spikes(Y_train.cpu().numpy(), output_dir, data.dt, 'train')
     plot_spikes(Y_test.cpu().numpy(), output_dir, data.dt, 'test')

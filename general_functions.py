@@ -22,7 +22,9 @@ def get_parser():
     parser.add_argument('--load_run', type=int, default=0, help='Which run to load model and optimizer from')
     parser.add_argument('--tau_config', type=int, default=0.5, help='Value for tau_sigma1')
     parser.add_argument('--tau_sigma', type=int, default=0.5, help='Value for tau_sigma2')
-    parser.add_argument('--tau_beta', type=int, default=0.5, help='Value for tau_beta')
+    parser.add_argument('--tau_beta_rough', type=int, default=0.5, help='Value for tau_beta_rough')
+    parser.add_argument('--tau_beta_entropy', type=int, default=0.5, help='Value for tau_beta_entropy')
+    parser.add_argument('--tau_beta_cov', type=int, default=0.5, help='Value for tau_beta_cov')
     parser.add_argument('--tau_budget', type=int, default=0.5, help='Value for tau_tau_budget')
     parser.add_argument('--num_epochs', type=int, default=5000, help='Number of training epochs')
     parser.add_argument('--scheduler_patience', type=int, default=1000, help='Number of epochs before scheduler step')
@@ -148,15 +150,15 @@ def load_model_checkpoint(output_dir, load_epoch):
     load_optimizer_dir = os.path.join(output_dir, 'models', f'optimizer_{load_epoch}.pth')
     scheduler_dir = os.path.join(output_dir, 'models', f'scheduler_{load_epoch}.pth')
     if os.path.isfile(load_model_dir):
-        model = torch.load(load_model_dir)
+        model = torch.load(load_model_dir, map_location=torch.device('cpu'))
     else:
         raise Exception(f'No model_{load_epoch}.pth file found at {load_model_dir}')
     if os.path.isfile(load_optimizer_dir):
-        optimizer = torch.load(load_optimizer_dir)
+        optimizer = torch.load(load_optimizer_dir, map_location=torch.device('cpu'))
     else:
         raise Exception(f'No optimizer_{load_epoch}.pth file found at {load_optimizer_dir}')
     if os.path.isfile(scheduler_dir):
-        scheduler = torch.load(scheduler_dir)
+        scheduler = torch.load(scheduler_dir, map_location=torch.device('cpu'))
     else:
         raise Exception(f'No scheduler_{load_epoch}.pth file found at {scheduler_dir}')
     return model, optimizer, scheduler
@@ -288,7 +290,7 @@ def plot_outputs(model, n_areas, output_dir, folder, epoch):
         plt.title('ConfigOffset')
         plt.savefig(os.path.join(configoffset_dir, f'configoffset_{epoch}.png'))
 
-        ltri = model.trial_peak_offset_covar_ltri.flatten().numpy()
+        ltri = model.ltri_matix('cpu').flatten().numpy()
         plt.figure(figsize=(10, 10))
         plt.plot(ltri, label='Ltri')
         plt.title('Ltri')

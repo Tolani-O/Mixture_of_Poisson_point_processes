@@ -30,36 +30,44 @@ outputs_folder = 'outputs'
 # args.tau_sigma = 0
 
 
-# args.folder_name = ''
+# args.folder_name = 'folder'
 # args.load = True
-# args.load_epoch = 10000
+# args.load_epoch = 49999
 # args.load_run = 0
-# args.data_seed = 4198318570
-# args.num_epochs = 50000
-# args.notes = 'Full'
+# args.data_seed = 2870963626
 # args.batch_size = 'All'
-# args.tau_beta = 10
-# args.tau_budget = 10000
-# args.tau_config = 1
-# args.tau_sigma = 1
+# args.scheduler_patience = 2000
+# args.scheduler_threshold = 2
+# args.scheduler_factor = 0.9
+# args.lr = 0.0001
+# args.num_epochs = 50000
+# args.tau_beta_rough = 1
+# args.tau_beta_entropy = 1 # 0.01
+# args.tau_config = 0
+# args.tau_sigma = 0
 
 
-# args.init = 'Rand'
-args.init = 'Zero'
-# args.init = 'DataAndRandBeta'
+# init = 'True'
+# init = 'Rand'
+init = 'Zero'
+# init = 'TrueAndRandBeta'
+# init = 'DataAndZeroBeta'
 # args.batch_size = 15
 args.batch_size = 'All'
-args.param_seed = f'{args.init}Init+MinorPenalty1+Size{args.batch_size}'
-args.notes = 'alpha=1(low-firing-rates)'
-args.scheduler_patience = 500
-args.scheduler_factor = 0.9
+args.param_seed = f'{init}Init+MinorPenalty1+Size{args.batch_size}'
+args.notes = 'alpha=2(high-firing-rates)'
+# args.scheduler_patience = 500
+# args.scheduler_threshold = 1
+args.scheduler_patience = 2000
 args.scheduler_threshold = 2
-args.lr = 0.01
+args.scheduler_factor = 0.9
+args.lr = 0.001
 args.num_epochs = 50000
-args.tau_beta = 1
-args.tau_budget = 10
-args.tau_config = 1
-args.tau_sigma = 1
+args.tau_beta_rough = 0 # 1
+args.tau_beta_entropy = 0 #.01
+# args.tau_beta_cov = 0.01
+args.tau_config = 0 # 1
+args.tau_sigma = 0 # 1
 
 
 # outputs_folder = '../../outputs'
@@ -89,8 +97,9 @@ intensities_test, factor_assignment_test, factor_assignment_onehot_test, neuron_
 # initialize the model with ground truth params
 num_factors = data.beta.shape[0]
 model = LikelihoodELBOModel(data.time, num_factors, args.A, args.n_configs, args.n_trial_samples)
-model.init_ground_truth(torch.tensor(data.beta), torch.tensor(data.alpha), torch.tensor(data.theta), torch.tensor(data.pi),
-                        torch.tensor(data.config_peak_offsets), torch.tensor(data.trial_peak_offset_covar_ltri))
+model.init_ground_truth(beta=torch.tensor(data.beta), alpha=torch.tensor(data.alpha), theta=torch.tensor(data.theta),
+                        pi=torch.tensor(data.pi), config_peak_offsets=torch.tensor(data.config_peak_offsets),
+                        trial_peak_offset_covar_ltri=torch.tensor(data.trial_peak_offset_covar_ltri))
 
 if args.cuda: model.cuda()
 model.eval()
@@ -113,34 +122,33 @@ if args.load:
     start_epoch = args.load_epoch + 1
     output_dir = os.path.join(output_dir, args.folder_name)
     model_state, optimizer_state, scheduler_state = load_model_checkpoint(os.path.join(output_dir, f'Run_{args.load_run}'), args.load_epoch)
-    # model_state, optimizer_state = model_state.state_dict(), optimizer_state.state_dict()
     model.load_state_dict(model_state)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    optimizer.load_state_dict(optimizer_state)
+    # optimizer.load_state_dict(optimizer_state)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=args.scheduler_factor,
                                                            patience=patience, threshold_mode='abs',
                                                            threshold=args.scheduler_threshold)
-    scheduler.load_state_dict(scheduler_state)
-    # output_dir = os.path.join(output_dir, f'Run_{args.load_run+1}')
+    # scheduler.load_state_dict(scheduler_state)
     output_dir = os.path.join(output_dir, f'Run_{args.load_run}')
 else:
     start_epoch = 0
     args.folder_name = (
         f'{args.param_seed}_dataSeed{args.data_seed}_K{args.K}_R{args.n_trials}_A{args.A}_C{args.n_configs}'
-        f'_R{args.n_trials}_tauBeta{args.tau_beta_roughness}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}'
+        f'_R{args.n_trials}_tauRough{args.tau_beta_rough}_tauEntropy{args.tau_beta_entropy}_tauCov{args.tau_beta_cov}'
+        f'_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}'
         f'_iters{args.num_epochs}_BatchSize{args.batch_size}_lr{args.lr}_patience{args.scheduler_patience}'
         f'_factor{args.scheduler_factor}_threshold{args.scheduler_threshold}_notes-{args.notes}')
     output_dir = os.path.join(output_dir, args.folder_name, 'Run_0')
     os.makedirs(output_dir)
     # Initialize the model
-    if args.init == 'Rand':
+    if init == 'Rand':
         model.init_random()
-    elif args.init == 'Zero':
+    elif init == 'Zero':
         model.init_zero()
-    elif 'Data' in args.init:
-        if 'Rand' in args.init:
+    elif 'Data' in init:
+        if 'Rand' in init:
             model.init_from_data(Y=Y_train, factor_access=factor_access_train)
-        elif 'Zero' in args.init:
+        elif 'Zero' in init:
             model.init_from_data(Y=Y_train, factor_access=factor_access_train, zeros=True)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -154,6 +162,20 @@ else:
     # plot_factor_assignments(factor_assignment_onehot_train-model_factor_assignment_train, output_dir, 'Train', -1)
     # plot_factor_assignments(factor_assignment_onehot_test-model_factor_assignment_test, output_dir, 'Test', -1)
     plot_outputs(model.cpu(), args.A, output_dir, 'Train', -1)
+
+
+
+# # DELETE
+# beta = torch.clone(model.beta).cuda()
+# beta[[0, 1, 3, 4]] = torch.max(beta[2]).cuda() * torch.rand((4, beta.shape[1]), dtype=torch.float64).cuda()
+# model.beta = torch.nn.Parameter(beta)
+# optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+# scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=args.scheduler_factor,
+#                                                            patience=patience, threshold_mode='abs',
+#                                                            threshold=args.scheduler_threshold)
+# # DELETE
+
+
 
 # Instantiate the dataset and dataloader
 dataset = CustomDataset(Y_train, factor_access_train)
@@ -189,7 +211,8 @@ if __name__ == "__main__":
         model.train()
         for Y, access in dataloader:
             optimizer.zero_grad()
-            likelihood_term, penalty_term = model.forward(Y, access, args.A, args.tau_beta, args.tau_budget, args.tau_config, args.tau_sigma)
+            likelihood_term, penalty_term = model.forward(Y, access, args.A, args.tau_beta_rough, args.tau_beta_entropy,
+                                                          args.tau_beta_cov, args.tau_budget, args.tau_config, args.tau_sigma)
             loss = -(likelihood_term + penalty_term)
             loss.backward()
             optimizer.step()
@@ -204,7 +227,7 @@ if __name__ == "__main__":
                 theta_mses.append(F.mse_loss(model.theta, torch.tensor(data.theta).to(model.device)).item())
                 pi_mses.append(F.mse_loss(model.pi, torch.tensor(data.pi).reshape(args.A, -1)[:, 1:].to(model.device)).item())
                 config_mses.append(F.mse_loss(model.config_peak_offsets, torch.tensor(data.config_peak_offsets).to(model.device)).item())
-                ltri_mses.append(F.mse_loss(model.trial_peak_offset_covar_ltri, torch.tensor(data.trial_peak_offset_covar_ltri).to(model.device)).item())
+                ltri_mses.append(F.mse_loss(model.ltri_matix(), torch.tensor(data.trial_peak_offset_covar_ltri).to(model.device)).item())
 
                 likelihood_term_train, model_trial_offsets_train, model_factor_assignment_train, model_neuron_gains_train = model.evaluate(Y_train, factor_access_train, args.A)
                 losses_train.append((likelihood_term_train + penalty_term).item())
@@ -230,7 +253,7 @@ if __name__ == "__main__":
             cur_log_likelihood_test = log_likelihoods_test[-1]
             cur_loss_test = losses_test[-1]
             with torch.no_grad():
-                smoothness_budget_constrained = F.softmax(torch.cat([torch.zeros(1, device=model.device), model.smoothness_budget]), dim=0).cpu().numpy()
+                smoothness_budget_constrained = torch.exp(model.smoothness_budget).cpu().numpy()
             output_str = (
                 f"Epoch: {epoch:2d}, Elapsed Time: {elapsed_time / 60:.2f} mins, Total Time: {total_time / (60 * 60):.2f} hrs,\n"
                 f"Loss train: {cur_loss_train:.5f}, Log Likelihood train: {cur_log_likelihood_train:.5f},\n"

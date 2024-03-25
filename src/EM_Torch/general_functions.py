@@ -191,6 +191,7 @@ def create_relevant_files(output_dir, output_str):
         'log_likelihoods_test',
         'losses_test',
         'beta_MSE_test',
+        'coupling_MSE_test',
         'alpha_MSE_test',
         'theta_MSE_test',
         'pi_MSE_test',
@@ -252,6 +253,12 @@ def plot_outputs(model, n_areas, output_dir, folder, epoch):
     ltri_dir = os.path.join(output_dir, 'ltri')
     if not os.path.exists(ltri_dir):
         os.makedirs(ltri_dir)
+    coupling_dir = os.path.join(output_dir, 'coupling')
+    if not os.path.exists(coupling_dir):
+        os.makedirs(coupling_dir)
+    beta_coupling_dir = os.path.join(output_dir, 'beta_coupling')
+    if not os.path.exists(beta_coupling_dir):
+        os.makedirs(beta_coupling_dir)
     with torch.no_grad():
         latent_factors = torch.exp(model.beta).numpy()
         L = latent_factors.shape[0]
@@ -265,6 +272,25 @@ def plot_outputs(model, n_areas, output_dir, folder, epoch):
             plt.ylim(bottom=0, top=upper_limit)
         plt.tight_layout()
         plt.savefig(os.path.join(beta_dir, f'LatentFactors_{epoch}.png'))
+
+        coupling = model.coupling.numpy()
+        plt.figure(figsize=(10, 10))
+        plt.plot(coupling, label='Coupling')
+        plt.title('Coupling')
+        plt.savefig(os.path.join(coupling_dir, f'coupling_{epoch}.png'))
+
+        beta_coupling = torch.exp(model.coupling.unsqueeze(1) * model.beta).numpy()
+        L = beta_coupling.shape[0]
+        global_max = np.max(beta_coupling)
+        upper_limit = global_max + 0.01
+        plt.figure(figsize=(10, L * 5))
+        for l in range(L):
+            plt.subplot(L, 1, l + 1)
+            plt.plot(beta_coupling[l, :], label=f'Factor [{l}, :]')
+            plt.title(f'Factor [{l}, :]')
+            plt.ylim(bottom=0, top=upper_limit)
+        plt.tight_layout()
+        plt.savefig(os.path.join(beta_coupling_dir, f'CoupledLatentFactors_{epoch}.png'))
 
         alpha = F.softplus(model.alpha).numpy()
         plt.figure(figsize=(10, 10))
@@ -297,19 +323,7 @@ def plot_outputs(model, n_areas, output_dir, folder, epoch):
         plt.savefig(os.path.join(ltri_dir, f'ltri_{epoch}.png'))
 
 
-    # warped_intensities = warped_factors.reshape(-1, 200)
-    #
-    # global_max = np.max(warped_intensities)
-    # upper_limit = global_max + batch * 0.01
-    # num_of_warped = warped_intensities.shape[0]
-    # for i in range(0, num_of_warped, batch):
-    #     this_batch = batch if i + batch < num_of_warped else num_of_warped - i
-    #     plt.figure(figsize=(10, 10))
-    #     for j in range(this_batch):
-    #         plt.plot(stim_time, warped_intensities[i + j, :] + j * 0.01)
-    #         plt.ylim(bottom=0, top=upper_limit)
-    #     plt.tight_layout()
-    #     plt.savefig(os.path.join(output_dir, f'warped_intensities_batch{i}.png'))
+
 
 
 def plot_factor_assignments(factor_assignment, output_dir, folder, epoch):
@@ -398,6 +412,10 @@ def softplus(x):
 
 def inv_softplus(x):
     return np.log(np.exp(x) - 1)
+
+
+def inv_softplus_torch(x):
+    return torch.log(torch.exp(x) - 1)
 
 
 def int_or_str(value):

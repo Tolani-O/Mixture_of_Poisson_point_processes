@@ -298,13 +298,13 @@ def plot_outputs(model, n_areas, output_dir, folder, epoch):
         plt.title('Alpha')
         plt.savefig(os.path.join(alpha_dir, f'alpha_{epoch}.png'))
 
-        theta = F.softplus(model.theta).numpy()
+        theta = model.theta.numpy()
         plt.figure(figsize=(10, 10))
         plt.plot(theta, label='Theta')
         plt.title('Theta')
         plt.savefig(os.path.join(theta_dir, f'theta_{epoch}.png'))
 
-        pi = F.softmax(torch.cat([torch.zeros(n_areas, 1), model.pi], dim=1), dim=1).flatten().numpy()
+        pi = model.pi.numpy()
         plt.figure(figsize=(10, 10))
         plt.plot(pi, label='Pi')
         plt.title('Pi')

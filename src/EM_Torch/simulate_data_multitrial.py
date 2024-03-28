@@ -42,7 +42,7 @@ class DataAnalyzer:
 
         n_factors = len(intensity_type) * A
         # paremeters
-        self.alpha = inv_softplus(2*np.ones(n_factors, dtype=np.float64))
+        self.alpha = inv_softplus(20*np.ones(n_factors, dtype=np.float64))
         self.theta = inv_softplus((1+np.arange(n_factors, dtype=np.float64))/10)
         self.pi = np.zeros(n_factors)
         self.config_peak_offsets = 0.01 * np.random.normal(size=(configs, 2 * n_factors))
@@ -62,6 +62,7 @@ class DataAnalyzer:
         # corr = np.diag(1/std_dev) @ trial_peak_offset_covar_matrix @ np.diag(1/std_dev)
         latent_factors = self.generate_latent_factors(intensity_type, intensity_mltply, intensity_bias)
         latent_factors = np.vstack([latent_factors] * A)
+        latent_factors = latent_factors / np.sum(latent_factors, axis=1, keepdims=True)
         self.beta = np.log(latent_factors)
         return self
 

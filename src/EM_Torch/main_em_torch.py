@@ -22,7 +22,7 @@ outputs_folder = 'outputs'
 # args.n_trials = 5  # R
 # args.n_configs = 1  # C
 # args.n_trial_samples = 2  # N
-# args.K = 3  # K
+args.K = 100  # K
 # args.A = 1  # A
 # args.tau_beta = 0
 # args.tau_beta = 0
@@ -47,28 +47,29 @@ outputs_folder = 'outputs'
 # args.tau_sigma = 0
 
 
-# init = 'True'
+init = 'True'
 # init = 'Rand'
-init = 'Zero'
+# init = 'Zero'
+# init = 'Data'
 # init = 'TrueAndRandBeta'
 # init = 'DataAndZeroBeta'
 # args.batch_size = 15
 args.batch_size = 'All'
 args.param_seed = f'{init}Init+MinorPenalty1+Size{args.batch_size}'
 args.notes = ''
-# args.scheduler_patience = 500
-# args.scheduler_threshold = 1
 args.scheduler_patience = 2000
-args.scheduler_threshold = 2
-args.scheduler_factor = 0.9
-args.lr = 0.001
+args.scheduler_threshold = 1
+# args.scheduler_patience = 2000
+# args.scheduler_threshold = 2
+args.scheduler_factor = 0.95
+args.lr = 0.0001
 args.num_epochs = 50000
-args.tau_beta_rough = 0 # 1
+args.tau_beta_rough = 1 # 1
 args.tau_beta_entropy = 0 #.01
 args.tau_budget = 0
 # args.tau_beta_cov = 0.01
-args.tau_config = 0 # 1
-args.tau_sigma = 0 # 1
+args.tau_config = 1 # 1
+args.tau_sigma = 1 # 1
 
 
 # outputs_folder = '../../outputs'
@@ -98,9 +99,12 @@ intensities_test, factor_assignment_test, factor_assignment_onehot_test, neuron_
 # initialize the model with ground truth params
 num_factors = data.beta.shape[0]
 model = LikelihoodELBOModel(data.time, num_factors, args.A, args.n_configs, args.n_trial_samples)
-model.init_ground_truth(beta=torch.tensor(data.beta), alpha=torch.tensor(data.alpha), theta=torch.tensor(data.theta),
+model.init_ground_truth(beta=torch.tensor(data.beta),
+                        alpha=torch.tensor(data.alpha),
+                        theta=F.softplus(torch.tensor(data.theta)),
                         coupling=torch.ones(num_factors, dtype=torch.float64, device=model.device),
-                        pi=torch.tensor(data.pi), config_peak_offsets=torch.tensor(data.config_peak_offsets),
+                        pi=F.softmax(torch.tensor(data.pi).reshape(args.A, -1), dim=1).flatten(),
+                        config_peak_offsets=torch.tensor(data.config_peak_offsets),
                         trial_peak_offset_covar_ltri=torch.tensor(data.trial_peak_offset_covar_ltri))
 
 if args.cuda: model.cuda()
@@ -134,7 +138,7 @@ if args.load:
 else:
     start_epoch = 0
     args.folder_name = (
-        f'{args.param_seed}_dataSeed{args.data_seed}_K{args.K}_R{args.n_trials}_A{args.A}_C{args.n_configs}'
+        f'dataSeed{args.data_seed}_{args.param_seed}_K{args.K}_R{args.n_trials}_A{args.A}_C{args.n_configs}'
         f'_R{args.n_trials}_tauRough{args.tau_beta_rough}_tauEntropy{args.tau_beta_entropy}_tauCov{args.tau_beta_cov}'
         f'_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauBudget{args.tau_budget}'
         f'_iters{args.num_epochs}_BatchSize{args.batch_size}_lr{args.lr}_patience{args.scheduler_patience}'
@@ -147,10 +151,11 @@ else:
     elif init == 'Zero':
         model.init_zero()
     elif 'Data' in init:
-        if 'Rand' in init:
-            model.init_from_data(Y=Y_train, factor_access=factor_access_train)
-        elif 'Zero' in init:
-            model.init_from_data(Y=Y_train, factor_access=factor_access_train, zeros=True)
+        model.init_from_data(Y=Y_train, factor_access=factor_access_train)
+        # if 'Rand' in init:
+        #     model.init_from_data(Y=Y_train, factor_access=factor_access_train)
+        # elif 'Zero' in init:
+        #     model.init_from_data(Y=Y_train, factor_access=factor_access_train, zeros=True)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=args.scheduler_factor,
@@ -166,32 +171,30 @@ else:
 
 
 
-# # DELETE
-#
-model.init_ground_truth(
-beta=torch.tensor(data.beta),
+# DELETE
+# model.init_ground_truth(
+# beta=torch.tensor(data.beta),
 # alpha=torch.tensor(data.alpha),
-theta=torch.tensor(data.theta),
-coupling=torch.ones(num_factors, dtype=torch.float64, device=model.device),
-pi=torch.tensor(data.pi),
-config_peak_offsets=torch.tensor(data.config_peak_offsets),
-trial_peak_offset_covar_ltri=torch.tensor(data.trial_peak_offset_covar_ltri),
-zeros=True)
-model.beta.requires_grad = False
+# theta=F.softplus(torch.tensor(data.theta)),
+# coupling=torch.ones(num_factors, dtype=torch.float64, device=model.device),
+# pi=F.softmax(torch.tensor(data.pi).reshape(args.A, -1), dim=1).flatten(),
+# config_peak_offsets=torch.tensor(data.config_peak_offsets),
+# trial_peak_offset_covar_ltri=torch.tensor(data.trial_peak_offset_covar_ltri)
+# )
+# model.beta.requires_grad = False
 # model.alpha.requires_grad = False
-model.theta.requires_grad = False
 model.coupling.requires_grad = False
-model.pi.requires_grad = False
-model.config_peak_offsets.requires_grad = False
-model.trial_peak_offset_covar_ltri_diag.requires_grad = False
-model.trial_peak_offset_covar_ltri_offdiag.requires_grad = False
-model.smoothness_budget.requires_grad = False
+# model.config_peak_offsets.requires_grad = False
+# model.trial_peak_offset_covar_ltri_diag.requires_grad = False
+# model.trial_peak_offset_covar_ltri_offdiag.requires_grad = False
+# model.smoothness_budget.requires_grad = False
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=args.scheduler_factor,
-                                                           patience=patience, threshold_mode='abs',
-                                                           threshold=args.scheduler_threshold)
-args.notes = 'Learn just theta'
-# # DELETE
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
+                                                       factor=args.scheduler_factor,
+                                                       patience=patience, threshold_mode='abs',
+                                                       threshold=args.scheduler_threshold)
+args.notes = 'Learn all. True init. No coupling.'
+# DELETE
 
 
 
@@ -245,7 +248,7 @@ if __name__ == "__main__":
                 coupling_mses.append(F.mse_loss(model.coupling, torch.ones(num_factors, dtype=torch.float64, device=model.device)).item())
                 alpha_mses.append(F.mse_loss(model.alpha, torch.tensor(data.alpha).to(model.device)).item())
                 theta_mses.append(F.mse_loss(model.theta, torch.tensor(data.theta).to(model.device)).item())
-                pi_mses.append(F.mse_loss(model.pi, torch.tensor(data.pi).reshape(args.A, -1)[:, 1:].to(model.device)).item())
+                pi_mses.append(F.mse_loss(model.pi, torch.tensor(data.pi).to(model.device)).item())
                 config_mses.append(F.mse_loss(model.config_peak_offsets, torch.tensor(data.config_peak_offsets).to(model.device)).item())
                 ltri_mses.append(F.mse_loss(model.ltri_matix(), torch.tensor(data.trial_peak_offset_covar_ltri).to(model.device)).item())
 
@@ -273,11 +276,11 @@ if __name__ == "__main__":
             cur_log_likelihood_test = log_likelihoods_test[-1]
             cur_loss_test = losses_test[-1]
             with torch.no_grad():
-                smoothness_budget_constrained = torch.exp(model.smoothness_budget).cpu().numpy()
-                coupling = model.coupling.cpu().numpy()
-                pi = F.softmax(torch.cat([torch.zeros(args.A, 1, device=model.device), model.pi], dim=1), dim=1).flatten().cpu().numpy()
-                alpha = F.softplus(model.alpha).cpu().numpy()
-                theta = F.softplus(model.theta).cpu().numpy()
+                smoothness_budget_constrained = torch.exp(model.smoothness_budget).cpu().numpy().round(3)
+                coupling = model.coupling.cpu().numpy().round(3)
+                pi = model.pi.cpu().numpy().round(3)
+                alpha = F.softplus(model.alpha).cpu().numpy().round(3)
+                theta = model.theta.cpu().numpy().round(3)
             output_str = (
                 f"Epoch: {epoch:2d}, Elapsed Time: {elapsed_time / 60:.2f} mins, Total Time: {total_time / (60 * 60):.2f} hrs,\n"
                 f"Loss train: {cur_loss_train:.5f}, Log Likelihood train: {cur_log_likelihood_train:.5f},\n"
@@ -313,9 +316,9 @@ if __name__ == "__main__":
             write_losses(offsets_test, 'Test', 'trialoffsets_MSE', output_dir, is_empty)
             write_losses(losses_batch, 'Batch', 'Loss', output_dir, is_empty)
             plot_losses(true_ELBO_train, output_dir, 'Train', 'Likelihood')
-            plot_losses(None, output_dir, 'Train', 'Loss', 1)
+            plot_losses(None, output_dir, 'Train', 'Loss', 10)
             plot_losses(true_ELBO_test, output_dir, 'Test', 'Likelihood')
-            plot_losses(None, output_dir, 'Test', 'Loss', 1)
+            plot_losses(None, output_dir, 'Test', 'Loss', 10)
             plot_losses(None, output_dir, 'Test', 'beta_MSE')
             plot_losses(None, output_dir, 'Test', 'coupling_MSE')
             plot_losses(None, output_dir, 'Test', 'alpha_MSE')
@@ -352,6 +355,6 @@ if __name__ == "__main__":
             offsets_test = []
             print(output_str)
             start_time = time.time()
-            if scheduler._last_lr[0] < 1e-5:
-                print('Learning rate is too low. Stopping training.')
-                break
+            # if scheduler._last_lr[0] < 1e-5:
+            #     print('Learning rate is too low. Stopping training.')
+            #     break

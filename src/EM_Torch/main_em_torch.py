@@ -41,16 +41,16 @@ args.K = 100  # K
 # args.scheduler_factor = 0.9
 # args.lr = 0.0001
 # args.num_epochs = 50000
-# args.tau_beta_rough = 1
+# args.tau_beta = 1
 # args.tau_beta_entropy = 1 # 0.01
 # args.tau_config = 0
 # args.tau_sigma = 0
 
 
-init = 'True'
+# init = 'True'
 # init = 'Rand'
 # init = 'Zero'
-# init = 'Data'
+init = 'Data'
 # init = 'TrueAndRandBeta'
 # init = 'DataAndZeroBeta'
 # args.batch_size = 15
@@ -64,12 +64,12 @@ args.scheduler_threshold = 1
 args.scheduler_factor = 0.95
 args.lr = 0.0001
 args.num_epochs = 50000
-args.tau_beta_rough = 1 # 1
-args.tau_beta_entropy = 0 #.01
-args.tau_budget = 0
+args.tau_beta = 50 # 1
+# args.tau_beta_entropy = 0 #.01
+# args.tau_budget = 0
 # args.tau_beta_cov = 0.01
-args.tau_config = 1 # 1
-args.tau_sigma = 1 # 1
+args.tau_config = 1
+args.tau_sigma = 1
 
 
 # outputs_folder = '../../outputs'
@@ -111,10 +111,10 @@ if args.cuda: model.cuda()
 model.eval()
 with (torch.no_grad()):
     model.trial_peak_offsets = trial_offsets_test.clone().detach()
-    true_ELBO_test, model_trial_offsets_test, model_factor_assignment_test, model_neuron_gains_test = model.evaluate(Y_test, factor_access_test, args.A)
+    true_ELBO_test, model_trial_offsets_test, model_factor_assignment_test, model_neuron_gains_test = model.evaluate(Y_test, factor_access_test)
 
     model.trial_peak_offsets = trial_offsets_train.clone().detach()
-    true_ELBO_train, model_trial_offsets_train, model_factor_assignment_train, model_neuron_gains_train = model.evaluate(Y_train, factor_access_train, args.A)
+    true_ELBO_train, model_trial_offsets_train, model_factor_assignment_train, model_neuron_gains_train = model.evaluate(Y_train, factor_access_train)
 
 trial_offsets_train = trial_offsets_train.squeeze().permute(1, 0, 2)
 trial_offsets_test = trial_offsets_test.squeeze().permute(1, 0, 2)
@@ -130,17 +130,16 @@ if args.load:
     model_state, optimizer_state, scheduler_state = load_model_checkpoint(output_dir, args.load_epoch)
     model.load_state_dict(model_state)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    # optimizer.load_state_dict(optimizer_state)
+    optimizer.load_state_dict(optimizer_state)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=args.scheduler_factor,
                                                            patience=patience, threshold_mode='abs',
                                                            threshold=args.scheduler_threshold)
-    # scheduler.load_state_dict(scheduler_state)
+    scheduler.load_state_dict(scheduler_state)
 else:
     start_epoch = 0
     args.folder_name = (
         f'dataSeed{args.data_seed}_{args.param_seed}_K{args.K}_R{args.n_trials}_A{args.A}_C{args.n_configs}'
-        f'_R{args.n_trials}_tauRough{args.tau_beta_rough}_tauEntropy{args.tau_beta_entropy}_tauCov{args.tau_beta_cov}'
-        f'_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauBudget{args.tau_budget}'
+        f'_R{args.n_trials}_tauRough{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}'
         f'_iters{args.num_epochs}_BatchSize{args.batch_size}_lr{args.lr}_patience{args.scheduler_patience}'
         f'_factor{args.scheduler_factor}_threshold{args.scheduler_threshold}_notes-{args.notes}')
     output_dir = os.path.join(output_dir, args.folder_name, 'Run_0')
@@ -165,10 +164,9 @@ else:
     plot_spikes(Y_train.cpu().numpy(), output_dir, data.dt, 'train')
     plot_spikes(Y_test.cpu().numpy(), output_dir, data.dt, 'test')
     plot_intensity_and_latents(data.time, np.exp(data.beta), intensities_train.cpu().numpy(), output_dir)
+    plot_outputs(model.cpu(), args.A, output_dir, 'Train', -1)
     # plot_factor_assignments(factor_assignment_onehot_train-model_factor_assignment_train, output_dir, 'Train', -1)
     # plot_factor_assignments(factor_assignment_onehot_test-model_factor_assignment_test, output_dir, 'Test', -1)
-    plot_outputs(model.cpu(), args.A, output_dir, 'Train', -1)
-
 
 
 # DELETE
@@ -193,7 +191,7 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
                                                        factor=args.scheduler_factor,
                                                        patience=patience, threshold_mode='abs',
                                                        threshold=args.scheduler_threshold)
-args.notes = 'Learn all. True init. No coupling.'
+args.notes = 'Learn all. Zero init. No coupling.'
 # DELETE
 
 
@@ -233,8 +231,7 @@ if __name__ == "__main__":
         model.train()
         for Y, access in dataloader:
             optimizer.zero_grad()
-            likelihood_term, penalty_term = model.forward(Y, access, args.A, args.tau_beta_rough, args.tau_beta_entropy,
-                                                          args.tau_beta_cov, args.tau_budget, args.tau_config, args.tau_sigma)
+            likelihood_term, penalty_term = model.forward(Y, access, args.tau_beta, args.tau_config, args.tau_sigma)
             loss = -(likelihood_term + penalty_term)
             loss.backward()
             optimizer.step()
@@ -252,14 +249,17 @@ if __name__ == "__main__":
                 config_mses.append(F.mse_loss(model.config_peak_offsets, torch.tensor(data.config_peak_offsets).to(model.device)).item())
                 ltri_mses.append(F.mse_loss(model.ltri_matix(), torch.tensor(data.trial_peak_offset_covar_ltri).to(model.device)).item())
 
-                likelihood_term_train, model_trial_offsets_train, model_factor_assignment_train, model_neuron_gains_train = model.evaluate(Y_train, factor_access_train, args.A)
+                penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma)
+                likelihood_term_train, model_trial_offsets_train, model_factor_assignment_train, model_neuron_gains_train = model.evaluate(Y_train, factor_access_train)
+                likelihood_term_test, model_trial_offsets_test, model_factor_assignment_test, model_neuron_gains_test = model.evaluate(Y_test, factor_access_test)
+
                 losses_train.append((likelihood_term_train + penalty_term).item())
                 log_likelihoods_train.append(likelihood_term_train.item())
-
-                likelihood_term_test, model_trial_offsets_test, model_factor_assignment_test, model_neuron_gains_test = model.evaluate(Y_test, factor_access_test, args.A)
                 losses_test.append((likelihood_term_test + penalty_term).item())
                 log_likelihoods_test.append(likelihood_term_test.item())
+
                 scheduler.step(log_likelihoods_test[-1])
+
                 clusr_misses_train.append(torch.sum(torch.abs(factor_assignment_onehot_train - model_factor_assignment_train)).item())
                 clusr_misses_test.append(torch.sum(torch.abs(factor_assignment_onehot_test - model_factor_assignment_test)).item())
                 gains_train.append(F.mse_loss(neuron_gains_train, model_neuron_gains_train).item())

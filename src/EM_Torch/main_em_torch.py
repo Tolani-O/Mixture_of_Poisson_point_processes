@@ -47,10 +47,11 @@ args.K = 100  # K
 # args.tau_sigma = 0
 
 
-# init = 'True'
+init = 'True'
 # init = 'Rand'
 # init = 'Zero'
-init = 'Data'
+# init = 'Data'
+# init = 'TrueBeta'
 # init = 'TrueAndRandBeta'
 # init = 'DataAndZeroBeta'
 # args.batch_size = 15
@@ -58,13 +59,13 @@ args.batch_size = 'All'
 args.param_seed = f'{init}Init+MinorPenalty1+Size{args.batch_size}'
 args.notes = ''
 args.scheduler_patience = 2000
-args.scheduler_threshold = 1
+args.scheduler_threshold = 2
 # args.scheduler_patience = 2000
 # args.scheduler_threshold = 2
-args.scheduler_factor = 0.95
+args.scheduler_factor = 0.9
 args.lr = 0.0001
 args.num_epochs = 50000
-args.tau_beta = 50 # 1
+args.tau_beta = 100 # 1
 # args.tau_beta_entropy = 0 #.01
 # args.tau_budget = 0
 # args.tau_beta_cov = 0.01
@@ -173,19 +174,20 @@ else:
 # model.init_ground_truth(
 # beta=torch.tensor(data.beta),
 # alpha=torch.tensor(data.alpha),
-# theta=F.softplus(torch.tensor(data.theta)),
-# coupling=torch.ones(num_factors, dtype=torch.float64, device=model.device),
-# pi=F.softmax(torch.tensor(data.pi).reshape(args.A, -1), dim=1).flatten(),
-# config_peak_offsets=torch.tensor(data.config_peak_offsets),
-# trial_peak_offset_covar_ltri=torch.tensor(data.trial_peak_offset_covar_ltri)
+# # theta=F.softplus(torch.tensor(data.theta)),
+# # coupling=torch.ones(num_factors, dtype=torch.float64, device=model.device),
+# # pi=F.softmax(torch.tensor(data.pi).reshape(args.A, -1), dim=1).flatten(),
+# # config_peak_offsets=torch.tensor(data.config_peak_offsets),
+# # trial_peak_offset_covar_ltri=torch.tensor(data.trial_peak_offset_covar_ltri)
+# init='zeros'
 # )
-# model.beta.requires_grad = False
+model.beta.requires_grad = False
 # model.alpha.requires_grad = False
 model.coupling.requires_grad = False
-# model.config_peak_offsets.requires_grad = False
-# model.trial_peak_offset_covar_ltri_diag.requires_grad = False
-# model.trial_peak_offset_covar_ltri_offdiag.requires_grad = False
-# model.smoothness_budget.requires_grad = False
+model.config_peak_offsets.requires_grad = False
+model.trial_peak_offset_covar_ltri_diag.requires_grad = False
+model.trial_peak_offset_covar_ltri_offdiag.requires_grad = False
+model.smoothness_budget.requires_grad = False
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
                                                        factor=args.scheduler_factor,
@@ -355,6 +357,6 @@ if __name__ == "__main__":
             offsets_test = []
             print(output_str)
             start_time = time.time()
-            # if scheduler._last_lr[0] < 1e-5:
-            #     print('Learning rate is too low. Stopping training.')
-            #     break
+            if scheduler._last_lr[0] < 1e-5:
+                print('Learning rate is too low. Stopping training.')
+                break

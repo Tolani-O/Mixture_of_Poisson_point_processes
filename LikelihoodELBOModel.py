@@ -281,12 +281,12 @@ class LikelihoodELBOModel(nn.Module):
         Y_sum_rt = torch.sum(Y_sum_t, dim=-1)
         # Y_sum_rt_plus_alpha  # C x K x L
         Y_sum_rt_plus_alpha = Y_sum_rt.unsqueeze(2) + alpha.unsqueeze(0).unsqueeze(1)
-        # dt_exp_beta_plus_theta  # C x K x L
-        dt_exp_beta_plus_theta = (R * dt * torch.sum(factors, dim=-1) + theta).unsqueeze(0).unsqueeze(1)
-        # log_dt_exp_beta_plus_theta  # C x K x L
-        log_dt_exp_beta_plus_theta = torch.log(dt_exp_beta_plus_theta)
+        # RDt_plus_theta  # C x K x L
+        RDt_plus_theta = R * dt + theta.unsqueeze(0).unsqueeze(1)
+        # log_RDt_plus_theta  # C x K x L
+        log_RDt_plus_theta = torch.log(RDt_plus_theta)
         # Y_sum_rt_plus_alpha_times_log_dt_exp_beta_plus_theta  # C x K x L
-        Y_sum_rt_plus_alpha_times_log_dt_exp_beta_plus_theta = Y_sum_rt_plus_alpha * log_dt_exp_beta_plus_theta
+        Y_sum_rt_plus_alpha_times_log_dt_exp_beta_plus_theta = Y_sum_rt_plus_alpha * log_RDt_plus_theta
         # Y_sum_rt_times_logalpha  # C x K x L
         Y_sum_rt_times_logalpha = torch.einsum('ck,l->ckl', Y_sum_rt, torch.log(alpha))
 
@@ -297,12 +297,12 @@ class LikelihoodELBOModel(nn.Module):
         Y_times_warped_beta = torch.sum(Y_times_warped_beta, dim=-1)
         # Y_sum_t_plus_alpha  # C x K x R x L
         Y_sum_t_plus_alpha = Y_sum_t.unsqueeze(3) + alpha.unsqueeze(0).unsqueeze(1).unsqueeze(2)
-        # dt_exp_warpedbeta_plus_theta  # C x R x L x N
-        dt_exp_warpedbeta_plus_theta = dt * torch.sum(warped_factors, dim=-1) + theta.unsqueeze(0).unsqueeze(1).unsqueeze(3)
-        # log_dt_exp_warpedbeta_plus_theta  # C x R x L x N
-        log_dt_exp_warpedbeta_plus_theta = torch.log(dt_exp_warpedbeta_plus_theta)
+        # dt_plus_theta  # C x R x L x N
+        dt_plus_theta = dt + theta.unsqueeze(0).unsqueeze(1).unsqueeze(3)
+        # log_dt_plus_theta  # C x R x L x N
+        log_dt_plus_theta = torch.log(dt_plus_theta)
         # Y_sum_t_plus_alpha_times_log_dt_exp_warpedbeta_plus_theta  # C x K x R x L x N
-        Y_sum_t_plus_alpha_times_log_dt_exp_warpedbeta_plus_theta = torch.einsum('ckrl,crln->ckrln', Y_sum_t_plus_alpha, log_dt_exp_warpedbeta_plus_theta)
+        Y_sum_t_plus_alpha_times_log_dt_exp_warpedbeta_plus_theta = torch.einsum('ckrl,crln->ckrln', Y_sum_t_plus_alpha, log_dt_plus_theta)
         # Y_sum_t_times_logalpha  # C x K x R x L
         Y_sum_t_times_logalpha = torch.einsum('ckr,l->ckrl', Y_sum_t, torch.log(alpha))
 
@@ -348,9 +348,9 @@ class LikelihoodELBOModel(nn.Module):
         # neuron_factor_access  # C x K x 1 x L x 1
         neuron_factor_access = neuron_factor_access.unsqueeze(2).unsqueeze(4)
         # a_CKL  # C x K x L
-        a_CKL = (Y_sum_rt_plus_alpha/dt_exp_beta_plus_theta).unsqueeze(2).unsqueeze(4).detach()
+        a_CKL = (Y_sum_rt_plus_alpha/RDt_plus_theta).unsqueeze(2).unsqueeze(4).detach()
         # b_CKL  # C x K x L
-        b_CKL = (torch.digamma(Y_sum_rt_plus_alpha) - log_dt_exp_beta_plus_theta).detach().unsqueeze(2).unsqueeze(4)
+        b_CKL = (torch.digamma(Y_sum_rt_plus_alpha) - log_RDt_plus_theta).unsqueeze(2).unsqueeze(4).detach()
         alpha = alpha.unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(4)
         # pad for numerical stability
         pad = 1 / torch.prod(torch.tensor(W_CKL.shape[:2]))

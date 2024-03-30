@@ -23,7 +23,7 @@ def get_parser():
     parser.add_argument('--tau_config', type=int, default=0.5, help='Value for tau_sigma1')
     parser.add_argument('--tau_sigma', type=int, default=0.5, help='Value for tau_sigma2')
     parser.add_argument('--tau_beta', type=int, default=0.5, help='Value for tau_beta')
-    parser.add_argument('--tau_beta_entropy', type=int, default=0.5, help='Value for tau_beta_entropy')
+    parser.add_argument('--train_mode', type=str, default='gradient', help='How to train the model')
     parser.add_argument('--tau_beta_cov', type=int, default=0.5, help='Value for tau_beta_cov')
     parser.add_argument('--tau_budget', type=int, default=0.5, help='Value for tau_tau_budget')
     parser.add_argument('--num_epochs', type=int, default=5000, help='Number of training epochs')

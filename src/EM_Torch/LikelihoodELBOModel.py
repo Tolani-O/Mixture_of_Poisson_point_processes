@@ -1,9 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from src.EM_Torch.general_functions import create_second_diff_matrix, create_first_diff_matrix, inv_softplus_torch
+from src.EM_Torch.general_functions import create_second_diff_matrix, create_first_diff_matrix
 import numpy as np
-from scipy.ndimage import gaussian_filter1d
 
 
 class LikelihoodELBOModel(nn.Module):
@@ -103,21 +102,35 @@ class LikelihoodELBOModel(nn.Module):
             self.trial_peak_offset_covar_ltri_offdiag = nn.Parameter(trial_peak_offset_covar_ltri[indices[0], indices[1]])
 
 
-    def init_from_data(self, Y, factor_access):
+    def init_from_data(self, Y, factor_access, init='zeros'):
+        Y, factor_access = Y.cpu(), factor_access.cpu()
         # Y # K x T x R x C
         # factor_access  # K x L x C
         K, T, R, C = Y.shape
-        averaged_neurons = np.einsum('ktrc,klc->tl', Y.cpu(), factor_access.cpu())
-        latent_factors = averaged_neurons.T + np.random.uniform(low=0, high=C*K, size=(self.n_factors, T))
-        L_a = self.n_factors // self.n_areas
+        summed_neurons = torch.einsum('ktrc,klc->lt', Y, factor_access)
+        latent_factors = summed_neurons + C * K * torch.rand(self.n_factors, T)
         # latent_factors[[a * L_a for a in range(self.n_areas)], :] = 1
-        latent_factors = latent_factors / np.sum(latent_factors, axis=1, keepdims=True)
-        beta = torch.log(torch.tensor(latent_factors))
-        alpha = torch.tensor(np.sum(averaged_neurons.T, axis=1))/(L_a*R*torch.sum(factor_access, dim=(0,2)))
-        #latent_factors = np.apply_along_axis(gaussian_filter1d, axis=0, arr=averaged_neurons, sigma=4).T
+        latent_factors = latent_factors / torch.sum(latent_factors, dim=-1, keepdim=True)
+        beta = torch.log(latent_factors)
+        spike_counts = torch.einsum('ktrc,klc->krlc', Y, factor_access)
+        mean = torch.sum(spike_counts, dim=(0,1,3)) / (R * torch.sum(factor_access, dim=(0, 2)))
+        neurons_centered = (spike_counts - mean[None,None,:,None])**2
+        summed_neurons_centered = torch.einsum('krlc,klc->l', neurons_centered, factor_access)
+        varaince = summed_neurons_centered / (R * torch.sum(factor_access, dim=(0, 2)))
+        alpha = mean**2 / varaince
+
+        # L_a = self.n_factors // self.n_areas
+        # x_bar = torch.sum(summed_neurons, dim=-1)/(R*torch.sum(factor_access, dim=(0,2)))
+        # log_x_bar = torch.log(x_bar)
+        # log_x = torch.einsum('krc,klc->krlc', torch.log(torch.sum(Y,dim=1)), factor_access)
+        # log_bar_x = torch.sum(log_x, dim=(0,1,3))/(R*torch.sum(factor_access, dim=(0,2)))
+        # alpha = 0.5/(log_x_bar - log_bar_x)
+        # alpha = torch.sum(summed_neurons, dim=-1)/(R*torch.sum(factor_access, dim=(0,2)))
+        #latent_factors = np.apply_along_axis(gaussian_filter1d, axis=0, arr=summed_neurons, sigma=4).T
         # latent_factors[[a*L_a+1 for a in range(self.n_areas)], :] = (
         #         latent_factors[[a*L_a+1 for a in range(self.n_areas)], :] + np.random.uniform(low=0, high=K, size=(self.n_areas, T)))
-        self.init_ground_truth(beta=beta, alpha=alpha, init='zeros')
+
+        self.init_ground_truth(beta=beta, alpha=alpha, init=init)
 
 
     def cuda(self, device=None):
@@ -244,10 +257,12 @@ class LikelihoodELBOModel(nn.Module):
         warped_factors = warped_factors.permute(4,3,0,2,1)  # C x R x L x N x T
         # include coupling
         warped_factors = warped_factors**self.coupling.unsqueeze(0).unsqueeze(1).unsqueeze(3).unsqueeze(4)
+        warped_factors = warped_factors / torch.sum(warped_factors, dim=-1, keepdim=True)
         log_warped_factors = torch.log(warped_factors)  # warped beta
         # include coupling
         beta = self.coupling.unsqueeze(1) * self.beta
-        factors = torch.exp(beta)  # exp(beta)
+        factors = F.softmax(beta, dim=-1)  # exp(beta)
+        beta = torch.log(factors)  # beta
         Y_sum_t = torch.sum(Y, dim=1).permute(2, 0, 1)  # C x K x R
         alpha = F.softplus(self.alpha)
         theta = self.theta
@@ -305,7 +320,7 @@ class LikelihoodELBOModel(nn.Module):
         # U_tensor # C x K x A x La
         U_tensor = U_tensor.reshape(*U_tensor.shape[:-1], self.n_areas, L_a)
         # W_CKL # C x K x L
-        W_CKL = (neuron_factor_access * F.softmax(U_tensor, dim=-1).reshape(*U_tensor.shape[:-2], factors.shape[0])).detach()
+        W_CKL = (neuron_factor_access * F.softmax(U_tensor, dim=-1).reshape(*U_tensor.shape[:-2], self.n_factors)).detach()
         self.W_CKL = W_CKL  # for finding the posterior clustering probabilities
 
         # V_tensor # C x K x R x L x N
@@ -333,7 +348,7 @@ class LikelihoodELBOModel(nn.Module):
         # neuron_factor_access  # C x K x 1 x L x 1
         neuron_factor_access = neuron_factor_access.unsqueeze(2).unsqueeze(4)
         # a_CKL  # C x K x L
-        a_CKL = (Y_sum_rt_plus_alpha/dt_exp_beta_plus_theta).detach().unsqueeze(2).unsqueeze(4)
+        a_CKL = (Y_sum_rt_plus_alpha/dt_exp_beta_plus_theta).unsqueeze(2).unsqueeze(4).detach()
         # b_CKL  # C x K x L
         b_CKL = (torch.digamma(Y_sum_rt_plus_alpha) - log_dt_exp_beta_plus_theta).detach().unsqueeze(2).unsqueeze(4)
         alpha = alpha.unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(4)

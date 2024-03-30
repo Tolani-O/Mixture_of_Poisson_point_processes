@@ -1,7 +1,6 @@
 import numpy as np
 from scipy.special import softmax
-from scipy.stats import gamma
-from src.EM_Torch.general_functions import softplus, inv_softplus
+
 
 class DataAnalyzer:
 
@@ -42,8 +41,8 @@ class DataAnalyzer:
 
         n_factors = len(intensity_type) * A
         # paremeters
-        self.alpha = inv_softplus(20*np.ones(n_factors, dtype=np.float64))
-        self.theta = inv_softplus((1+np.arange(n_factors, dtype=np.float64))/10)
+        self.alpha = 100*(1+np.arange(n_factors, dtype=np.float64))
+        self.theta = 1.1+np.arange(n_factors, dtype=np.float64)
         self.pi = np.zeros(n_factors)
         self.config_peak_offsets = 0.01 * np.random.normal(size=(configs, 2 * n_factors))
         matrix = np.tril(np.random.normal(size=(2 * n_factors, 2 * n_factors)))
@@ -118,8 +117,8 @@ class DataAnalyzer:
             neurons_assigned += neurons_per_area
             neuron_factor_access[:, (a * neurons_per_area):((a + 1) * neurons_per_area), area_start_indx:(area_start_indx + factors_per_area)] = 1
         neuron_factor_assignments = np.concatenate(neuron_factor_assignments, axis=1)
-        neuron_gains = np.random.gamma(softplus(self.alpha[neuron_factor_assignments]),
-                                       softplus(self.theta[neuron_factor_assignments])**(-1))
+        neuron_gains = np.random.gamma(self.alpha[neuron_factor_assignments],
+                                       self.theta[neuron_factor_assignments]**(-1))
         self.neuron_gains = neuron_gains
         self.neuron_factor_assignments = neuron_factor_assignments
         self.neuron_factor_access = neuron_factor_access
@@ -245,36 +244,3 @@ class DataAnalyzer:
     def get_sample_ground_truth(self):
         return (self.neuron_intensities, self.neuron_factor_assignments, self.neuron_factor_assignments_onehot,
                 self.neuron_gains, self.trial_peak_offsets)
-
-    # def compute_log_likelihood(self, Y, neuron_intensities, factor_assignment, config_offsets, trial_offset):
-    #     ratio = softmax(self.pi, axis=0)[factor_assignment]
-    #     likelihood = np.sum(np.log(neuron_intensities) * Y - neuron_intensities * self.dt)
-    #     gain_prior = gamma.logpdf(self.neuron_gains, a=softplus(self.alpha)[factor_assignment],
-    #                               scale=1/softplus(self.theta)[factor_assignment]).sum()
-    #     membership_prior = np.sum(np.log(ratio))
-    #     self.transformed_config_peak_offset_samples = config_offsets
-    #     self.transformed_trial_peak_offset_samples = trial_offset
-    #     offset_priors = self.compute_offset_entropy_terms()
-    #     return likelihood+gain_prior+membership_prior+offset_priors
-    #
-    #
-    # def compute_offset_entropy_terms(self):  # last 2 entropy terms
-    #     # Entropy1 Terms
-    #     dim = self.config_peak_offset_stdevs.shape[0]
-    #
-    #     Sigma1 = np.diag(softplus(self.config_peak_offset_stdevs)) @ np.diag(softplus(self.config_peak_offset_stdevs)).T
-    #     det_Sigma1 = np.linalg.det(Sigma1)
-    #     inv_Sigma1 = np.linalg.inv(Sigma1)
-    #     prod_term1 = np.einsum('ncl,lj,ncj->nc', self.transformed_config_peak_offset_samples, inv_Sigma1, self.transformed_config_peak_offset_samples)  # sum over l
-    #     # entropy_term1  # N x C
-    #     entropy_term1 = -0.5 * np.sum(np.log((2 * np.pi) ** dim * det_Sigma1) + prod_term1)
-    #
-    #     Sigma2 = self.trial_peak_offset_covar_ltri @ self.trial_peak_offset_covar_ltri.T
-    #     det_Sigma2 = np.linalg.det(Sigma2)
-    #     inv_Sigma2 = np.linalg.inv(Sigma2)
-    #     prod_term2 = np.einsum('mrcl,lj,mrcj->mrc', self.transformed_trial_peak_offset_samples, inv_Sigma2, self.transformed_trial_peak_offset_samples)  # sum over l
-    #     # entropy_term2  # M x C
-    #     entropy_term2 = -0.5 * np.sum(np.log((2 * np.pi) ** dim * det_Sigma2) + prod_term2)
-    #
-    #     entropy_term = entropy_term1 + entropy_term2
-    #     return entropy_term

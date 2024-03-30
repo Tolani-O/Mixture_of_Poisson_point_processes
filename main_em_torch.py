@@ -6,7 +6,7 @@ from src.EM_Torch.simulate_data_multitrial import DataAnalyzer
 from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
 from src.EM_Torch.general_functions import load_model_checkpoint, plot_factor_assignments, plot_spikes, \
     plot_intensity_and_latents, create_relevant_files, get_parser, plot_outputs, \
-    write_log_and_model, write_losses, plot_losses, CustomDataset, load_tensors
+    write_log_and_model, write_losses, plot_losses, CustomDataset, load_tensors, inv_softplus_torch
 import numpy as np
 import time
 import torch
@@ -47,16 +47,18 @@ args.K = 100  # K
 # args.tau_sigma = 0
 
 
-init = 'True'
+# init = 'True'
 # init = 'Rand'
 # init = 'Zero'
-# init = 'Data'
+init = 'Data'
+the_rest = ''
 # init = 'TrueBeta'
 # init = 'TrueAndRandBeta'
 # init = 'DataAndZeroBeta'
 # args.batch_size = 15
 args.batch_size = 'All'
-args.param_seed = f'{init}Init+MinorPenalty1+Size{args.batch_size}'
+args.train_mode = 'EM'
+args.param_seed = f'{init}Init+MinorPenalty1+Size{args.batch_size}+Mode{args.train_mode}'
 args.notes = ''
 args.scheduler_patience = 2000
 args.scheduler_threshold = 2
@@ -101,8 +103,8 @@ intensities_test, factor_assignment_test, factor_assignment_onehot_test, neuron_
 num_factors = data.beta.shape[0]
 model = LikelihoodELBOModel(data.time, num_factors, args.A, args.n_configs, args.n_trial_samples)
 model.init_ground_truth(beta=torch.tensor(data.beta),
-                        alpha=torch.tensor(data.alpha),
-                        theta=F.softplus(torch.tensor(data.theta)),
+                        alpha=inv_softplus_torch(torch.tensor(data.alpha)),
+                        theta=torch.tensor(data.theta),
                         coupling=torch.ones(num_factors, dtype=torch.float64, device=model.device),
                         pi=F.softmax(torch.tensor(data.pi).reshape(args.A, -1), dim=1).flatten(),
                         config_peak_offsets=torch.tensor(data.config_peak_offsets),
@@ -151,7 +153,7 @@ else:
     elif init == 'Zero':
         model.init_zero()
     elif 'Data' in init:
-        model.init_from_data(Y=Y_train, factor_access=factor_access_train)
+        model.init_from_data(Y=Y_train, factor_access=factor_access_train, init=the_rest)
         # if 'Rand' in init:
         #     model.init_from_data(Y=Y_train, factor_access=factor_access_train)
         # elif 'Zero' in init:
@@ -172,27 +174,28 @@ else:
 
 # DELETE
 # model.init_ground_truth(
-# beta=torch.tensor(data.beta),
-# alpha=torch.tensor(data.alpha),
-# # theta=F.softplus(torch.tensor(data.theta)),
-# # coupling=torch.ones(num_factors, dtype=torch.float64, device=model.device),
-# # pi=F.softmax(torch.tensor(data.pi).reshape(args.A, -1), dim=1).flatten(),
-# # config_peak_offsets=torch.tensor(data.config_peak_offsets),
-# # trial_peak_offset_covar_ltri=torch.tensor(data.trial_peak_offset_covar_ltri)
+# # beta=torch.tensor(data.beta),
+# # alpha=inv_softplus_torch(torch.tensor(data.alpha)),
+# theta=torch.tensor(data.theta),
+# coupling=torch.ones(num_factors, dtype=torch.float64, device=model.device),
+# pi=F.softmax(torch.tensor(data.pi).reshape(args.A, -1), dim=1).flatten(),
+# config_peak_offsets=torch.tensor(data.config_peak_offsets),
+# trial_peak_offset_covar_ltri=torch.tensor(data.trial_peak_offset_covar_ltri),
 # init='zeros'
 # )
-model.beta.requires_grad = False
+# optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+# scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
+#                                                        factor=args.scheduler_factor,
+#                                                        patience=patience, threshold_mode='abs',
+#                                                        threshold=args.scheduler_threshold)
+# model.beta.requires_grad = False
 # model.alpha.requires_grad = False
 model.coupling.requires_grad = False
 model.config_peak_offsets.requires_grad = False
 model.trial_peak_offset_covar_ltri_diag.requires_grad = False
 model.trial_peak_offset_covar_ltri_offdiag.requires_grad = False
 model.smoothness_budget.requires_grad = False
-optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
-                                                       factor=args.scheduler_factor,
-                                                       patience=patience, threshold_mode='abs',
-                                                       threshold=args.scheduler_threshold)
+
 args.notes = 'Learn all. Zero init. No coupling.'
 # DELETE
 
@@ -205,6 +208,47 @@ if args.batch_size == 'All':
 dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 print(f'folder_name: {args.folder_name}')
 print(output_str)
+
+
+def train_gradient():
+    for Y, access in dataloader:
+        optimizer.zero_grad()
+        likelihood_term, penalty_term = model.forward(Y, access, args.tau_beta, args.tau_config, args.tau_sigma)
+        loss = -(likelihood_term + penalty_term)
+        loss.backward()
+        optimizer.step()
+        losses_batch.append((likelihood_term + penalty_term).item())
+        log_likelihoods_batch.append(likelihood_term.item())
+
+
+def train_EM():
+    model.beta.requires_grad = False
+    model.alpha.requires_grad = True
+    # model.config_peak_offsets.requires_grad = True
+    # model.trial_peak_offset_covar_ltri_diag.requires_grad = True
+    # model.trial_peak_offset_covar_ltri_offdiag.requires_grad = True
+    for Y, access in dataloader:
+        optimizer.zero_grad()
+        likelihood_term, penalty_term = model.forward(Y, access, args.tau_beta, args.tau_config, args.tau_sigma)
+        loss = -(likelihood_term + penalty_term)
+        loss.backward()
+        optimizer.step()
+        losses_batch.append((likelihood_term + penalty_term).item())
+        log_likelihoods_batch.append(likelihood_term.item())
+    model.beta.requires_grad = True
+    model.alpha.requires_grad = False
+    # model.config_peak_offsets.requires_grad = False
+    # model.trial_peak_offset_covar_ltri_diag.requires_grad = False
+    # model.trial_peak_offset_covar_ltri_offdiag.requires_grad = False
+    for Y, access in dataloader:
+        optimizer.zero_grad()
+        likelihood_term, penalty_term = model.forward(Y, access, args.tau_beta, args.tau_config, args.tau_sigma)
+        loss = -(likelihood_term + penalty_term)
+        loss.backward()
+        optimizer.step()
+        losses_batch.append((likelihood_term + penalty_term).item())
+        log_likelihoods_batch.append(likelihood_term.item())
+
 
 if __name__ == "__main__":
     log_likelihoods_batch = []
@@ -231,21 +275,16 @@ if __name__ == "__main__":
     for epoch in range(start_epoch, start_epoch + args.num_epochs):
         if args.cuda: model.cuda()
         model.train()
-        for Y, access in dataloader:
-            optimizer.zero_grad()
-            likelihood_term, penalty_term = model.forward(Y, access, args.tau_beta, args.tau_config, args.tau_sigma)
-            loss = -(likelihood_term + penalty_term)
-            loss.backward()
-            optimizer.step()
-            losses_batch.append((likelihood_term + penalty_term).item())
-            log_likelihoods_batch.append(likelihood_term.item())
-
+        if args.train_mode == 'gradient':
+            train_gradient()
+        elif args.train_mode == 'EM':
+            train_EM()
         if epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             model.eval()
             with torch.no_grad():
                 beta_mses.append(F.mse_loss(model.beta, torch.tensor(data.beta).to(model.device)).item())
                 coupling_mses.append(F.mse_loss(model.coupling, torch.ones(num_factors, dtype=torch.float64, device=model.device)).item())
-                alpha_mses.append(F.mse_loss(model.alpha, torch.tensor(data.alpha).to(model.device)).item())
+                alpha_mses.append(F.mse_loss(F.softplus(model.alpha), torch.tensor(data.alpha).to(model.device)).item())
                 theta_mses.append(F.mse_loss(model.theta, torch.tensor(data.theta).to(model.device)).item())
                 pi_mses.append(F.mse_loss(model.pi, torch.tensor(data.pi).to(model.device)).item())
                 config_mses.append(F.mse_loss(model.config_peak_offsets, torch.tensor(data.config_peak_offsets).to(model.device)).item())

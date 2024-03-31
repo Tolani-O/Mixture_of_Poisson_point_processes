@@ -30,11 +30,11 @@ args.K = 100  # K
 # args.tau_sigma = 0
 
 
-# args.folder_name = 'folder'
-# args.load = True
-# args.load_epoch = 49999
-# args.load_run = 0
-# args.data_seed = 1853039048
+args.folder_name = 'folder'
+args.load = True
+args.load_epoch = 46400
+args.load_run = 0
+args.data_seed = 922550380
 # args.batch_size = 'All'
 # args.scheduler_patience = 2000
 # args.scheduler_threshold = 2
@@ -47,17 +47,17 @@ args.K = 100  # K
 # args.tau_sigma = 0
 
 
-# init = 'True'
+init = 'True'
 # init = 'Rand'
 # init = 'Zero'
-init = 'Data'
+# init = 'Data'
 the_rest = ''
 # init = 'TrueBeta'
 # init = 'TrueAndRandBeta'
 # init = 'DataAndZeroBeta'
 # args.batch_size = 15
 args.batch_size = 'All'
-args.train_mode = 'EM'
+# args.train_mode = 'EM'
 args.param_seed = f'{init}Init+MinorPenalty1+Size{args.batch_size}+Mode{args.train_mode}'
 args.notes = ''
 args.scheduler_patience = 2000
@@ -73,6 +73,8 @@ args.tau_beta = 100 # 1
 # args.tau_beta_cov = 0.01
 args.tau_config = 1
 args.tau_sigma = 1
+trial_offsets_train_model = None
+trial_offsets_test_model = None
 
 
 # outputs_folder = '../../outputs'
@@ -113,16 +115,16 @@ model.init_ground_truth(beta=torch.tensor(data.beta),
 if args.cuda: model.cuda()
 model.eval()
 with (torch.no_grad()):
-    model.trial_peak_offsets = trial_offsets_test.clone().detach()
-    true_ELBO_test, model_trial_offsets_test, model_factor_assignment_test, model_neuron_gains_test = model.evaluate(Y_test, factor_access_test)
-
     model.trial_peak_offsets = trial_offsets_train.clone().detach()
-    true_ELBO_train, model_trial_offsets_train, model_factor_assignment_train, model_neuron_gains_train = model.evaluate(Y_train, factor_access_train)
+    true_ELBO_train, model_trial_offsets_train, model_factor_assignment_train, model_neuron_gains_train = model.evaluate(
+        Y_train, factor_access_train)
 
-trial_offsets_train = trial_offsets_train.squeeze().permute(1, 0, 2)
-trial_offsets_test = trial_offsets_test.squeeze().permute(1, 0, 2)
-true_ELBO_train = true_ELBO_train.item()
-true_ELBO_test = true_ELBO_test.item()
+    model.trial_peak_offsets = trial_offsets_test.clone().detach()
+    true_ELBO_test, model_trial_offsets_test, model_factor_assignment_test, model_neuron_gains_test = model.evaluate(
+        Y_test, factor_access_test)
+
+true_ELBO_train = (1/(args.K*args.n_trials*args.n_configs))*true_ELBO_train.item()
+true_ELBO_test = (1/(args.K*args.n_trials*args.n_configs))*true_ELBO_test.item()
 output_str = (
     f"True ELBO Training: {true_ELBO_train},\n"
     f"True ELBO Test: {true_ELBO_test}\n\n")
@@ -190,12 +192,13 @@ else:
 #                                                        threshold=args.scheduler_threshold)
 # model.beta.requires_grad = False
 # model.alpha.requires_grad = False
+# model.config_peak_offsets.requires_grad = False
+# model.trial_peak_offset_covar_ltri_diag.requires_grad = False
+# model.trial_peak_offset_covar_ltri_offdiag.requires_grad = False
+# trial_offsets_train_model = trial_offsets_train.clone()
+# trial_offsets_test_model = trial_offsets_test.clone()
 model.coupling.requires_grad = False
-model.config_peak_offsets.requires_grad = False
-model.trial_peak_offset_covar_ltri_diag.requires_grad = False
-model.trial_peak_offset_covar_ltri_offdiag.requires_grad = False
 model.smoothness_budget.requires_grad = False
-
 args.notes = 'Learn all. Zero init. No coupling.'
 # DELETE
 
@@ -213,7 +216,8 @@ print(output_str)
 def train_gradient():
     for Y, access in dataloader:
         optimizer.zero_grad()
-        likelihood_term, penalty_term = model.forward(Y, access, args.tau_beta, args.tau_config, args.tau_sigma)
+        likelihood_term, penalty_term = model.forward(
+            Y, access, args.tau_beta, args.tau_config, args.tau_sigma, trial_offsets_train_model)
         loss = -(likelihood_term + penalty_term)
         loss.backward()
         optimizer.step()
@@ -224,12 +228,13 @@ def train_gradient():
 def train_EM():
     model.beta.requires_grad = False
     model.alpha.requires_grad = True
-    # model.config_peak_offsets.requires_grad = True
-    # model.trial_peak_offset_covar_ltri_diag.requires_grad = True
-    # model.trial_peak_offset_covar_ltri_offdiag.requires_grad = True
+    model.config_peak_offsets.requires_grad = True
+    model.trial_peak_offset_covar_ltri_diag.requires_grad = True
+    model.trial_peak_offset_covar_ltri_offdiag.requires_grad = True
     for Y, access in dataloader:
         optimizer.zero_grad()
-        likelihood_term, penalty_term = model.forward(Y, access, args.tau_beta, args.tau_config, args.tau_sigma)
+        likelihood_term, penalty_term = model.forward(
+            Y, access, args.tau_beta, args.tau_config, args.tau_sigma, trial_offsets_train_model)
         loss = -(likelihood_term + penalty_term)
         loss.backward()
         optimizer.step()
@@ -237,12 +242,13 @@ def train_EM():
         log_likelihoods_batch.append(likelihood_term.item())
     model.beta.requires_grad = True
     model.alpha.requires_grad = False
-    # model.config_peak_offsets.requires_grad = False
-    # model.trial_peak_offset_covar_ltri_diag.requires_grad = False
-    # model.trial_peak_offset_covar_ltri_offdiag.requires_grad = False
+    model.config_peak_offsets.requires_grad = False
+    model.trial_peak_offset_covar_ltri_diag.requires_grad = False
+    model.trial_peak_offset_covar_ltri_offdiag.requires_grad = False
     for Y, access in dataloader:
         optimizer.zero_grad()
-        likelihood_term, penalty_term = model.forward(Y, access, args.tau_beta, args.tau_config, args.tau_sigma)
+        likelihood_term, penalty_term = model.forward(
+            Y, access, args.tau_beta, args.tau_config, args.tau_sigma, trial_offsets_train_model)
         loss = -(likelihood_term + penalty_term)
         loss.backward()
         optimizer.step()
@@ -291,13 +297,15 @@ if __name__ == "__main__":
                 ltri_mses.append(F.mse_loss(model.ltri_matix(), torch.tensor(data.trial_peak_offset_covar_ltri).to(model.device)).item())
 
                 penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma)
-                likelihood_term_train, model_trial_offsets_train, model_factor_assignment_train, model_neuron_gains_train = model.evaluate(Y_train, factor_access_train)
-                likelihood_term_test, model_trial_offsets_test, model_factor_assignment_test, model_neuron_gains_test = model.evaluate(Y_test, factor_access_test)
+                likelihood_term_train, model_trial_offsets_train, model_factor_assignment_train, model_neuron_gains_train = model.evaluate(
+                    Y_train, factor_access_train, trial_offsets_train_model)
+                likelihood_term_test, model_trial_offsets_test, model_factor_assignment_test, model_neuron_gains_test = model.evaluate(
+                    Y_test, factor_access_test, trial_offsets_test_model)
 
-                losses_train.append((likelihood_term_train + penalty_term).item())
-                log_likelihoods_train.append(likelihood_term_train.item())
-                losses_test.append((likelihood_term_test + penalty_term).item())
-                log_likelihoods_test.append(likelihood_term_test.item())
+                losses_train.append(((1/(args.K*args.n_trials*args.n_configs))*likelihood_term_train + (1/args.n_trials)*penalty_term).item())
+                log_likelihoods_train.append((1/(args.K*args.n_trials*args.n_configs))*likelihood_term_train.item())
+                losses_test.append(((1/(args.K*args.n_trials*args.n_configs))*likelihood_term_test + (1/args.n_trials)*penalty_term).item())
+                log_likelihoods_test.append((1/(args.K*args.n_trials*args.n_configs))*likelihood_term_test.item())
 
                 scheduler.step(log_likelihoods_test[-1])
 
@@ -305,8 +313,8 @@ if __name__ == "__main__":
                 clusr_misses_test.append(torch.sum(torch.abs(factor_assignment_onehot_test - model_factor_assignment_test)).item())
                 gains_train.append(F.mse_loss(neuron_gains_train, model_neuron_gains_train).item())
                 gains_test.append(F.mse_loss(neuron_gains_test, model_neuron_gains_test).item())
-                offsets_train.append(F.mse_loss(trial_offsets_train, model_trial_offsets_train).item())
-                offsets_test.append(F.mse_loss(trial_offsets_test, model_trial_offsets_test).item())
+                offsets_train.append(F.mse_loss(trial_offsets_train.squeeze().permute(1, 0, 2), model_trial_offsets_train).item())
+                offsets_test.append(F.mse_loss(trial_offsets_test.squeeze().permute(1, 0, 2), model_trial_offsets_test).item())
 
         if epoch % args.log_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             end_time = time.time()  # Record the end time of the epoch

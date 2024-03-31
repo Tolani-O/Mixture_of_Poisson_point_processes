@@ -379,21 +379,23 @@ class LikelihoodELBOModel(nn.Module):
         log_pi = torch.log(pi)
 
         # trial_peak_offsets  # N x R x C x 2AL
-        n_dims = self.trial_peak_offset_covar_ltri_diag.shape[0]
         ltri_matrix = self.ltri_matix()
-        Sigma = ltri_matrix @ ltri_matrix.t()
-        det_Sigma = torch.linalg.det(Sigma)
-        inv_Sigma = torch.linalg.inv(Sigma)
-        prod_term = torch.einsum('nrcl,lj,nrcj->crn', self.trial_peak_offsets, inv_Sigma, self.trial_peak_offsets)  # sum over l
-        normalizing_const = n_dims*torch.log(torch.tensor(2*torch.pi)) + torch.log(det_Sigma)
-        entropy_term = 0.5 * (normalizing_const + prod_term).unsqueeze(1).unsqueeze(3)
+        entropy_term = self.Sigma_log_likelihood(self.trial_peak_offsets, ltri_matrix)
 
-        elbo = Y_times_warped_beta + (1/R) * (-a_CKL_times_dt_exp_warpedbeta_plus_theta - log_gamma_alpha + alpha_log_theta_plus_b_KL + log_pi) - (1/K) * entropy_term
-        # elbo = - a_CKL_times_dt_exp_warpedbeta_plus_theta - log_gamma_alpha + alpha_log_theta_plus_b_KL
+        elbo = Y_times_warped_beta + (1/R) * (-a_CKL_times_dt_exp_warpedbeta_plus_theta - log_gamma_alpha + alpha_log_theta_plus_b_KL + log_pi) + (1/K) * entropy_term
         elbo = W_tensor * elbo
 
         return torch.sum(elbo)
 
+    def Sigma_log_likelihood(self, trial_peak_offsets, ltri_matrix):
+        n_dims = ltri_matrix.shape[0]
+        Sigma = ltri_matrix @ ltri_matrix.t()
+        det_Sigma = torch.linalg.det(Sigma)
+        inv_Sigma = torch.linalg.inv(Sigma)
+        prod_term = torch.einsum('nrcl,lj,nrcj->crn', trial_peak_offsets, inv_Sigma, trial_peak_offsets)  # sum over l
+        normalizing_const = n_dims * torch.log(torch.tensor(2 * torch.pi)) + torch.log(det_Sigma)
+        entropy_term = - 0.5 * (normalizing_const + prod_term).unsqueeze(1).unsqueeze(3)
+        return entropy_term
 
     def compute_penalty_terms(self, tau_beta, tau_config, tau_sigma):
         # Penalty Terms
@@ -445,16 +447,24 @@ class LikelihoodELBOModel(nn.Module):
         return trial_offsets, neuron_factor_assignment, neuron_firing_rates
 
 
-    def forward(self, Y, neuron_factor_access, tau_beta, tau_config, tau_sigma):
-        _, _, n_trials, n_configs = Y.shape
-        # self.sample_trial_offsets(n_configs, n_trials)
+    def forward(self, Y, neuron_factor_access, tau_beta, tau_config, tau_sigma, trial_peak_offsets=None):
+        if trial_peak_offsets is None:
+            _, _, n_trials, n_configs = Y.shape
+            self.sample_trial_offsets(n_configs, n_trials)
+        else:
+            self.trial_peak_offsets = trial_peak_offsets
         warped_factors = self.warp_all_latent_factors_for_all_trials()
         likelihood_term = self.compute_log_elbo(Y, neuron_factor_access, warped_factors)
         penalty_term = self.compute_penalty_terms(tau_beta, tau_config, tau_sigma)
         return likelihood_term, penalty_term
 
 
-    def evaluate(self, Y, neuron_factor_access):
+    def evaluate(self, Y, neuron_factor_access, trial_peak_offsets=None):
+        if trial_peak_offsets is None:
+            _, _, n_trials, n_configs = Y.shape
+            self.sample_trial_offsets(n_configs, n_trials)
+        else:
+            self.trial_peak_offsets = trial_peak_offsets
         warped_factors = self.warp_all_latent_factors_for_all_trials()
         likelihood_term = self.compute_log_elbo(Y, neuron_factor_access, warped_factors)
         trial_offsets, neuron_factor_assignment, neuron_firing_rates = self.infer_latent_variables()

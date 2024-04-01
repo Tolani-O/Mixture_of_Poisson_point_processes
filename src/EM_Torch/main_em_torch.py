@@ -30,11 +30,11 @@ args.K = 100  # K
 # args.tau_sigma = 0
 
 
-args.folder_name = 'folder'
-args.load = True
-args.load_epoch = 46400
-args.load_run = 0
-args.data_seed = 922550380
+# args.folder_name = 'folder'
+# args.load = True
+# args.load_epoch = 47100
+# args.load_run = 0
+# args.data_seed = 3492718058
 # args.batch_size = 'All'
 # args.scheduler_patience = 2000
 # args.scheduler_threshold = 2
@@ -47,10 +47,10 @@ args.data_seed = 922550380
 # args.tau_sigma = 0
 
 
-init = 'True'
+# init = 'True'
 # init = 'Rand'
 # init = 'Zero'
-# init = 'Data'
+init = 'Data'
 the_rest = ''
 # init = 'TrueBeta'
 # init = 'TrueAndRandBeta'
@@ -67,12 +67,10 @@ args.scheduler_threshold = 2
 args.scheduler_factor = 0.9
 args.lr = 0.0001
 args.num_epochs = 50000
-args.tau_beta = 100 # 1
-# args.tau_beta_entropy = 0 #.01
+args.tau_beta = 100
 # args.tau_budget = 0
-# args.tau_beta_cov = 0.01
-args.tau_config = 1
-args.tau_sigma = 1
+args.tau_config = 10
+args.tau_sigma = 10
 trial_offsets_train_model = None
 trial_offsets_test_model = None
 
@@ -82,8 +80,6 @@ print('Start')
 output_dir = os.path.join(os.getcwd(), outputs_folder)
 # Set the random seed manually for reproducibility.
 np.random.seed(args.data_seed)
-# if args.param_seed != 'TRUTH':
-#     torch.manual_seed(args.param_seed)
 # Ground truth data
 if torch.cuda.is_available():
     if not args.cuda:
@@ -125,9 +121,13 @@ with (torch.no_grad()):
 
 true_ELBO_train = (1/(args.K*args.n_trials*args.n_configs))*true_ELBO_train.item()
 true_ELBO_test = (1/(args.K*args.n_trials*args.n_configs))*true_ELBO_test.item()
+true_offset_penalty_train = (1/(args.n_trials*args.n_configs))*model.Sigma_log_likelihood(trial_offsets_train, model.ltri_matix()).sum().item()
+true_offset_penalty_test = (1/(args.n_trials*args.n_configs))*model.Sigma_log_likelihood(trial_offsets_test, model.ltri_matix()).sum().item()
 output_str = (
     f"True ELBO Training: {true_ELBO_train},\n"
-    f"True ELBO Test: {true_ELBO_test}\n\n")
+    f"True ELBO Test: {true_ELBO_test},\n"
+    f"True Offset Likelihood Training: {true_offset_penalty_train},\n"
+    f"True Offset Likelihood Test: {true_offset_penalty_test}\n\n")
 patience = args.scheduler_patience//args.eval_interval
 if args.load:
     start_epoch = args.load_epoch + 1
@@ -144,7 +144,7 @@ else:
     start_epoch = 0
     args.folder_name = (
         f'dataSeed{args.data_seed}_{args.param_seed}_K{args.K}_R{args.n_trials}_A{args.A}_C{args.n_configs}'
-        f'_R{args.n_trials}_tauRough{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}'
+        f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}'
         f'_iters{args.num_epochs}_BatchSize{args.batch_size}_lr{args.lr}_patience{args.scheduler_patience}'
         f'_factor{args.scheduler_factor}_threshold{args.scheduler_threshold}_notes-{args.notes}')
     output_dir = os.path.join(output_dir, args.folder_name, 'Run_0')
@@ -156,10 +156,6 @@ else:
         model.init_zero()
     elif 'Data' in init:
         model.init_from_data(Y=Y_train, factor_access=factor_access_train, init=the_rest)
-        # if 'Rand' in init:
-        #     model.init_from_data(Y=Y_train, factor_access=factor_access_train)
-        # elif 'Zero' in init:
-        #     model.init_from_data(Y=Y_train, factor_access=factor_access_train, zeros=True)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=args.scheduler_factor,
@@ -270,6 +266,8 @@ if __name__ == "__main__":
     pi_mses = []
     config_mses = []
     ltri_mses = []
+    ltriLkhd_train = []
+    ltriLkhd_test = []
     clusr_misses_train = []
     clusr_misses_test = []
     gains_train = []
@@ -302,9 +300,11 @@ if __name__ == "__main__":
                 likelihood_term_test, model_trial_offsets_test, model_factor_assignment_test, model_neuron_gains_test = model.evaluate(
                     Y_test, factor_access_test, trial_offsets_test_model)
 
-                losses_train.append(((1/(args.K*args.n_trials*args.n_configs))*likelihood_term_train + (1/args.n_trials)*penalty_term).item())
+                losses_train.append(((1/(args.K*args.n_trials*args.n_configs))*likelihood_term_train +
+                                     (1/(args.n_trials*args.n_configs))*penalty_term).item())
                 log_likelihoods_train.append((1/(args.K*args.n_trials*args.n_configs))*likelihood_term_train.item())
-                losses_test.append(((1/(args.K*args.n_trials*args.n_configs))*likelihood_term_test + (1/args.n_trials)*penalty_term).item())
+                losses_test.append(((1/(args.K*args.n_trials*args.n_configs))*likelihood_term_test +
+                                    (1/(args.n_trials*args.n_configs))*penalty_term).item())
                 log_likelihoods_test.append((1/(args.K*args.n_trials*args.n_configs))*likelihood_term_test.item())
 
                 scheduler.step(log_likelihoods_test[-1])
@@ -315,6 +315,8 @@ if __name__ == "__main__":
                 gains_test.append(F.mse_loss(neuron_gains_test, model_neuron_gains_test).item())
                 offsets_train.append(F.mse_loss(trial_offsets_train.squeeze().permute(1, 0, 2), model_trial_offsets_train).item())
                 offsets_test.append(F.mse_loss(trial_offsets_test.squeeze().permute(1, 0, 2), model_trial_offsets_test).item())
+                ltriLkhd_train.append((1/(args.n_trials*args.n_configs))*model.Sigma_log_likelihood(trial_offsets_train, model.ltri_matix()).sum().item())
+                ltriLkhd_test.append((1/(args.n_trials*args.n_configs))*model.Sigma_log_likelihood(trial_offsets_test, model.ltri_matix()).sum().item())
 
         if epoch % args.log_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             end_time = time.time()  # Record the end time of the epoch
@@ -324,6 +326,8 @@ if __name__ == "__main__":
             cur_loss_train = losses_train[-1]
             cur_log_likelihood_test = log_likelihoods_test[-1]
             cur_loss_test = losses_test[-1]
+            cur_ltriLkhd_train = ltriLkhd_train[-1]
+            cur_ltriLkhd_test = ltriLkhd_test[-1]
             with torch.no_grad():
                 smoothness_budget_constrained = torch.exp(model.smoothness_budget).cpu().numpy().round(3)
                 coupling = model.coupling.cpu().numpy().round(3)
@@ -334,6 +338,7 @@ if __name__ == "__main__":
                 f"Epoch: {epoch:2d}, Elapsed Time: {elapsed_time / 60:.2f} mins, Total Time: {total_time / (60 * 60):.2f} hrs,\n"
                 f"Loss train: {cur_loss_train:.5f}, Log Likelihood train: {cur_log_likelihood_train:.5f},\n"
                 f"Loss test: {cur_loss_test:.5f}, Log Likelihood test: {cur_log_likelihood_test:.5f},\n"
+                f"ltriLkhd_train: {cur_ltriLkhd_train:.5f}, ltriLkhd_test: {cur_ltriLkhd_test:.5f},\n"
                 f"smoothness_budget: {smoothness_budget_constrained.T},\n"
                 f"coupling: {coupling.T},\n"
                 f"pi: {pi.T},\n"
@@ -356,6 +361,8 @@ if __name__ == "__main__":
             write_losses(pi_mses, 'Test', 'pi_MSE', output_dir, is_empty)
             write_losses(config_mses, 'Test', 'configoffset_MSE', output_dir, is_empty)
             write_losses(ltri_mses, 'Test', 'ltri_MSE', output_dir, is_empty)
+            write_losses(ltriLkhd_train, 'Train', 'ltriLkhd', output_dir, is_empty)
+            write_losses(ltriLkhd_test, 'Test', 'ltriLkhd', output_dir, is_empty)
             write_losses(log_likelihoods_batch, 'Batch', 'Likelihood', output_dir, is_empty)
             write_losses(clusr_misses_train, 'Train', 'clusr_misses', output_dir, is_empty)
             write_losses(clusr_misses_test, 'Test', 'clusr_misses', output_dir, is_empty)
@@ -375,6 +382,8 @@ if __name__ == "__main__":
             plot_losses(None, output_dir, 'Test', 'pi_MSE')
             plot_losses(None, output_dir, 'Test', 'configoffset_MSE')
             plot_losses(None, output_dir, 'Test', 'ltri_MSE')
+            plot_losses(true_offset_penalty_train, output_dir, 'Train', 'ltriLkhd', 10)
+            plot_losses(true_offset_penalty_test, output_dir, 'Test', 'ltriLkhd', 10)
             plot_losses(true_ELBO_train, output_dir, 'Batch', 'Likelihood', 20)
             plot_losses(None, output_dir, 'Batch', 'Loss', 20)
             plot_losses(None, output_dir, 'Train', 'clusr_misses')
@@ -396,6 +405,8 @@ if __name__ == "__main__":
             pi_mses = []
             config_mses = []
             ltri_mses = []
+            ltriLkhd_train = []
+            ltriLkhd_test = []
             clusr_misses_train = []
             clusr_misses_test = []
             gains_train = []

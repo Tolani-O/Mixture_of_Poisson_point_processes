@@ -125,6 +125,7 @@ class DataAnalyzer:
 
     def generate_spike_trains(self, trial_warped_factors):
 
+        # trial_warped_factors = trial_warped_factors / np.sum(trial_warped_factors, axis=1, keepdims=True)
         neuron_trial_warped_factors = []
         for i in range(self.neuron_factor_assignments.shape[0]):
             neuron_trial_warped_factors.append(trial_warped_factors[self.neuron_factor_assignments[i,:], :, :, i])
@@ -132,6 +133,7 @@ class DataAnalyzer:
         neuron_intensities = self.neuron_gains.T[:,None,None,:] * neuron_trial_warped_factors
         # padding
         neuron_intensities = np.concatenate([np.zeros((neuron_intensities.shape[0], 1, neuron_intensities.shape[2], neuron_intensities.shape[3])), neuron_intensities], axis=1)
+        neuron_intensities = neuron_intensities*10
         rates = np.max(neuron_intensities, axis=1)
         arrival_times = np.zeros_like(rates)
         homogeneous_poisson_process = np.zeros_like(neuron_intensities)

@@ -197,6 +197,8 @@ def create_relevant_files(output_dir, output_str):
         'pi_MSE_test',
         'configoffset_MSE_test',
         'ltri_MSE_test',
+        'ltriLkhd_train',
+        'ltriLkhd_test',
         'clusr_misses_train',
         'clusr_misses_test',
         'gains_MSE_train',
@@ -385,7 +387,7 @@ def plot_losses(true_likelihood, output_dir, name, metric, cutoff=0):
     metric_data = metric_data[cutoff:]
     plt.figure(figsize=(10, 6))
     plt.plot(metric_data, label=metric)
-    if 'likelihood' in metric.lower():
+    if true_likelihood is not None:
         true_likelihood_vector = [true_likelihood] * len(metric_data)
         plt.plot(true_likelihood_vector, label='True Log Likelihood')
     plt.xlabel('Iterations')

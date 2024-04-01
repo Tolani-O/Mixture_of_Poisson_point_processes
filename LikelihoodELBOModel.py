@@ -114,11 +114,12 @@ class LikelihoodELBOModel(nn.Module):
         beta = torch.log(latent_factors)
         spike_counts = torch.einsum('ktrc,klc->krlc', Y, factor_access)
         mean = torch.sum(spike_counts, dim=(0,1,3)) / (R * torch.sum(factor_access, dim=(0, 2)))
-        neurons_centered = (spike_counts - mean[None,None,:,None])**2
-        summed_neurons_centered = torch.einsum('krlc,klc->l', neurons_centered, factor_access)
-        varaince = summed_neurons_centered / (R * torch.sum(factor_access, dim=(0, 2)))
-        alpha = mean**2 / varaince
+        alpha = mean
 
+        # neurons_centered = (spike_counts - mean[None,None,:,None])**2
+        # summed_neurons_centered = torch.einsum('krlc,klc->l', neurons_centered, factor_access)
+        # varaince = summed_neurons_centered / (R * torch.sum(factor_access, dim=(0, 2)))
+        # alpha = mean**2 / varaince
         # L_a = self.n_factors // self.n_areas
         # x_bar = torch.sum(summed_neurons, dim=-1)/(R*torch.sum(factor_access, dim=(0,2)))
         # log_x_bar = torch.log(x_bar)

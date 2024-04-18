@@ -59,15 +59,13 @@ the_rest = ''
 args.batch_size = 'All'
 # args.train_mode = 'EM'
 args.param_seed = f'{init}Init+MinorPenalty1+Size{args.batch_size}+Mode{args.train_mode}'
-args.notes = ''
+args.notes = f'Learn all. {init} init.'
 args.scheduler_patience = 2000
 args.scheduler_threshold = 2
-# args.scheduler_patience = 2000
-# args.scheduler_threshold = 2
 args.scheduler_factor = 0.9
 args.lr = 0.0001
-args.num_epochs = 50000
-args.tau_beta = 100
+args.num_epochs = 40000
+args.tau_beta = 10000
 # args.tau_budget = 0
 args.tau_config = 10
 args.tau_sigma = 10
@@ -111,13 +109,11 @@ model.init_ground_truth(beta=torch.tensor(data.beta),
 if args.cuda: model.cuda()
 model.eval()
 with (torch.no_grad()):
-    model.trial_peak_offsets = trial_offsets_train.clone().detach()
     true_ELBO_train, model_trial_offsets_train, model_factor_assignment_train, model_neuron_gains_train = model.evaluate(
-        Y_train, factor_access_train)
+        Y_train, factor_access_train, trial_offsets_train)
 
-    model.trial_peak_offsets = trial_offsets_test.clone().detach()
     true_ELBO_test, model_trial_offsets_test, model_factor_assignment_test, model_neuron_gains_test = model.evaluate(
-        Y_test, factor_access_test)
+        Y_test, factor_access_test, trial_offsets_test)
 
 true_ELBO_train = (1/(args.K*args.n_trials*args.n_configs))*true_ELBO_train.item()
 true_ELBO_test = (1/(args.K*args.n_trials*args.n_configs))*true_ELBO_test.item()
@@ -195,7 +191,6 @@ else:
 # trial_offsets_test_model = trial_offsets_test.clone()
 model.coupling.requires_grad = False
 model.smoothness_budget.requires_grad = False
-args.notes = 'Learn all. Zero init. No coupling.'
 # DELETE
 
 

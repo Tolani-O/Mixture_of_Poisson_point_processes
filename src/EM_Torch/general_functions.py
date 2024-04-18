@@ -240,6 +240,9 @@ def plot_outputs(model, n_areas, output_dir, folder, epoch):
     beta_dir = os.path.join(output_dir, 'beta')
     if not os.path.exists(beta_dir):
         os.makedirs(beta_dir)
+    log_beta_dir = os.path.join(output_dir, 'log_beta')
+    if not os.path.exists(log_beta_dir):
+        os.makedirs(log_beta_dir)
     alpha_dir = os.path.join(output_dir, 'alpha')
     if not os.path.exists(alpha_dir):
         os.makedirs(alpha_dir)
@@ -262,6 +265,21 @@ def plot_outputs(model, n_areas, output_dir, folder, epoch):
     if not os.path.exists(beta_coupling_dir):
         os.makedirs(beta_coupling_dir)
     with torch.no_grad():
+        beta = model.beta.numpy()
+        L = beta.shape[0]
+        global_max = np.max(beta)
+        upper_limit = global_max + 0.1
+        global_min = np.min(beta)
+        lower_limit = global_min - 0.01
+        plt.figure(figsize=(10, L*5))
+        for l in range(L):
+            plt.subplot(L, 1, l + 1)
+            plt.plot(beta[l, :], label=f'Log Factor [{l}, :]')
+            plt.title(f'Log Factor [{l}, :]')
+            plt.ylim(bottom=lower_limit, top=upper_limit)
+        plt.tight_layout()
+        plt.savefig(os.path.join(log_beta_dir, f'beta_{epoch}.png'))
+
         latent_factors = torch.exp(model.beta).numpy()
         L = latent_factors.shape[0]
         global_max = np.max(latent_factors)

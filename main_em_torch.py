@@ -60,10 +60,10 @@ args.batch_size = 'All'
 args.param_seed = f'{init}Init'
 args.notes = f'Learn all. {init} init.'
 args.scheduler_patience = 2000
-args.scheduler_threshold = 1e-10 #2
+args.scheduler_threshold = 0.1
 args.scheduler_factor = 0.9
 args.lr = 0.0001
-args.num_epochs = 80000
+args.num_epochs = 40000
 args.tau_beta = 10000
 args.tau_config = 10
 args.tau_sigma = 10
@@ -153,7 +153,8 @@ else:
         model.init_from_data(Y=Y_train, factor_access=factor_access_train, init=the_rest)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=args.scheduler_factor,
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
+                                                           factor=args.scheduler_factor,
                                                            patience=patience, threshold_mode='abs',
                                                            threshold=args.scheduler_threshold)
     create_relevant_files(output_dir, output_str)
@@ -169,26 +170,25 @@ else:
 # model.init_ground_truth(
 # # beta=torch.tensor(data.beta),
 # # alpha=inv_softplus_torch(torch.tensor(data.alpha)),
-# theta=torch.tensor(data.theta),
-# coupling=torch.ones(num_factors, dtype=torch.float64, device=model.device),
-# pi=F.softmax(torch.tensor(data.pi).reshape(args.A, -1), dim=1).flatten(),
+# # theta=torch.tensor(data.theta),
+# # pi=F.softmax(torch.tensor(data.pi).reshape(args.A, -1), dim=1).flatten(),
 # config_peak_offsets=torch.tensor(data.config_peak_offsets),
 # trial_peak_offset_covar_ltri=torch.tensor(data.trial_peak_offset_covar_ltri),
-# init='zeros'
+# init=''
+# # coupling=torch.ones(num_factors, dtype=torch.float64, device=model.device),
 # )
 # optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
 #                                                        factor=args.scheduler_factor,
 #                                                        patience=patience, threshold_mode='abs',
 #                                                        threshold=args.scheduler_threshold)
-# model.beta.requires_grad = False
-# model.alpha.requires_grad = False
-# model.config_peak_offsets.requires_grad = False
-# model.trial_peak_offset_covar_ltri_diag.requires_grad = False
-# model.trial_peak_offset_covar_ltri_offdiag.requires_grad = False
+# # model.beta.requires_grad = False
+# # model.alpha.requires_grad = False
+# # model.config_peak_offsets.requires_grad = False
+# # model.trial_peak_offset_covar_ltri_diag.requires_grad = False
+# # model.trial_peak_offset_covar_ltri_offdiag.requires_grad = False
 # trial_offsets_train_model = trial_offsets_train.clone()
 # trial_offsets_test_model = trial_offsets_test.clone()
-
 # model.coupling.requires_grad = False
 # model.smoothness_budget.requires_grad = False
 # DELETE

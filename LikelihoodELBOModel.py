@@ -41,11 +41,11 @@ class LikelihoodELBOModel(nn.Module):
         # Parameters
         self.beta = None  # AL x P
         self.alpha = None  # 1 x AL
-        self.coupling = None  # 1 x AL
+        # self.coupling = None  # 1 x AL
         self.config_peak_offsets = None  # C x 2AL
         self.trial_peak_offset_covar_ltri_diag = None
         self.trial_peak_offset_covar_ltri_offdiag = None
-        self.smoothness_budget = None  # L x 1
+        # self.smoothness_budget = None  # L x 1
 
 
     def init_random(self):
@@ -74,9 +74,9 @@ class LikelihoodELBOModel(nn.Module):
 
     def standard_init(self):
         self.theta = torch.ones(self.n_factors, dtype=torch.float64)
-        self.coupling = nn.Parameter(torch.ones(self.n_factors, dtype=torch.float64))
+        # self.coupling = nn.Parameter(torch.ones(self.n_factors, dtype=torch.float64))
         self.pi = F.softmax(torch.zeros(self.n_areas, self.n_factors // self.n_areas, dtype=torch.float64), dim=1).flatten()
-        self.smoothness_budget = nn.Parameter(torch.zeros(self.n_factors, dtype=torch.float64))
+        # self.smoothness_budget = nn.Parameter(torch.zeros(self.n_factors, dtype=torch.float64))
 
 
     def init_ground_truth(self, beta=None, alpha=None, theta=None, coupling=None, pi=None,
@@ -94,8 +94,8 @@ class LikelihoodELBOModel(nn.Module):
             self.theta = theta
         if pi is not None:
             self.pi = pi
-        if coupling is not None:
-            self.coupling = nn.Parameter(coupling)
+        # if coupling is not None:
+        #     self.coupling = nn.Parameter(coupling)
         if config_peak_offsets is not None:
             self.config_peak_offsets = nn.Parameter(config_peak_offsets)
         if trial_peak_offset_covar_ltri is not None:
@@ -260,12 +260,12 @@ class LikelihoodELBOModel(nn.Module):
         neuron_factor_access = neuron_factor_access.permute(2, 0, 1)  # C x K x L
         warped_factors = warped_factors.permute(4,3,0,2,1)  # C x R x L x N x T
         # include coupling
-        warped_factors = warped_factors**self.coupling.unsqueeze(0).unsqueeze(1).unsqueeze(3).unsqueeze(4)
+        # warped_factors = warped_factors**self.coupling.unsqueeze(0).unsqueeze(1).unsqueeze(3).unsqueeze(4)
         warped_factors = warped_factors / torch.sum(warped_factors, dim=-1, keepdim=True)
         log_warped_factors = torch.log(warped_factors)  # warped beta
         # include coupling
-        beta = self.coupling.unsqueeze(1) * self.beta
-        factors = F.softmax(beta, dim=-1)  # exp(beta)
+        # beta = self.coupling.unsqueeze(1) * self.beta
+        factors = F.softmax(self.beta, dim=-1)  # exp(beta)
         beta = torch.log(factors)  # beta
         Y_sum_t = torch.sum(Y, dim=1).permute(2, 0, 1)  # C x K x R
         alpha = F.softplus(self.alpha)
@@ -454,13 +454,24 @@ class LikelihoodELBOModel(nn.Module):
         return trial_offsets, neuron_factor_assignment, neuron_firing_rates
 
 
-    def forward(self, Y, neuron_factor_access, tau_beta, tau_config, tau_sigma, trial_peak_offsets=None):
+    def forward(self, Y, neuron_factor_access, tau_beta, tau_config, tau_sigma, trial_peak_offsets=None, sigma=0):
         if trial_peak_offsets is None:
             _, _, n_trials, n_configs = Y.shape
             self.sample_trial_offsets(n_configs, n_trials)
         else:
             self.trial_peak_offsets = trial_peak_offsets
-        warped_factors = self.warp_all_latent_factors_for_all_trials()
+        sigma = bool(sigma)
+        self.beta.requires_grad = not sigma
+        self.alpha.requires_grad = not sigma
+        self.config_peak_offsets.requires_grad = not sigma
+        self.trial_peak_offset_covar_ltri_diag.requires_grad = sigma
+        self.trial_peak_offset_covar_ltri_offdiag.requires_grad = sigma
+        if sigma:
+            warped_factors = self.warp_all_latent_factors_for_all_trials()
+        else:
+            _, _, n_trials, n_configs = Y.shape
+            warped_factors = (torch.exp(self.beta).unsqueeze(2).unsqueeze(3).unsqueeze(4).
+                              expand(-1, -1, self.n_trial_samples, n_trials, n_configs))
         likelihood_term = self.compute_log_elbo(Y, neuron_factor_access, warped_factors)
         penalty_term = self.compute_penalty_terms(tau_beta, tau_config, tau_sigma)
         return likelihood_term, penalty_term

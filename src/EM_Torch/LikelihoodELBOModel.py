@@ -463,7 +463,7 @@ class LikelihoodELBOModel(nn.Module):
         sigma = bool(sigma)
         self.beta.requires_grad = not sigma
         self.alpha.requires_grad = not sigma
-        self.config_peak_offsets.requires_grad = not sigma
+        self.config_peak_offsets.requires_grad = sigma
         self.trial_peak_offset_covar_ltri_diag.requires_grad = sigma
         self.trial_peak_offset_covar_ltri_offdiag.requires_grad = sigma
         if sigma:

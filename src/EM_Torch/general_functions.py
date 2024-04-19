@@ -8,6 +8,7 @@ from matplotlib.figure import figaspect
 import json
 import argparse
 from torch.utils.data import Dataset
+plt.rcParams.update({'figure.max_open_warning': 0})
 
 def get_parser():
     parser = argparse.ArgumentParser(description='Sequence Modeling - Polyphonic Music')
@@ -320,6 +321,7 @@ def plot_outputs(model, n_areas, output_dir, folder, epoch):
         plt.title('Ltri')
         plt.savefig(os.path.join(ltri_dir, f'ltri_{epoch}.png'))
         plt.close()
+        plt.close('all')
 
 
 def plot_factor_assignments(factor_assignment, output_dir, folder, epoch):

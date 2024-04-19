@@ -57,20 +57,19 @@ the_rest = ''
 # init = 'DataAndZeroBeta'
 # args.batch_size = 15
 args.batch_size = 'All'
-# args.train_mode = 'EM'
-args.param_seed = f'{init}Init+MinorPenalty1+Size{args.batch_size}+Mode{args.train_mode}'
+args.param_seed = f'{init}Init'
 args.notes = f'Learn all. {init} init.'
 args.scheduler_patience = 2000
-args.scheduler_threshold = 2
+args.scheduler_threshold = 1e-10 #2
 args.scheduler_factor = 0.9
 args.lr = 0.0001
-args.num_epochs = 40000
+args.num_epochs = 80000
 args.tau_beta = 10000
-# args.tau_budget = 0
 args.tau_config = 10
 args.tau_sigma = 10
 trial_offsets_train_model = None
 trial_offsets_test_model = None
+sigma = 0
 
 
 # outputs_folder = '../../outputs'
@@ -189,11 +188,10 @@ else:
 # model.trial_peak_offset_covar_ltri_offdiag.requires_grad = False
 # trial_offsets_train_model = trial_offsets_train.clone()
 # trial_offsets_test_model = trial_offsets_test.clone()
-model.coupling.requires_grad = False
-model.smoothness_budget.requires_grad = False
+
+# model.coupling.requires_grad = False
+# model.smoothness_budget.requires_grad = False
 # DELETE
-
-
 
 # Instantiate the dataset and dataloader
 dataset = CustomDataset(Y_train, factor_access_train)
@@ -208,38 +206,7 @@ def train_gradient():
     for Y, access in dataloader:
         optimizer.zero_grad()
         likelihood_term, penalty_term = model.forward(
-            Y, access, args.tau_beta, args.tau_config, args.tau_sigma, trial_offsets_train_model)
-        loss = -(likelihood_term + penalty_term)
-        loss.backward()
-        optimizer.step()
-        losses_batch.append((likelihood_term + penalty_term).item())
-        log_likelihoods_batch.append(likelihood_term.item())
-
-
-def train_EM():
-    model.beta.requires_grad = False
-    model.alpha.requires_grad = True
-    model.config_peak_offsets.requires_grad = True
-    model.trial_peak_offset_covar_ltri_diag.requires_grad = True
-    model.trial_peak_offset_covar_ltri_offdiag.requires_grad = True
-    for Y, access in dataloader:
-        optimizer.zero_grad()
-        likelihood_term, penalty_term = model.forward(
-            Y, access, args.tau_beta, args.tau_config, args.tau_sigma, trial_offsets_train_model)
-        loss = -(likelihood_term + penalty_term)
-        loss.backward()
-        optimizer.step()
-        losses_batch.append((likelihood_term + penalty_term).item())
-        log_likelihoods_batch.append(likelihood_term.item())
-    model.beta.requires_grad = True
-    model.alpha.requires_grad = False
-    model.config_peak_offsets.requires_grad = False
-    model.trial_peak_offset_covar_ltri_diag.requires_grad = False
-    model.trial_peak_offset_covar_ltri_offdiag.requires_grad = False
-    for Y, access in dataloader:
-        optimizer.zero_grad()
-        likelihood_term, penalty_term = model.forward(
-            Y, access, args.tau_beta, args.tau_config, args.tau_sigma, trial_offsets_train_model)
+            Y, access, args.tau_beta, args.tau_config, args.tau_sigma, trial_offsets_train_model, sigma)
         loss = -(likelihood_term + penalty_term)
         loss.backward()
         optimizer.step()
@@ -255,7 +222,7 @@ if __name__ == "__main__":
     log_likelihoods_test = []
     losses_test = []
     beta_mses = []
-    coupling_mses = []
+    # coupling_mses = []
     alpha_mses = []
     theta_mses = []
     pi_mses = []
@@ -274,15 +241,15 @@ if __name__ == "__main__":
     for epoch in range(start_epoch, start_epoch + args.num_epochs):
         if args.cuda: model.cuda()
         model.train()
-        if args.train_mode == 'gradient':
-            train_gradient()
-        elif args.train_mode == 'EM':
-            train_EM()
+        train_gradient()
+        sigma = 1 - sigma
+        train_gradient()
+        sigma = 1 - sigma
         if epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             model.eval()
             with torch.no_grad():
                 beta_mses.append(F.mse_loss(model.beta, torch.tensor(data.beta).to(model.device)).item())
-                coupling_mses.append(F.mse_loss(model.coupling, torch.ones(num_factors, dtype=torch.float64, device=model.device)).item())
+                # coupling_mses.append(F.mse_loss(model.coupling, torch.ones(num_factors, dtype=torch.float64, device=model.device)).item())
                 alpha_mses.append(F.mse_loss(F.softplus(model.alpha), torch.tensor(data.alpha).to(model.device)).item())
                 theta_mses.append(F.mse_loss(model.theta, torch.tensor(data.theta).to(model.device)).item())
                 pi_mses.append(F.mse_loss(model.pi, torch.tensor(data.pi).to(model.device)).item())
@@ -324,8 +291,8 @@ if __name__ == "__main__":
             cur_ltriLkhd_train = ltriLkhd_train[-1]
             cur_ltriLkhd_test = ltriLkhd_test[-1]
             with torch.no_grad():
-                smoothness_budget_constrained = torch.exp(model.smoothness_budget).cpu().numpy().round(3)
-                coupling = model.coupling.cpu().numpy().round(3)
+                # smoothness_budget_constrained = torch.exp(model.smoothness_budget).cpu().numpy().round(3)
+                # coupling = model.coupling.cpu().numpy().round(3)
                 pi = model.pi.cpu().numpy().round(3)
                 alpha = F.softplus(model.alpha).cpu().numpy().round(3)
                 theta = model.theta.cpu().numpy().round(3)
@@ -334,8 +301,8 @@ if __name__ == "__main__":
                 f"Loss train: {cur_loss_train:.5f}, Log Likelihood train: {cur_log_likelihood_train:.5f},\n"
                 f"Loss test: {cur_loss_test:.5f}, Log Likelihood test: {cur_log_likelihood_test:.5f},\n"
                 f"ltriLkhd_train: {cur_ltriLkhd_train:.5f}, ltriLkhd_test: {cur_ltriLkhd_test:.5f},\n"
-                f"smoothness_budget: {smoothness_budget_constrained.T},\n"
-                f"coupling: {coupling.T},\n"
+                # f"smoothness_budget: {smoothness_budget_constrained.T},\n"
+                # f"coupling: {coupling.T},\n"
                 f"pi: {pi.T},\n"
                 f"alpha: {alpha},\n"
                 f"theta: {theta},\n"
@@ -350,7 +317,7 @@ if __name__ == "__main__":
             write_losses(log_likelihoods_test, 'Test', 'Likelihood', output_dir, is_empty)
             write_losses(losses_test, 'Test', 'Loss', output_dir, is_empty)
             write_losses(beta_mses, 'Test', 'beta_MSE', output_dir, is_empty)
-            write_losses(coupling_mses, 'Test', 'coupling_MSE', output_dir, is_empty)
+            # write_losses(coupling_mses, 'Test', 'coupling_MSE', output_dir, is_empty)
             write_losses(alpha_mses, 'Test', 'alpha_MSE', output_dir, is_empty)
             write_losses(theta_mses, 'Test', 'theta_MSE', output_dir, is_empty)
             write_losses(pi_mses, 'Test', 'pi_MSE', output_dir, is_empty)
@@ -371,7 +338,7 @@ if __name__ == "__main__":
             plot_losses(true_ELBO_test, output_dir, 'Test', 'Likelihood')
             plot_losses(None, output_dir, 'Test', 'Loss', 10)
             plot_losses(None, output_dir, 'Test', 'beta_MSE')
-            plot_losses(None, output_dir, 'Test', 'coupling_MSE')
+            # plot_losses(None, output_dir, 'Test', 'coupling_MSE')
             plot_losses(None, output_dir, 'Test', 'alpha_MSE')
             plot_losses(None, output_dir, 'Test', 'theta_MSE')
             plot_losses(None, output_dir, 'Test', 'pi_MSE')
@@ -394,7 +361,7 @@ if __name__ == "__main__":
             log_likelihoods_test = []
             losses_test = []
             beta_mses = []
-            coupling_mses = []
+            # coupling_mses = []
             alpha_mses = []
             theta_mses = []
             pi_mses = []

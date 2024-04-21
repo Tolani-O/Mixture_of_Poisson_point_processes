@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.special import softmax
+import torch
 
 
 class DataAnalyzer:
@@ -246,3 +247,20 @@ class DataAnalyzer:
     def get_sample_ground_truth(self):
         return (self.neuron_intensities, self.neuron_factor_assignments, self.neuron_factor_assignments_onehot,
                 self.neuron_gains, self.trial_peak_offsets)
+
+
+    def load_tensors(self, is_cuda):
+        # load tensors
+        self.beta = torch.tensor(self.beta)
+        self.alpha = torch.tensor(self.alpha)
+        self.theta = torch.tensor(self.theta)
+        self.pi = torch.tensor(self.pi)
+        self.config_peak_offsets = torch.tensor(self.config_peak_offsets)
+        self.trial_peak_offset_covar_ltri = torch.tensor(self.trial_peak_offset_covar_ltri)
+        if is_cuda:
+            self.beta = self.beta.cuda()
+            self.alpha = self.alpha.cuda()
+            self.theta = self.theta.cuda()
+            self.pi = self.pi.cuda()
+            self.config_peak_offsets = self.config_peak_offsets.cuda()
+            self.trial_peak_offset_covar_ltri = self.trial_peak_offset_covar_ltri.cuda()

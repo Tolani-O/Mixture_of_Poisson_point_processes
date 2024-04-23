@@ -134,7 +134,7 @@ class DataAnalyzer:
         neuron_intensities = self.neuron_gains.T[:,None,None,:] * neuron_trial_warped_factors
         # padding
         neuron_intensities = np.concatenate([np.zeros((neuron_intensities.shape[0], 1, neuron_intensities.shape[2], neuron_intensities.shape[3])), neuron_intensities], axis=1)
-        neuron_intensities = neuron_intensities*10
+        # neuron_intensities = neuron_intensities*10
         rates = np.max(neuron_intensities, axis=1)
         arrival_times = np.zeros_like(rates)
         homogeneous_poisson_process = np.zeros_like(neuron_intensities)

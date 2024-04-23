@@ -287,14 +287,15 @@ class LikelihoodELBOModel(nn.Module):
         dt_exp_beta_plus_theta = (R * dt * torch.sum(factors, dim=-1) + theta).unsqueeze(0).unsqueeze(1)
         # log_dt_exp_beta_plus_theta  # C x K x L
         log_dt_exp_beta_plus_theta = torch.log(dt_exp_beta_plus_theta)
-        # factors_times_1_minus_Y  # C x K x R x L x T
-        factors_times_1_minus_Y = torch.einsum('ktrc,lt->ckrlt', 1 - Y, factors)
-        # dt_factors_plus_theta  # C x K x L
-        dt_factors_plus_theta = dt * torch.sum(factors_times_1_minus_Y, dim=(2, 4)) + theta.unsqueeze(0).unsqueeze(1)
-        # log_dt_factors_plus_theta  # C x K x L
-        log_dt_factors_plus_theta = torch.log(dt_factors_plus_theta)
-        # Y_sum_rt_plus_alpha_times_log_dt_factors_plus_theta  # C x K x L
-        Y_sum_rt_plus_alpha_times_log_dt_factors_plus_theta = Y_sum_rt_plus_alpha * log_dt_factors_plus_theta
+        # # factors_times_1_minus_Y  # C x K x R x L x T
+        # factors_times_1_minus_Y = torch.einsum('ktrc,lt->ckrlt', 1 - Y, factors)
+        # # dt_factors_plus_theta  # C x K x L
+        # dt_factors_plus_theta = dt * torch.sum(factors_times_1_minus_Y, dim=(2, 4)) + theta.unsqueeze(0).unsqueeze(1)
+        # # log_dt_factors_plus_theta  # C x K x L
+        # log_dt_factors_plus_theta = torch.log(dt_factors_plus_theta)
+        # Y_sum_rt_plus_alpha_times_log_dt_factors_plus_theta = Y_sum_rt_plus_alpha * log_dt_factors_plus_theta
+        # Y_sum_rt_plus_alpha_times_log_dt_exp_beta_plus_theta  # C x K x L
+        Y_sum_rt_plus_alpha_times_log_dt_exp_beta_plus_theta = Y_sum_rt_plus_alpha * log_dt_exp_beta_plus_theta
         # Y_sum_rt_times_logalpha  # C x K x L
         Y_sum_rt_times_logalpha = torch.einsum('ck,l->ckl', Y_sum_rt, torch.log(alpha))
 
@@ -322,7 +323,7 @@ class LikelihoodELBOModel(nn.Module):
         L_a = self.n_factors // self.n_areas
 
         # U_tensor # C x K x L
-        U_tensor = (Y_times_beta - Y_sum_rt_plus_alpha_times_log_dt_factors_plus_theta +
+        U_tensor = (Y_times_beta - Y_sum_rt_plus_alpha_times_log_dt_exp_beta_plus_theta +
                     alpha_log_theta.unsqueeze(0).unsqueeze(1) + Y_sum_rt_times_logalpha +
                     log_pi.unsqueeze(0).unsqueeze(1))
         # U_tensor # C x K x A x La

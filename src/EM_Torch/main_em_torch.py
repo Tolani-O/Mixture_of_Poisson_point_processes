@@ -171,7 +171,7 @@ else:
     create_relevant_files(output_dir, output_str)
     plot_spikes(Y_train.cpu().numpy(), output_dir, data.dt, 'train')
     plot_spikes(Y_test.cpu().numpy(), output_dir, data.dt, 'test')
-    plot_intensity_and_latents(data.time, np.exp(data.beta), intensities_train.cpu().numpy(), output_dir)
+    plot_intensity_and_latents(data.time, np.exp(data.beta.cpu().numpy()), intensities_train.cpu().numpy(), output_dir)
     plot_outputs(model.cpu(), args.A, output_dir, 'Train', -1)
     # plot_factor_assignments(factor_assignment_onehot_train-model_factor_assignment_train, output_dir, 'Train', -1)
     # plot_factor_assignments(factor_assignment_onehot_test-model_factor_assignment_test, output_dir, 'Test', -1)
@@ -266,8 +266,10 @@ if __name__ == "__main__":
                 pi_model = model.pi[non_zero_model_train[:, 2]]
                 pi_data = data.pi[non_zero_data_train[:, 2]]
                 pi_mses.append(F.mse_loss(pi_model, pi_data).item())
-                ltri_model = model.ltri_matix()[non_zero_model_train[:, 2], non_zero_model_train[:, 2]]
-                ltri_data = data.trial_peak_offset_covar_ltri[non_zero_data_train[:, 2], non_zero_data_train[:, 2]]
+                ltri_model = model.ltri_matix()
+                ltri_model = ltri_model.reshape(ltri_model.shape[0], 2, model.n_factors)[:, :, non_zero_model_train[:, 2]]
+                ltri_data = data.trial_peak_offset_covar_ltri.reshape(ltri_model.shape[0], 2,
+                                                                      model.n_factors)[:, :, non_zero_data_train[:, 2]]
                 ltri_mses.append(F.mse_loss(ltri_model, ltri_data).item())
                 config_model = model.config_peak_offsets.reshape(model.config_peak_offsets.shape[0], 2,
                                                                  model.n_factors)[non_zero_model_train[:, 0], :, non_zero_model_train[:, 2]]
@@ -277,12 +279,8 @@ if __name__ == "__main__":
 
                 # clusr_misses_train.append(torch.sum(torch.abs(factor_assignment_onehot_train - model_factor_assignment_train)).item())
                 # clusr_misses_test.append(torch.sum(torch.abs(factor_assignment_onehot_test - model_factor_assignment_test)).item())
-                gains_model_train = model_neuron_gains_train[non_zero_model_train[:, 0], non_zero_model_train[:, 2]]
-                gains_data_train = neuron_gains_train[non_zero_data_train[:, 0], non_zero_data_train[:, 2]]
-                gains_train.append(F.mse_loss(gains_data_train, gains_model_train).item())
-                gains_model_test = model_neuron_gains_test[non_zero_data_test[:, 0], non_zero_data_test[:, 2]]
-                gains_data_test = neuron_gains_test[non_zero_data_test[:, 0], non_zero_data_test[:, 2]]
-                gains_test.append(F.mse_loss(gains_data_test, gains_model_test).item())
+                gains_train.append(F.mse_loss(neuron_gains_train, model_neuron_gains_train).item())
+                gains_test.append(F.mse_loss(neuron_gains_test, model_neuron_gains_test).item())
                 trial_offsets_model_train = model_trial_offsets_train.reshape(model_trial_offsets_train.shape[0],
                                                                               model_trial_offsets_train.shape[1],
                                                                               2, model.n_factors)[non_zero_model_train[:, 0], :, :, non_zero_model_train[:, 2]]

@@ -276,7 +276,7 @@ class LikelihoodELBOModel(nn.Module):
         alpha = F.softplus(self.alpha)
         theta = self.theta
         pi = self.pi
-        dt = self.dt  # 1
+        dt = 1  # self.dt
 
         # U tensor items:
         # Y_times_beta  # C x K x R x L x T
@@ -287,10 +287,10 @@ class LikelihoodELBOModel(nn.Module):
         Y_sum_rt = torch.sum(Y_sum_t, dim=-1)
         # Y_sum_rt_plus_alpha  # C x K x L
         Y_sum_rt_plus_alpha = Y_sum_rt.unsqueeze(2) + alpha.unsqueeze(0).unsqueeze(1)
-        # # dt_exp_beta_plus_theta  # C x K x L
-        # dt_exp_beta_plus_theta = (R * dt * torch.sum(factors, dim=-1) + theta).unsqueeze(0).unsqueeze(1)
-        # # log_dt_exp_beta_plus_theta  # C x K x L
-        # log_dt_exp_beta_plus_theta = torch.log(dt_exp_beta_plus_theta)
+        # dt_exp_beta_plus_theta  # C x K x L
+        dt_exp_beta_plus_theta = (R * dt * torch.sum(factors, dim=-1) + theta).unsqueeze(0).unsqueeze(1)
+        # log_dt_exp_beta_plus_theta  # C x K x L
+        log_dt_exp_beta_plus_theta = torch.log(dt_exp_beta_plus_theta)
         # factors_times_1_minus_Y  # C x K x R x L x T
         factors_times_1_minus_Y = torch.einsum('ktrc,lt->ckrlt', 1 - Y, factors)
         # dt_factors_plus_theta  # C x K x L
@@ -299,7 +299,6 @@ class LikelihoodELBOModel(nn.Module):
         log_dt_factors_plus_theta = torch.log(dt_factors_plus_theta)
         # Y_sum_rt_plus_alpha_times_log_dt_exp_beta_plus_theta  # C x K x L
         Y_sum_rt_plus_alpha_times_log_dt_factors_plus_theta = Y_sum_rt_plus_alpha * log_dt_factors_plus_theta
-        # Y_sum_rt_plus_alpha_times_log_dt_exp_beta_plus_theta = Y_sum_rt_plus_alpha * log_dt_exp_beta_plus_theta
         # Y_sum_rt_times_logalpha  # C x K x L
         Y_sum_rt_times_logalpha = torch.einsum('ck,l->ckl', Y_sum_rt, torch.log(alpha))
 
@@ -316,10 +315,8 @@ class LikelihoodELBOModel(nn.Module):
         # log_dt_exp_warpedbeta_plus_theta = torch.log(dt_exp_warpedbeta_plus_theta)
         # warpedfactors_times_1_minus_Y  # C x K x R x L x N x T
         warpedfactors_times_1_minus_Y = torch.einsum('ktrc,crlnt->ckrlnt', 1 - Y, warped_factors)
-        # warpedfactors_times_1_minus_Y  # C x K x R x L x N
-        warpedfactors_times_1_minus_Y = torch.sum(warpedfactors_times_1_minus_Y, dim=-1)
         # dt_warpedfactors_plus_theta  # C x K x R x L x N
-        dt_warpedfactors_plus_theta = dt * warpedfactors_times_1_minus_Y + theta.unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(4)
+        dt_warpedfactors_plus_theta = dt * torch.sum(warpedfactors_times_1_minus_Y, dim=-1) + theta.unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(4)
         # log_dt_warpedfactors_plus_theta  # C x K x R x L x N
         log_dt_warpedfactors_plus_theta = torch.log(dt_warpedfactors_plus_theta)
         # Y_sum_t_plus_alpha_times_log_dt_exp_warpedfactors_plus_theta  # C x K x R x L x N
@@ -369,9 +366,13 @@ class LikelihoodELBOModel(nn.Module):
         # neuron_factor_access  # C x K x 1 x L x 1
         neuron_factor_access = neuron_factor_access.unsqueeze(2).unsqueeze(4)
         # a_CKL  # C x K x 1 x L x 1
-        a_CKL = (Y_sum_rt_plus_alpha/dt_factors_plus_theta).unsqueeze(2).unsqueeze(4).detach()
+        a_CKL = (Y_sum_rt_plus_alpha/dt_exp_beta_plus_theta).unsqueeze(2).unsqueeze(4).detach()
         # b_CKL  # C x K x 1 x L x 1
-        b_CKL = (torch.digamma(Y_sum_rt_plus_alpha) - log_dt_factors_plus_theta).unsqueeze(2).unsqueeze(4).detach()
+        b_CKL = (torch.digamma(Y_sum_rt_plus_alpha) - log_dt_exp_beta_plus_theta).unsqueeze(2).unsqueeze(4).detach()
+        # # a_CKL  # C x K x 1 x L x 1
+        # a_CKL = (Y_sum_rt_plus_alpha / dt_factors_plus_theta).unsqueeze(2).unsqueeze(4).detach()
+        # # b_CKL  # C x K x 1 x L x 1
+        # b_CKL = (torch.digamma(Y_sum_rt_plus_alpha) - log_dt_factors_plus_theta).unsqueeze(2).unsqueeze(4).detach()
         alpha = alpha.unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(4)
         # pad for numerical stability
         pad = 1 / torch.prod(torch.tensor(W_CKL.shape[:2]))
@@ -390,7 +391,7 @@ class LikelihoodELBOModel(nn.Module):
 
         # Liklelihood Terms
         # a_CKL_times_dt_exp_warpedbeta_plus_theta # C x K x R x L x N
-        a_CKL_times_dt_exp_warpedbeta_plus_theta = a_CKL * (R * dt * warpedfactors_times_1_minus_Y + theta)
+        a_CKL_times_dt_exp_warpedbeta_plus_theta = a_CKL * (R * dt * torch.sum(warped_factors, dim=-1).unsqueeze(1) + theta)
         # alpha_log_theta_plus_alpha_b_KL  # C x K x R x L x N
         alpha_log_theta_plus_b_KL = alpha * (torch.log(theta) + b_CKL)
         log_gamma_alpha = torch.lgamma(alpha)

@@ -262,6 +262,9 @@ def plot_outputs(model, output_dir, folder, epoch, ess_train, ess_test):
     ess_test_dir = os.path.join(output_dir, 'ess_test')
     if not os.path.exists(ess_test_dir):
         os.makedirs(ess_test_dir)
+    trial_offsets_dir = os.path.join(output_dir, 'trial_offsets')
+    if not os.path.exists(trial_offsets_dir):
+        os.makedirs(trial_offsets_dir)
     with torch.no_grad():
         beta = model.beta.numpy()
         L = beta.shape[0]
@@ -338,6 +341,13 @@ def plot_outputs(model, output_dir, folder, epoch, ess_train, ess_test):
         plt.plot(ess_test.flatten().numpy(), label='Effective Sample Size Test')
         plt.title('Effective Sample Size Test')
         plt.savefig(os.path.join(ess_test_dir, f'ess_test_{epoch}.png'))
+        plt.close()
+
+        trial_offsets = model.trial_peak_offset_means.flatten().numpy()
+        plt.figure(figsize=(10, 10))
+        plt.plot(trial_offsets, label='Trial Offsets')
+        plt.title('Trial Offsets')
+        plt.savefig(os.path.join(trial_offsets_dir, f'trial_offsets_{epoch}.png'))
         plt.close()
         plt.close('all')
 

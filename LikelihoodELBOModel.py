@@ -78,7 +78,7 @@ class LikelihoodELBOModel(nn.Module):
     def standard_init(self):
         self.trial_peak_offset_means = torch.zeros(self.n_trials, self.n_configs, 2 * self.n_factors, dtype=torch.float64)
         # gaussian_sample # N x R x C x 2AL
-        scale = 1e-5
+        scale = 1e-3
         self.gaussian_sample = scale * torch.randn(self.n_trial_samples, self.n_trials, self.n_configs, 2 * self.n_factors,
                                                    dtype=torch.float64)
         self.theta = torch.ones(self.n_factors, dtype=torch.float64)
@@ -278,14 +278,16 @@ class LikelihoodELBOModel(nn.Module):
         dt_exp_beta_plus_theta = (R * dt * torch.sum(factors, dim=-1) + theta).unsqueeze(0).unsqueeze(1)
         # log_dt_exp_beta_plus_theta  # C x K x L
         log_dt_exp_beta_plus_theta = torch.log(dt_exp_beta_plus_theta)
-        # factors_times_1_minus_Y  # C x K x R x L x T
-        factors_times_1_minus_Y = torch.einsum('ktrc,lt->ckrlt', 1 - Y, factors)
-        # dt_factors_plus_theta  # C x K x L
-        dt_factors_plus_theta = dt * torch.sum(factors_times_1_minus_Y, dim=(2, 4)) + theta.unsqueeze(0).unsqueeze(1)
-        # log_dt_factors_plus_theta  # C x K x L
-        log_dt_factors_plus_theta = torch.log(dt_factors_plus_theta)
         # Y_sum_rt_plus_alpha_times_log_dt_exp_beta_plus_theta  # C x K x L
-        Y_sum_rt_plus_alpha_times_log_dt_factors_plus_theta = Y_sum_rt_plus_alpha * log_dt_factors_plus_theta
+        Y_sum_rt_plus_alpha_times_log_dt_factors_plus_theta = Y_sum_rt_plus_alpha * log_dt_exp_beta_plus_theta
+        # # factors_times_1_minus_Y  # C x K x R x L x T
+        # factors_times_1_minus_Y = torch.einsum('ktrc,lt->ckrlt', 1 - Y, factors)
+        # # dt_factors_plus_theta  # C x K x L
+        # dt_factors_plus_theta = dt * torch.sum(factors_times_1_minus_Y, dim=(2, 4)) + theta.unsqueeze(0).unsqueeze(1)
+        # # log_dt_factors_plus_theta  # C x K x L
+        # log_dt_factors_plus_theta = torch.log(dt_factors_plus_theta)
+        # # Y_sum_rt_plus_alpha_times_log_dt_exp_beta_plus_theta  # C x K x L
+        # Y_sum_rt_plus_alpha_times_log_dt_factors_plus_theta = Y_sum_rt_plus_alpha * log_dt_factors_plus_theta
         # Y_sum_rt_times_logalpha  # C x K x L
         Y_sum_rt_times_logalpha = torch.einsum('ck,l->ckl', Y_sum_rt, torch.log(alpha))
 
@@ -296,18 +298,20 @@ class LikelihoodELBOModel(nn.Module):
         Y_times_warped_beta = torch.sum(Y_times_warped_beta, dim=-1)
         # Y_sum_t_plus_alpha  # C x K x R x L
         Y_sum_t_plus_alpha = Y_sum_t.unsqueeze(3) + alpha.unsqueeze(0).unsqueeze(1).unsqueeze(2)
-        # # dt_exp_warpedbeta_plus_theta  # C x R x L x N
-        # dt_exp_warpedbeta_plus_theta = dt * torch.sum(warped_factors, dim=-1) + theta.unsqueeze(0).unsqueeze(1).unsqueeze(3)
-        # # log_dt_exp_warpedbeta_plus_theta  # C x R x L x N
-        # log_dt_exp_warpedbeta_plus_theta = torch.log(dt_exp_warpedbeta_plus_theta)
-        # warpedfactors_times_1_minus_Y  # C x K x R x L x N x T
-        warpedfactors_times_1_minus_Y = torch.einsum('ktrc,crlnt->ckrlnt', 1 - Y, warped_factors)
-        # dt_warpedfactors_plus_theta  # C x K x R x L x N
-        dt_warpedfactors_plus_theta = dt * torch.sum(warpedfactors_times_1_minus_Y, dim=-1) + theta.unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(4)
-        # log_dt_warpedfactors_plus_theta  # C x K x R x L x N
-        log_dt_warpedfactors_plus_theta = torch.log(dt_warpedfactors_plus_theta)
+        # dt_exp_warpedbeta_plus_theta  # C x R x L x N
+        dt_exp_warpedbeta_plus_theta = dt * torch.sum(warped_factors, dim=-1) + theta.unsqueeze(0).unsqueeze(1).unsqueeze(3)
+        # log_dt_exp_warpedbeta_plus_theta  # C x R x L x N
+        log_dt_exp_warpedbeta_plus_theta = torch.log(dt_exp_warpedbeta_plus_theta)
         # Y_sum_t_plus_alpha_times_log_dt_exp_warpedfactors_plus_theta  # C x K x R x L x N
-        Y_sum_t_plus_alpha_times_log_dt_exp_warpedfactors_plus_theta = torch.einsum('ckrl,ckrln->ckrln', Y_sum_t_plus_alpha, log_dt_warpedfactors_plus_theta)
+        Y_sum_t_plus_alpha_times_log_dt_exp_warpedfactors_plus_theta = torch.einsum('ckrl,crln->ckrln', Y_sum_t_plus_alpha, log_dt_exp_warpedbeta_plus_theta)
+        # # warpedfactors_times_1_minus_Y  # C x K x R x L x N x T
+        # warpedfactors_times_1_minus_Y = torch.einsum('ktrc,crlnt->ckrlnt', 1 - Y, warped_factors)
+        # # dt_warpedfactors_plus_theta  # C x K x R x L x N
+        # dt_warpedfactors_plus_theta = dt * torch.sum(warpedfactors_times_1_minus_Y, dim=-1) + theta.unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(4)
+        # # log_dt_warpedfactors_plus_theta  # C x K x R x L x N
+        # log_dt_warpedfactors_plus_theta = torch.log(dt_warpedfactors_plus_theta)
+        # # Y_sum_t_plus_alpha_times_log_dt_exp_warpedfactors_plus_theta  # C x K x R x L x N
+        # Y_sum_t_plus_alpha_times_log_dt_exp_warpedfactors_plus_theta = torch.einsum('ckrl,ckrln->ckrln', Y_sum_t_plus_alpha, log_dt_warpedfactors_plus_theta)
         # Y_sum_t_times_logalpha  # C x K x R x L
         Y_sum_t_times_logalpha = torch.einsum('ckr,l->ckrl', Y_sum_t, torch.log(alpha))
 

@@ -230,7 +230,7 @@ def write_log_and_model(output_str, output_dir, epoch, model, optimizer, schedul
     torch.save(scheduler.state_dict(), os.path.join(models_path, f'scheduler_{epoch}.pth'))
 
 
-def plot_outputs(model, n_areas, output_dir, folder, epoch):
+def plot_outputs(model, output_dir, folder, epoch, ess_train, ess_test):
 
     output_dir = os.path.join(output_dir, folder)
     if not os.path.exists(output_dir):
@@ -256,6 +256,12 @@ def plot_outputs(model, n_areas, output_dir, folder, epoch):
     ltri_dir = os.path.join(output_dir, 'ltri')
     if not os.path.exists(ltri_dir):
         os.makedirs(ltri_dir)
+    ess_train_dir = os.path.join(output_dir, 'ess_train')
+    if not os.path.exists(ess_train_dir):
+        os.makedirs(ess_train_dir)
+    ess_test_dir = os.path.join(output_dir, 'ess_test')
+    if not os.path.exists(ess_test_dir):
+        os.makedirs(ess_test_dir)
     with torch.no_grad():
         beta = model.beta.numpy()
         L = beta.shape[0]
@@ -320,6 +326,18 @@ def plot_outputs(model, n_areas, output_dir, folder, epoch):
         plt.plot(ltri, label='Ltri')
         plt.title('Ltri')
         plt.savefig(os.path.join(ltri_dir, f'ltri_{epoch}.png'))
+        plt.close()
+
+        plt.figure(figsize=(10, 10))
+        plt.plot(ess_train.flatten().numpy(), label='Effective Sample Size Train')
+        plt.title('Effective Sample Size Train')
+        plt.savefig(os.path.join(ess_train_dir, f'ess_train_{epoch}.png'))
+        plt.close()
+
+        plt.figure(figsize=(10, 10))
+        plt.plot(ess_test.flatten().numpy(), label='Effective Sample Size Test')
+        plt.title('Effective Sample Size Test')
+        plt.savefig(os.path.join(ess_test_dir, f'ess_test_{epoch}.png'))
         plt.close()
         plt.close('all')
 

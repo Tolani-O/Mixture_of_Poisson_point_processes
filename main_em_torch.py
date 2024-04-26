@@ -37,7 +37,7 @@ args.K = 100  # K
 # init = 'Rand'
 # init = 'Zero'
 init = 'Data'
-the_rest = ''
+the_rest = 'zeros'
 # init = 'TrueBeta'
 # init = 'TrueAndRandBeta'
 # init = 'DataAndZeroBeta'
@@ -84,7 +84,7 @@ intensities_test, factor_assignment_test, factor_assignment_onehot_test, neuron_
 # initialize the model with ground truth params
 data.load_tensors(args.cuda)
 num_factors = data.beta.shape[0]
-model = LikelihoodELBOModel(data.time, num_factors, args.A, args.n_configs, args.n_trial_samples)
+model = LikelihoodELBOModel(data.time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples)
 model.init_ground_truth(beta=data.beta,
                         alpha=inv_softplus_torch(data.alpha),
                         theta=data.theta,
@@ -95,10 +95,10 @@ model.init_ground_truth(beta=data.beta,
 if args.cuda: model.cuda()
 model.eval()
 with (torch.no_grad()):
-    true_ELBO_train, model_trial_offsets_train, model_factor_assignment_train, model_neuron_gains_train = model.evaluate(
+    true_ELBO_train, model_trial_offsets_train, model_factor_assignment_train, model_neuron_gains_train, effective_sample_size_train = model.evaluate(
         Y_train, factor_access_train, trial_offsets_train)
 
-    true_ELBO_test, model_trial_offsets_test, model_factor_assignment_test, model_neuron_gains_test = model.evaluate(
+    true_ELBO_test, model_trial_offsets_test, model_factor_assignment_test, model_neuron_gains_test, effective_sample_size_test = model.evaluate(
         Y_test, factor_access_test, trial_offsets_test)
 
 true_ELBO_train = (1/(args.K*args.n_trials*args.n_configs))*true_ELBO_train.item()
@@ -172,7 +172,8 @@ else:
     plot_spikes(Y_train.cpu().numpy(), output_dir, data.dt, 'train')
     plot_spikes(Y_test.cpu().numpy(), output_dir, data.dt, 'test')
     plot_intensity_and_latents(data.time, np.exp(data.beta.cpu().numpy()), intensities_train.cpu().numpy(), output_dir)
-    plot_outputs(model.cpu(), args.A, output_dir, 'Train', -1)
+    plot_outputs(model.cpu(), output_dir, 'Train', -1,
+                 effective_sample_size_train.cpu(), effective_sample_size_test.cpu())
     # plot_factor_assignments(factor_assignment_onehot_train-model_factor_assignment_train, output_dir, 'Train', -1)
     # plot_factor_assignments(factor_assignment_onehot_test-model_factor_assignment_test, output_dir, 'Test', -1)
 
@@ -233,9 +234,9 @@ if __name__ == "__main__":
             model.eval()
             with torch.no_grad():
                 penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma)
-                likelihood_term_train, model_trial_offsets_train, model_factor_assignment_train, model_neuron_gains_train = model.evaluate(
+                likelihood_term_train, model_trial_offsets_train, model_factor_assignment_train, model_neuron_gains_train, effective_sample_size_train = model.evaluate(
                     Y_train, factor_access_train, trial_offsets_train_model)
-                likelihood_term_test, model_trial_offsets_test, model_factor_assignment_test, model_neuron_gains_test = model.evaluate(
+                likelihood_term_test, model_trial_offsets_test, model_factor_assignment_test, model_neuron_gains_test, effective_sample_size_test = model.evaluate(
                     Y_test, factor_access_test, trial_offsets_test_model)
 
                 losses_train.append(((1 / (args.K * args.n_trials * args.n_configs)) * likelihood_term_train +
@@ -328,7 +329,8 @@ if __name__ == "__main__":
                 f"dataSeed: {args.data_seed},\n"
                 f"{args.notes}\n\n")
             write_log_and_model(output_str, output_dir, epoch, model, optimizer, scheduler)
-            plot_outputs(model.cpu(), args.A, output_dir, 'Train', epoch)
+            plot_outputs(model.cpu(), output_dir, 'Train', epoch,
+                         effective_sample_size_train.cpu(), effective_sample_size_test.cpu())
             is_empty = epoch == 0
             write_losses(log_likelihoods_train, 'Train', 'Likelihood', output_dir, is_empty)
             write_losses(losses_train, 'Train', 'Loss', output_dir, is_empty)
@@ -349,7 +351,7 @@ if __name__ == "__main__":
             write_losses(gains_train, 'Train', 'gains_MSE', output_dir, is_empty)
             write_losses(gains_test, 'Test', 'gains_MSE', output_dir, is_empty)
             write_losses(offsets_train, 'Train', 'trialoffsets_MSE', output_dir, is_empty)
-            write_losses(offsets_test, 'Test', 'trialoffsets_MSE', output_dir, is_empty)
+            write_losses(offsets_test, 'Test', 'trialoffsets_MSE', output_dir, is_empty) # we expect this to diverge
             write_losses(losses_batch, 'Batch', 'Loss', output_dir, is_empty)
             plot_losses(true_ELBO_train, output_dir, 'Train', 'Likelihood')
             plot_losses(None, output_dir, 'Train', 'Loss', 10)

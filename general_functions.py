@@ -265,6 +265,9 @@ def plot_outputs(model, output_dir, folder, epoch, ess_train, ess_test):
     trial_offsets_dir = os.path.join(output_dir, 'trial_offsets')
     if not os.path.exists(trial_offsets_dir):
         os.makedirs(trial_offsets_dir)
+    trial_sd_dir = os.path.join(output_dir, 'trial_SDs')
+    if not os.path.exists(trial_sd_dir):
+        os.makedirs(trial_sd_dir)
     with torch.no_grad():
         beta = model.beta.numpy()
         L = beta.shape[0]
@@ -348,6 +351,13 @@ def plot_outputs(model, output_dir, folder, epoch, ess_train, ess_test):
         plt.plot(trial_offsets, label='Trial Offsets')
         plt.title('Trial Offsets')
         plt.savefig(os.path.join(trial_offsets_dir, f'trial_offsets_{epoch}.png'))
+        plt.close()
+
+        trial_SDs = model.trial_peak_offset_variances.flatten().numpy()
+        plt.figure(figsize=(10, 10))
+        plt.plot(trial_SDs, label='Trial Standard Deviations')
+        plt.title('Trial Standard Deviations')
+        plt.savefig(os.path.join(trial_sd_dir, f'trial_variances_{epoch}.png'))
         plt.close()
         plt.close('all')
 

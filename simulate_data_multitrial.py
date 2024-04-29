@@ -45,7 +45,7 @@ class DataAnalyzer:
         self.alpha = 100*(1+np.arange(n_factors, dtype=np.float64))
         self.theta = 1.1+np.arange(n_factors, dtype=np.float64)
         self.pi = np.zeros(n_factors)
-        self.config_peak_offsets = 0.01 * np.random.normal(size=(configs, 2 * n_factors))
+        self.config_peak_offsets = 0.1 * np.random.normal(size=(configs, 2 * n_factors))
         matrix = np.tril(np.random.normal(size=(2 * n_factors, 2 * n_factors)))
         cov = matrix @ matrix.T
         stdevs = np.sqrt(np.diag(cov))

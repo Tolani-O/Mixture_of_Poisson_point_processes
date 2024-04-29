@@ -21,7 +21,7 @@ outputs_folder = 'outputs'
 
 # args.n_trials = 5  # R
 # args.n_configs = 1  # C
-# args.n_trial_samples = 100
+args.n_trial_samples = 100
 args.K = 100  # K
 # args.A = 1  # A
 
@@ -30,7 +30,7 @@ args.K = 100  # K
 # args.load = True
 # args.load_epoch = 39999
 # args.load_run = 0
-# args.data_seed = 2192592440
+args.data_seed = 1947067064
 
 
 # init = 'True'
@@ -44,15 +44,15 @@ the_rest = 'zeros'
 # args.batch_size = 15
 args.batch_size = 'All'
 args.param_seed = f'{init}Init'
-args.notes = f'Learn all. {init} init.'
-args.scheduler_patience = 2000
-args.scheduler_threshold = 0.1
+args.notes = f'Learn all. {init} init. importance sampling 100 samples test 8.'
+args.scheduler_patience = 80000 #2000
+args.scheduler_threshold = 1e-10 #0.1
 args.scheduler_factor = 0.9
 args.lr = 0.0001
-args.num_epochs = 40000
+args.num_epochs = 80000 #40000
 args.tau_beta = 8000
-args.tau_config = 10
-args.tau_sigma = 10
+args.tau_config = 1
+args.tau_sigma = 1
 trial_offsets_train_model = None
 trial_offsets_test_model = None
 sigma = 0
@@ -84,7 +84,7 @@ intensities_test, factor_assignment_test, factor_assignment_onehot_test, neuron_
 # initialize the model with ground truth params
 data.load_tensors(args.cuda)
 num_factors = data.beta.shape[0]
-model = LikelihoodELBOModel(data.time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples)
+model = LikelihoodELBOModel(data.time, num_factors, args.A, args.n_configs, args.n_trials)
 model.init_ground_truth(beta=data.beta,
                         alpha=inv_softplus_torch(data.alpha),
                         theta=data.theta,
@@ -95,11 +95,11 @@ model.init_ground_truth(beta=data.beta,
 if args.cuda: model.cuda()
 model.eval()
 with (torch.no_grad()):
-    true_ELBO_train, model_trial_offsets_train, model_factor_assignment_train, model_neuron_gains_train, effective_sample_size_train = model.evaluate(
-        Y_train, factor_access_train, trial_offsets_train)
+    model.init_ground_truth(trial_peak_offset_means=trial_offsets_train.squeeze(), init='')
+    true_ELBO_train, _, _, effective_sample_size_train = model.evaluate(Y_train, factor_access_train)
 
-    true_ELBO_test, model_trial_offsets_test, model_factor_assignment_test, model_neuron_gains_test, effective_sample_size_test = model.evaluate(
-        Y_test, factor_access_test, trial_offsets_test)
+    model.init_ground_truth(trial_peak_offset_means=trial_offsets_test.squeeze(), init='')
+    true_ELBO_test, _, _, effective_sample_size_test = model.evaluate(Y_test, factor_access_test)
 
 true_ELBO_train = (1/(args.K*args.n_trials*args.n_configs))*true_ELBO_train.item()
 true_ELBO_test = (1/(args.K*args.n_trials*args.n_configs))*true_ELBO_test.item()
@@ -132,7 +132,11 @@ else:
         f'_factor{args.scheduler_factor}_threshold{args.scheduler_threshold}_notes-{args.notes}')
     output_dir = os.path.join(output_dir, args.folder_name, 'Run_0')
     os.makedirs(output_dir)
+    plot_outputs(model.cpu(), output_dir, 'Train', -2,
+                 effective_sample_size_train.cpu(), effective_sample_size_test.cpu())
     # Initialize the model
+    if init == 'True':
+        model.init_ground_truth(trial_peak_offset_means=trial_offsets_train.squeeze(), init='')
     if init == 'Rand':
         model.init_random()
     elif init == 'Zero':
@@ -140,27 +144,24 @@ else:
     elif 'Data' in init:
         model.init_from_data(Y=Y_train, factor_access=factor_access_train, init=the_rest)
 
-    # DELETE: For when I want to partially init to Rand or Zero. Not used for data init,
-    # DELETE: That can already handle the partial init
+    # DELETE: For when I want to partially init to Rand or Zero. Not used for data init, which can already handle the partial init
     # model.init_ground_truth(
-    # # beta=data.beta,
-    # # alpha=inv_softplus_torch(data.alpha),
-    # # theta=data.theta,
-    # # pi=F.softmax(data.pi.reshape(args.A, -1), dim=1).flatten(),
+    # beta=data.beta,
+    # alpha=inv_softplus_torch(data.alpha),
+    # theta=data.theta,
+    # pi=F.softmax(data.pi.reshape(args.A, -1), dim=1).flatten(),
+    # trial_peak_offset_means = trial_offsets_train.squeeze()
     # config_peak_offsets=data.config_peak_offsets,
     # trial_peak_offset_covar_ltri=data.trial_peak_offset_covar_ltri,
     # init=''
-    # # coupling=torch.ones(num_factors, dtype=torch.float64, device=model.device),
     # )
     # model.beta.requires_grad = False
     # model.alpha.requires_grad = False
     # model.config_peak_offsets.requires_grad = False
     # model.trial_peak_offset_covar_ltri_diag.requires_grad = False
     # model.trial_peak_offset_covar_ltri_offdiag.requires_grad = False
-    # trial_offsets_train_model = trial_offsets_train.clone()
-    # trial_offsets_test_model = trial_offsets_test.clone()
-    # model.coupling.requires_grad = False
-    # model.smoothness_budget.requires_grad = False
+    # model.trial_peak_offset_means.requires_grad = False
+    # model.trial_peak_offset_variances.requires_grad = False
     # DELETE
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -189,8 +190,7 @@ print(output_str)
 def train_gradient():
     for Y, access in dataloader:
         optimizer.zero_grad()
-        likelihood_term, penalty_term = model.forward(
-            Y, access, args.tau_beta, args.tau_config, args.tau_sigma, trial_offsets_train_model, sigma)
+        likelihood_term, penalty_term = model.forward(Y, access, args.tau_beta, args.tau_config, args.tau_sigma, args.n_trial_samples, sigma)
         loss = -(likelihood_term + penalty_term)
         loss.backward()
         optimizer.step()
@@ -206,7 +206,6 @@ if __name__ == "__main__":
     log_likelihoods_test = []
     losses_test = []
     beta_mses = []
-    # coupling_mses = []
     alpha_mses = []
     theta_mses = []
     pi_mses = []
@@ -214,8 +213,6 @@ if __name__ == "__main__":
     ltri_mses = []
     ltriLkhd_train = []
     ltriLkhd_test = []
-    # clusr_misses_train = []
-    # clusr_misses_test = []
     gains_train = []
     gains_test = []
     offsets_train = []
@@ -234,10 +231,12 @@ if __name__ == "__main__":
             model.eval()
             with torch.no_grad():
                 penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma)
-                likelihood_term_train, model_trial_offsets_train, model_factor_assignment_train, model_neuron_gains_train, effective_sample_size_train = model.evaluate(
-                    Y_train, factor_access_train, trial_offsets_train_model)
-                likelihood_term_test, model_trial_offsets_test, model_factor_assignment_test, model_neuron_gains_test, effective_sample_size_test = model.evaluate(
-                    Y_test, factor_access_test, trial_offsets_test_model)
+                model_trial_offsets_train = model.trial_peak_offset_means
+                model_trial_offsets_test = model.trial_peak_offset_means
+                likelihood_term_train, model_factor_assignment_train, model_neuron_gains_train, effective_sample_size_train = model.evaluate(
+                    Y_train, factor_access_train)
+                likelihood_term_test, model_factor_assignment_test, model_neuron_gains_test, effective_sample_size_test = model.evaluate(
+                    Y_test, factor_access_test)
 
                 losses_train.append(((1 / (args.K * args.n_trials * args.n_configs)) * likelihood_term_train +
                                      (1 / (args.n_trials * args.n_configs)) * penalty_term).item())
@@ -265,7 +264,7 @@ if __name__ == "__main__":
                 theta_data = data.theta[non_zero_data_train[:, 2]]
                 theta_mses.append(F.mse_loss(theta_model, theta_data).item())
                 pi_model = model.pi[non_zero_model_train[:, 2]]
-                pi_data = data.pi[non_zero_data_train[:, 2]]
+                pi_data = F.softmax(data.pi.reshape(args.A, -1), dim=1).flatten()[non_zero_data_train[:, 2]]
                 pi_mses.append(F.mse_loss(pi_model, pi_data).item())
                 ltri_model = model.ltri_matix()
                 ltri_model = ltri_model.reshape(ltri_model.shape[0], 2, model.n_factors)[:, :, non_zero_model_train[:, 2]]
@@ -282,6 +281,7 @@ if __name__ == "__main__":
                 # clusr_misses_test.append(torch.sum(torch.abs(factor_assignment_onehot_test - model_factor_assignment_test)).item())
                 gains_train.append(F.mse_loss(neuron_gains_train, model_neuron_gains_train).item())
                 gains_test.append(F.mse_loss(neuron_gains_test, model_neuron_gains_test).item())
+                model_trial_offsets_train = model_trial_offsets_train.permute(1, 0, 2)
                 trial_offsets_model_train = model_trial_offsets_train.reshape(model_trial_offsets_train.shape[0],
                                                                               model_trial_offsets_train.shape[1],
                                                                               2, model.n_factors)[non_zero_model_train[:, 0], :, :, non_zero_model_train[:, 2]]
@@ -289,9 +289,10 @@ if __name__ == "__main__":
                                                                                                   model_trial_offsets_train.shape[1],
                                                                                                   2, model.n_factors)[non_zero_data_train[:, 0], :, :, non_zero_data_train[:, 2]]
                 offsets_train.append(F.mse_loss(trial_offsets_data_train, trial_offsets_model_train).item())
+                model_trial_offsets_test = model_trial_offsets_test.permute(1, 0, 2)
                 trial_offsets_model_test = model_trial_offsets_test.reshape(model_trial_offsets_test.shape[0],
-                                                                              model_trial_offsets_test.shape[1],
-                                                                              2, model.n_factors)[non_zero_model_test[:, 0], :, :, non_zero_model_test[:, 2]]
+                                                                            model_trial_offsets_test.shape[1],
+                                                                            2, model.n_factors)[non_zero_model_test[:, 0], :, :, non_zero_model_test[:, 2]]
                 trial_offsets_data_test = trial_offsets_test.squeeze().permute(1, 0, 2).reshape(model_trial_offsets_test.shape[0],
                                                                                                 model_trial_offsets_test.shape[1],
                                                                                                 2, model.n_factors)[non_zero_data_test[:, 0], :, :, non_zero_data_test[:, 2]]
@@ -353,9 +354,9 @@ if __name__ == "__main__":
             write_losses(offsets_train, 'Train', 'trialoffsets_MSE', output_dir, is_empty)
             write_losses(offsets_test, 'Test', 'trialoffsets_MSE', output_dir, is_empty) # we expect this to diverge
             write_losses(losses_batch, 'Batch', 'Loss', output_dir, is_empty)
-            plot_losses(true_ELBO_train, output_dir, 'Train', 'Likelihood')
+            plot_losses(true_ELBO_train, output_dir, 'Train', 'Likelihood', 10)
             plot_losses(None, output_dir, 'Train', 'Loss', 10)
-            plot_losses(true_ELBO_test, output_dir, 'Test', 'Likelihood')
+            plot_losses(true_ELBO_test, output_dir, 'Test', 'Likelihood', 10)
             plot_losses(None, output_dir, 'Test', 'Loss', 10)
             plot_losses(None, output_dir, 'Test', 'beta_MSE')
             # plot_losses(None, output_dir, 'Test', 'coupling_MSE')

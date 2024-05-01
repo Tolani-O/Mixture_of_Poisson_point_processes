@@ -346,14 +346,14 @@ def plot_outputs(model, output_dir, folder, epoch, ess_train, ess_test):
         plt.savefig(os.path.join(ess_test_dir, f'ess_test_{epoch}.png'))
         plt.close()
 
-        trial_offsets = model.trial_peak_offset_means.flatten().numpy()
+        trial_offsets = model.trial_peak_offset_proposal_means.flatten().numpy()
         plt.figure(figsize=(10, 10))
         plt.plot(trial_offsets, label='Trial Offsets')
         plt.title('Trial Offsets')
         plt.savefig(os.path.join(trial_offsets_dir, f'trial_offsets_{epoch}.png'))
         plt.close()
 
-        trial_SDs = model.trial_peak_offset_variances.flatten().numpy()
+        trial_SDs = model.trial_peak_offset_proposal_variances.flatten().numpy()
         plt.figure(figsize=(10, 10))
         plt.plot(trial_SDs, label='Trial Standard Deviations')
         plt.title('Trial Standard Deviations')

@@ -21,7 +21,7 @@ outputs_folder = 'outputs'
 
 # args.n_trials = 5  # R
 # args.n_configs = 1  # C
-args.n_trial_samples = 10
+args.n_trial_samples = 100
 args.K = 100  # K
 # args.A = 1  # A
 
@@ -33,10 +33,10 @@ args.K = 100  # K
 args.data_seed = 1947067064
 
 
-# init = 'True'
+init = 'Data'
 # init = 'Rand'
 # init = 'Zero'
-init = 'Data'
+# init = 'True'
 the_rest = 'zeros'
 # init = 'TrueBeta'
 # init = 'TrueAndRandBeta'
@@ -44,12 +44,12 @@ the_rest = 'zeros'
 # args.batch_size = 15
 args.batch_size = 'All'
 args.param_seed = f'{init}Init'
-args.notes = f'Learn all. {init} init. importance sampling {args.n_trial_samples} samples test 2.'
+args.notes = f'Learn all. {init} init. importance sampling {args.n_trial_samples} time warping = 0.'
 args.scheduler_patience = 80000 #2000
 args.scheduler_threshold = 1e-10 #0.1
 args.scheduler_factor = 0.9
 args.lr = 0.0001
-args.num_epochs = 120000 #40000
+args.num_epochs = 80000 #40000
 args.tau_beta = 8000
 args.tau_config = 1
 args.tau_sigma = 0
@@ -93,13 +93,13 @@ model.init_ground_truth(beta=data.beta,
 if args.cuda: model.cuda()
 model.eval()
 with (torch.no_grad()):
-    model.init_ground_truth(trial_peak_offset_proposal_means=trial_offsets_train.squeeze(), init='')
-    model.generate_trial_peak_offset_single_sample()
-    true_ELBO_train, _, _, effective_sample_size_train, trial_peak_offsets_train = model.evaluate(Y_train, factor_access_train)
-
     model.init_ground_truth(trial_peak_offset_proposal_means=trial_offsets_test.squeeze(), init='')
     model.generate_trial_peak_offset_single_sample()
     true_ELBO_test, _, _, effective_sample_size_test, trial_peak_offsets_test = model.evaluate(Y_test, factor_access_test)
+
+    model.init_ground_truth(trial_peak_offset_proposal_means=trial_offsets_train.squeeze(), init='')
+    model.generate_trial_peak_offset_single_sample()
+    true_ELBO_train, _, _, effective_sample_size_train, trial_peak_offsets_train = model.evaluate(Y_train, factor_access_train)
 
 true_ELBO_train = (1/(args.K*args.n_trials*args.n_configs))*true_ELBO_train.item()
 true_ELBO_test = (1/(args.K*args.n_trials*args.n_configs))*true_ELBO_test.item()
@@ -133,7 +133,8 @@ else:
     output_dir = os.path.join(output_dir, args.folder_name, 'Run_0')
     os.makedirs(output_dir)
     plot_outputs(model.cpu(), output_dir, 'Train', -2,
-                 effective_sample_size_train.cpu(), effective_sample_size_test.cpu())
+                 effective_sample_size_train.cpu(), effective_sample_size_test.cpu(),
+                 trial_peak_offsets_train.permute(1,0,2).cpu(), trial_peak_offsets_test.permute(1,0,2).cpu())
     # Initialize the model
     if init == 'True':
         model.init_ground_truth(beta=data.beta,
@@ -181,7 +182,8 @@ else:
     plot_spikes(Y_test.cpu().numpy(), output_dir, data.dt, 'test')
     plot_intensity_and_latents(data.time, np.exp(data.beta.cpu().numpy()), intensities_train.cpu().numpy(), output_dir)
     plot_outputs(model.cpu(), output_dir, 'Train', -1,
-                 effective_sample_size_train.cpu(), effective_sample_size_test.cpu())
+                 effective_sample_size_train.cpu(), effective_sample_size_test.cpu(),
+                 trial_peak_offsets_train.permute(1,0,2).cpu(), trial_peak_offsets_test.permute(1,0,2).cpu())
     # plot_factor_assignments(factor_assignment_onehot_train-model_factor_assignment_train, output_dir, 'Train', -1)
     # plot_factor_assignments(factor_assignment_onehot_test-model_factor_assignment_test, output_dir, 'Test', -1)
 
@@ -238,7 +240,7 @@ if __name__ == "__main__":
             model.eval()
             with torch.no_grad():
                 penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma)
-                model.generate_trial_peak_offset_single_sample()
+                model.generate_trial_peak_offset_samples()
                 likelihood_term_train, model_factor_assignment_train, model_neuron_gains_train, effective_sample_size_train, model_trial_offsets_train = model.evaluate(
                     Y_train, factor_access_train)
                 likelihood_term_test, model_factor_assignment_test, model_neuron_gains_test, effective_sample_size_test, model_trial_offsets_test = model.evaluate(
@@ -335,7 +337,8 @@ if __name__ == "__main__":
                 f"{args.notes}\n\n")
             write_log_and_model(output_str, output_dir, epoch, model, optimizer, scheduler)
             plot_outputs(model.cpu(), output_dir, 'Train', epoch,
-                         effective_sample_size_train.cpu(), effective_sample_size_test.cpu())
+                         effective_sample_size_train.cpu(), effective_sample_size_test.cpu(),
+                         model_trial_offsets_train.permute(1,0,2).cpu(), model_trial_offsets_test.permute(1,0,2).cpu())
             is_empty = epoch == 0
             write_losses(log_likelihoods_train, 'Train', 'Likelihood', output_dir, is_empty)
             write_losses(losses_train, 'Train', 'Loss', output_dir, is_empty)

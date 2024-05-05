@@ -403,7 +403,7 @@ class LikelihoodELBOModel(nn.Module):
 
         n_trial_samples = warped_factors.shape[3]
         elbo = (Y_times_warped_beta + (1/R) * (-a_CKL_times_dt_exp_warpedbeta_plus_theta - log_gamma_alpha + alpha_log_theta_plus_b_KL + log_pi) +
-                (1/K) * (log_P - log_Q - torch.log(W_CRN * n_trial_samples)))
+                (1/K) * (log_P - log_Q - torch.log((W_CRN * n_trial_samples)+1e-10)))
         elbo = W_tensor * elbo
 
         return torch.sum(elbo), theta.squeeze(), pi.squeeze()

@@ -230,7 +230,7 @@ def write_log_and_model(output_str, output_dir, epoch, model, optimizer, schedul
     torch.save(scheduler.state_dict(), os.path.join(models_path, f'scheduler_{epoch}.pth'))
 
 
-def plot_outputs(model, output_dir, folder, epoch, ess_train, ess_test):
+def plot_outputs(model, output_dir, folder, epoch, ess_train, ess_test, offset_train, offset_test):
 
     output_dir = os.path.join(output_dir, folder)
     if not os.path.exists(output_dir):
@@ -262,9 +262,15 @@ def plot_outputs(model, output_dir, folder, epoch, ess_train, ess_test):
     ess_test_dir = os.path.join(output_dir, 'ess_test')
     if not os.path.exists(ess_test_dir):
         os.makedirs(ess_test_dir)
-    trial_offsets_dir = os.path.join(output_dir, 'trial_offsets')
-    if not os.path.exists(trial_offsets_dir):
-        os.makedirs(trial_offsets_dir)
+    offset_train_dir = os.path.join(output_dir, 'offset_train')
+    if not os.path.exists(offset_train_dir):
+        os.makedirs(offset_train_dir)
+    offset_test_dir = os.path.join(output_dir, 'offset_test')
+    if not os.path.exists(offset_test_dir):
+        os.makedirs(offset_test_dir)
+    proposal_offsets_dir = os.path.join(output_dir, 'proposal_offsets')
+    if not os.path.exists(proposal_offsets_dir):
+        os.makedirs(proposal_offsets_dir)
     trial_sd_dir = os.path.join(output_dir, 'trial_SDs')
     if not os.path.exists(trial_sd_dir):
         os.makedirs(trial_sd_dir)
@@ -346,11 +352,23 @@ def plot_outputs(model, output_dir, folder, epoch, ess_train, ess_test):
         plt.savefig(os.path.join(ess_test_dir, f'ess_test_{epoch}.png'))
         plt.close()
 
-        trial_offsets = model.trial_peak_offset_proposal_means.flatten().numpy()
         plt.figure(figsize=(10, 10))
-        plt.plot(trial_offsets, label='Trial Offsets')
-        plt.title('Trial Offsets')
-        plt.savefig(os.path.join(trial_offsets_dir, f'trial_offsets_{epoch}.png'))
+        plt.plot(offset_train.flatten().numpy(), label='Trial Offsets Train')
+        plt.title('Trial Offset Train')
+        plt.savefig(os.path.join(offset_train_dir, f'offset_train_{epoch}.png'))
+        plt.close()
+
+        plt.figure(figsize=(10, 10))
+        plt.plot(offset_test.flatten().numpy(), label='Trial Offset Test')
+        plt.title('Trial Offset Test')
+        plt.savefig(os.path.join(offset_test_dir, f'offset_test_{epoch}.png'))
+        plt.close()
+
+        proposal_offsets = model.trial_peak_offset_proposal_means.flatten().numpy()
+        plt.figure(figsize=(10, 10))
+        plt.plot(proposal_offsets, label='Trial Offsets Proposals')
+        plt.title('Trial Offsets Proposals')
+        plt.savefig(os.path.join(proposal_offsets_dir, f'proposal_offsets_{epoch}.png'))
         plt.close()
 
         trial_SDs = model.trial_peak_offset_proposal_variances.flatten().numpy()

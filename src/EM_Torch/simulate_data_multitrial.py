@@ -46,6 +46,7 @@ class DataAnalyzer:
         self.theta = 1.1+np.arange(n_factors, dtype=np.float64)
         self.pi = np.zeros(n_factors)
         self.config_peak_offsets = 0.1 * np.random.normal(size=(configs, 2 * n_factors))
+        # self.config_peak_offsets = np.zeros((configs, 2 * n_factors))
         matrix = np.tril(np.random.normal(size=(2 * n_factors, 2 * n_factors)))
         cov = matrix @ matrix.T
         stdevs = np.sqrt(np.diag(cov))
@@ -60,6 +61,7 @@ class DataAnalyzer:
         # bool((trial_peak_offset_covar_matrix == trial_peak_offset_covar_matrix.T).all() and (np.linalg.eigvals(trial_peak_offset_covar_matrix).real >= 0).all())
         # std_dev = np.sqrt(np.diag(trial_peak_offset_covar_matrix))
         # corr = np.diag(1/std_dev) @ trial_peak_offset_covar_matrix @ np.diag(1/std_dev)
+        # self.trial_peak_offset_covar_ltri = 1e-10 * np.eye(2 * n_factors)
         latent_factors = self.generate_latent_factors(intensity_type, intensity_mltply, intensity_bias)
         latent_factors = np.vstack([latent_factors] * A)
         latent_factors = latent_factors / np.sum(latent_factors, axis=1, keepdims=True)

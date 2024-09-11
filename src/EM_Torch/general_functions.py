@@ -291,7 +291,7 @@ def plot_outputs(model, output_dir, folder, epoch, ess_train, ess_test, offset_t
         plt.savefig(os.path.join(log_beta_dir, f'beta_{epoch}.png'))
         plt.close()
 
-        latent_factors = torch.exp(model.beta).numpy()
+        latent_factors = torch.softmax(model.beta, dim=-1).numpy()
         L = latent_factors.shape[0]
         global_max = np.max(latent_factors)
         upper_limit = global_max + 0.01
@@ -442,6 +442,8 @@ def plot_losses(true_likelihood, output_dir, name, metric, cutoff=0):
     if true_likelihood is not None:
         true_likelihood_vector = [true_likelihood] * len(metric_data)
         plt.plot(true_likelihood_vector, label='True Log Likelihood')
+    if 'MSE' in metric:
+        plt.ylim(bottom=0)
     plt.xlabel('Iterations')
     plt.ylabel(metric)
     plt.title('Plot of metric values')

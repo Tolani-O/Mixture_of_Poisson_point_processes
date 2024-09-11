@@ -19,10 +19,11 @@ if args.param_seed == '':
 args.data_seed = np.random.randint(0, 2 ** 32 - 1)
 outputs_folder = 'outputs'
 
-# args.n_trials = 5  # R
+# args.n_trials = 2  # R
 # args.n_configs = 1  # C
-args.n_trial_samples = 100
+args.n_trial_samples = 100  # N
 args.K = 100  # K
+# args.intensity_bias = 10
 # args.A = 1  # A
 
 
@@ -126,7 +127,7 @@ if args.load:
 else:
     start_epoch = 0
     args.folder_name = (
-        f'dataSeed{args.data_seed}_{args.param_seed}_K{args.K}_R{args.n_trials}_A{args.A}_C{args.n_configs}'
+        f'dataSeed{args.data_seed}_{args.param_seed}_K{args.K}_A{args.A}_C{args.n_configs}'
         f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}'
         f'_iters{args.num_epochs}_BatchSize{args.batch_size}_lr{args.lr}_patience{args.scheduler_patience}'
         f'_factor{args.scheduler_factor}_threshold{args.scheduler_threshold}_notes-{args.notes}')

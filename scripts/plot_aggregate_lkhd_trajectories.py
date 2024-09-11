@@ -30,30 +30,58 @@ for file in files:
         # Append the file name to the list of loaded files
         loaded_files.append(file)
 
+length_of_lists
 n = 401
 # Use a list comprehension to take the first n entries of each list
 trimmed_lists = [lst[1:n] for lst in list_of_lists]
 # Convert the list of lists into a 2D numpy array
 array_2d = np.array(trimmed_lists)
 # Create a new figure
+# plt.figure(figsize=(10, 6))
+# # Plot each row with a light color
+# for row in array_2d:
+#     plt.plot(row, color='lightgray')
+#
+# plt.plot(row, color='lightgray', label='Training trajectories')
+# truth = -298.2
+# # Calculate the average across rows
+# average = np.mean(array_2d, axis=0)
+# # Plot the average with a dark color
+# plt.plot(average, color='black', label='Average')
+# # Plot the truth with a dashed line
+# plt.plot(truth*np.ones(n), color='orange', linestyle='dashed', label='Average truth')
+# plt.ylabel('Log likelihood')
+# plt.xlabel('Iteration (x100)')
+# plt.title('Training trajectories for multiple simulated datasets')
+# plt.legend()
+# plt.savefig(os.path.join(target_dir, 'Test_trajectoroes.png'))
+# plt.close()
+
+# array_2d_true = array_2d - (np.max(array_2d, axis=1) + np.random.normal(scale=0.1, size=array_2d.shape[0]))[:,None]
+array_2d_true = array_2d - (np.max(array_2d, axis=1))[:,None]
+a = np.where(array_2d_true[:,200:] < -2)
+a[0][-10:]
+a[1][-10:]
+loaded_files[a[0][-1]]
+# Create a new figure
 plt.figure(figsize=(10, 6))
 # Plot each row with a light color
-for row in array_2d:
+for row in array_2d_true:
     plt.plot(row, color='lightgray')
 
 plt.plot(row, color='lightgray', label='Training trajectories')
-truth = -298.2
+truth = 0
 # Calculate the average across rows
-average = np.mean(array_2d, axis=0)
+average = np.mean(array_2d_true, axis=0)
 # Plot the average with a dark color
 plt.plot(average, color='black', label='Average')
-# Plot the truth with a dashed line
-plt.plot(truth*np.ones(n), color='orange', linestyle='dashed', label='Average truth')
+# # Plot the truth with a dashed line
+# plt.plot(truth*np.ones(n), color='orange', linestyle='dashed', label='Average truth')
 plt.ylabel('Log likelihood')
 plt.xlabel('Iteration (x100)')
 plt.title('Training trajectories for multiple simulated datasets')
 plt.legend()
-plt.savefig(os.path.join(target_dir, 'Test_trajectoroes.png'))
+plt.savefig(os.path.join(target_dir, 'Test_trajectoroes_true.png'))
 plt.close()
 
 

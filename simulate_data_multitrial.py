@@ -35,15 +35,17 @@ class DataAnalyzer:
 
     def initialize(self, configs=3, A=2, T=200, intensity_type=('constant', '1peak', '2peaks'),
                    intensity_mltply=15, intensity_bias=1):
-        degree = 3
         time = np.arange(0, T, 1) / 100
         self.time = time
         self.dt = round(self.time[1] - self.time[0], 3)
 
         n_factors = len(intensity_type) * A
-        # paremeters
-        self.alpha = 100*(1+np.arange(n_factors, dtype=np.float64))
-        self.theta = 1.1+np.arange(n_factors, dtype=np.float64)
+        # define parameters on terms of mean and sqrt variance
+        # alpha = (mu/sigma)^2, theta = mu/sigma^2
+        mu = 90*np.ones(n_factors, dtype=np.float64)
+        sigma = 8
+        self.alpha = (mu/sigma)**2
+        self.theta = mu/(sigma**2)
         self.pi = np.zeros(n_factors)
         self.config_peak_offsets = 0.1 * np.random.normal(size=(configs, 2 * n_factors))
         # self.config_peak_offsets = np.zeros((configs, 2 * n_factors))
@@ -127,16 +129,17 @@ class DataAnalyzer:
         self.neuron_factor_access = neuron_factor_access
 
     def generate_spike_trains(self, trial_warped_factors):
-
-        # trial_warped_factors = trial_warped_factors / np.sum(trial_warped_factors, axis=1, keepdims=True)
+        # trial_warped_factors # L x T x R X C
+        trial_warped_factors = trial_warped_factors / np.sum(trial_warped_factors, axis=1, keepdims=True)
         neuron_trial_warped_factors = []
+        # self.neuron_factor_assignments # C x K, where K is the number of neurons across all areas
         for i in range(self.neuron_factor_assignments.shape[0]):
             neuron_trial_warped_factors.append(trial_warped_factors[self.neuron_factor_assignments[i,:], :, :, i])
         neuron_trial_warped_factors = np.stack(neuron_trial_warped_factors, axis=3)
+        # neuron_trial_warped_factors # K x T x R X C
         neuron_intensities = self.neuron_gains.T[:,None,None,:] * neuron_trial_warped_factors
         # padding
         neuron_intensities = np.concatenate([np.zeros((neuron_intensities.shape[0], 1, neuron_intensities.shape[2], neuron_intensities.shape[3])), neuron_intensities], axis=1)
-        # neuron_intensities = neuron_intensities*10
         rates = np.max(neuron_intensities, axis=1)
         arrival_times = np.zeros_like(rates)
         homogeneous_poisson_process = np.zeros_like(neuron_intensities)
@@ -145,11 +148,18 @@ class DataAnalyzer:
             update_entries = arrival_times < neuron_intensities.shape[1]
             update_indices = np.floor(update_entries * arrival_times).astype(int)
             dim_indices = np.indices(update_indices.shape)
-            homogeneous_poisson_process[dim_indices[0].flatten(), update_indices.flatten(), dim_indices[1].flatten(), dim_indices[2].flatten()] = 1
+            homogeneous_poisson_process[dim_indices[0].flatten(), update_indices.flatten(), dim_indices[1].flatten(), dim_indices[2].flatten()] += 1
+        max_spikes = np.max(homogeneous_poisson_process)
         acceptance_threshold = neuron_intensities / rates[:, None, :, :]
-        acceptance_probabilities = np.random.uniform(0, 1, neuron_intensities.shape)
-        accepted_spikes = (acceptance_probabilities <= acceptance_threshold).astype(int)
-        Y = accepted_spikes * homogeneous_poisson_process
+        Y = np.copy(homogeneous_poisson_process)
+        i = 0
+        while i < max_spikes:
+            thin_locs = np.where(homogeneous_poisson_process > i)
+            thin_threshold = acceptance_threshold[thin_locs]
+            acceptance_probabilities = np.random.uniform(0, 1, thin_threshold.shape)
+            rejected_spikes = np.where(acceptance_probabilities > thin_threshold)[0]
+            Y[thin_locs[0][rejected_spikes], thin_locs[1][rejected_spikes], thin_locs[2][rejected_spikes], thin_locs[3][rejected_spikes]] -= 1
+            i += 1
         self.Y = Y[:, 1:, :, :]
         self.neuron_intensities = neuron_intensities[:, 1:, :, :]
 
@@ -229,13 +239,13 @@ class DataAnalyzer:
         late = factors[:, self.right_landmark2:]
         late = np.broadcast_to(np.expand_dims(late, (2, 3, 4)), (late.shape) + tuple(warped_factors.shape[2:-1]))
         warped_factors = np.concatenate([early, warped_factors[:, :, :, :, :, 0], mid, warped_factors[:, :, :, :, :, 1], late], axis=1)
-        return warped_factors
+        return warped_factors[:,:,0,:,:]
 
 
     def sample_data(self, K, A, n_trials):
         n_factors = self.beta.shape[0]
         n_configs = self.config_peak_offsets.shape[0]
-        trial_warped_factors = self.warp_all_latent_factors_for_all_trials(n_trials).squeeze()
+        trial_warped_factors = self.warp_all_latent_factors_for_all_trials(n_trials)
         self.generate_neuron_gains_factor_assignments_condition_assignment_and_factor_access(K, A)
         self.generate_spike_trains(trial_warped_factors)
         indcs = np.indices(self.neuron_factor_assignments.shape)

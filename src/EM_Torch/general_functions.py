@@ -371,7 +371,7 @@ def plot_outputs(model, output_dir, folder, epoch, ess_train, ess_test, offset_t
         plt.savefig(os.path.join(proposal_offsets_dir, f'proposal_offsets_{epoch}.png'))
         plt.close()
 
-        trial_SDs = model.trial_peak_offset_proposal_variances.flatten().numpy()
+        trial_SDs = model.trial_peak_offset_proposal_sds.flatten().numpy()
         plt.figure(figsize=(10, 10))
         plt.plot(trial_SDs, label='Trial Standard Deviations')
         plt.title('Trial Standard Deviations')

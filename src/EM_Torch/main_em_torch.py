@@ -31,7 +31,7 @@ args.K = 100  # K
 # args.load = True
 # args.load_epoch = 39999
 # args.load_run = 0
-args.data_seed = 1947067064
+args.data_seed = 549775901
 
 
 init = 'Data'
@@ -45,7 +45,7 @@ the_rest = 'zeros'
 # args.batch_size = 15
 args.batch_size = 'All'
 args.param_seed = f'{init}Init'
-args.notes = f'Learn all. {init} init. importance sampling {args.n_trial_samples} time warping = 0.'
+args.notes = f'Learn all. {init} init. importance sampling {args.n_trial_samples}.'
 args.scheduler_patience = 80000 #2000
 args.scheduler_threshold = 1e-10 #0.1
 args.scheduler_factor = 0.9
@@ -170,7 +170,7 @@ else:
     # model.trial_peak_offset_covar_ltri_diag.requires_grad = False
     # model.trial_peak_offset_covar_ltri_offdiag.requires_grad = False
     # model.trial_peak_offset_proposal_means.requires_grad = False
-    # model.trial_peak_offset_proposal_variances.requires_grad = False
+    # model.trial_peak_offset_proposal_sds.requires_grad = False
     # DELETE
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)

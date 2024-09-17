@@ -312,7 +312,7 @@ def plot_outputs(model, output_dir, folder, epoch, ess_train, ess_test, offset_t
         plt.savefig(os.path.join(alpha_dir, f'alpha_{epoch}.png'))
         plt.close()
 
-        theta = model.theta.numpy()
+        theta = model.theta_value().numpy()
         plt.figure(figsize=(10, 10))
         plt.plot(theta, label='Theta')
         plt.title('Theta')

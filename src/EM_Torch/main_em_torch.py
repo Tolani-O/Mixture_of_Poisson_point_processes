@@ -49,7 +49,7 @@ args.notes = f'Learn all. {init} init. importance sampling {args.n_trial_samples
 args.scheduler_patience = 80000 #2000
 args.scheduler_threshold = 1e-10 #0.1
 args.scheduler_factor = 0.9
-args.lr = 0.0001
+args.lr = 0.0009
 args.num_epochs = 80000 #40000
 args.tau_beta = 8000
 args.tau_config = 1
@@ -86,19 +86,21 @@ num_factors = data.beta.shape[0]
 model = LikelihoodELBOModel(data.time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples)
 model.init_ground_truth(beta=data.beta,
                         alpha=inv_softplus_torch(data.alpha),
-                        theta=data.theta,
-                        pi=F.softmax(data.pi.reshape(args.A, -1), dim=1).flatten(),
                         config_peak_offsets=data.config_peak_offsets,
                         trial_peak_offset_covar_ltri=data.trial_peak_offset_covar_ltri)
 
 if args.cuda: model.cuda()
 model.eval()
 with (torch.no_grad()):
-    model.init_ground_truth(trial_peak_offset_proposal_means=trial_offsets_test.squeeze(), init='')
+    model.init_ground_truth(theta=data.theta,
+                            pi=F.softmax(data.pi.reshape(args.A, -1), dim=1).flatten(),
+                            trial_peak_offset_proposal_means=trial_offsets_test.squeeze(), init='')
     model.generate_trial_peak_offset_single_sample()
     true_ELBO_test, _, _, effective_sample_size_test, trial_peak_offsets_test = model.evaluate(Y_test, factor_access_test)
 
-    model.init_ground_truth(trial_peak_offset_proposal_means=trial_offsets_train.squeeze(), init='')
+    model.init_ground_truth(theta=data.theta,
+                            pi=F.softmax(data.pi.reshape(args.A, -1), dim=1).flatten(),
+                            trial_peak_offset_proposal_means=trial_offsets_train.squeeze(), init='')
     model.generate_trial_peak_offset_single_sample()
     true_ELBO_train, _, _, effective_sample_size_train, trial_peak_offsets_train = model.evaluate(Y_train, factor_access_train)
 
@@ -269,10 +271,10 @@ if __name__ == "__main__":
                 alpha_model = F.softplus(model.alpha[non_zero_model_train[:, 2]])
                 alpha_data = data.alpha[non_zero_data_train[:, 2]]
                 alpha_mses.append(F.mse_loss(alpha_model, alpha_data).item())
-                theta_model = model.theta[non_zero_model_train[:, 2]]
+                theta_model = model.theta_value()[non_zero_model_train[:, 2]]
                 theta_data = data.theta[non_zero_data_train[:, 2]]
                 theta_mses.append(F.mse_loss(theta_model, theta_data).item())
-                pi_model = model.pi[non_zero_model_train[:, 2]]
+                pi_model = model.pi_value(factor_access_train)[non_zero_model_train[:, 2]]
                 pi_data = F.softmax(data.pi.reshape(args.A, -1), dim=1).flatten()[non_zero_data_train[:, 2]]
                 pi_mses.append(F.mse_loss(pi_model, pi_data).item())
                 ltri_model = model.ltri_matix()
@@ -320,9 +322,9 @@ if __name__ == "__main__":
             with torch.no_grad():
                 # smoothness_budget_constrained = torch.exp(model.smoothness_budget).cpu().numpy().round(3)
                 # coupling = model.coupling.cpu().numpy().round(3)
-                pi = model.pi.cpu().numpy().round(3)
+                pi = model.pi_value(factor_access_train).cpu().numpy().round(3)
                 alpha = F.softplus(model.alpha).cpu().numpy().round(3)
-                theta = model.theta.cpu().numpy().round(3)
+                theta = model.theta_value().cpu().numpy().round(3)
             output_str = (
                 f"Epoch: {epoch:2d}, Elapsed Time: {elapsed_time / 60:.2f} mins, Total Time: {total_time / (60 * 60):.2f} hrs,\n"
                 f"Loss train: {cur_loss_train:.5f}, Log Likelihood train: {cur_log_likelihood_train:.5f},\n"

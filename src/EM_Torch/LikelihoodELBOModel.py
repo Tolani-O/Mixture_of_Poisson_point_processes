@@ -463,24 +463,17 @@ class LikelihoodELBOModel(nn.Module):
             # update beta and alpha
             self.beta.requires_grad = True
             self.alpha.requires_grad = True
-            self.trial_peak_offset_proposal_samples = torch.zeros(self.n_trial_samples, self.n_trials, self.n_configs, 2 * self.n_factors,
-                                                                  dtype=torch.float64, device=self.device)
-            # warped_factors # L x T x N x R x C
-            warped_factors = (torch.exp(self.beta).unsqueeze(2).unsqueeze(3).unsqueeze(4).
-                              expand(-1, -1, self.n_trial_samples, self.n_trials, self.n_configs))
         elif stage == 2:
             # update config_peak_offsets and ltri maxtrix
             self.config_peak_offsets.requires_grad = True
             self.trial_peak_offset_covar_ltri_diag.requires_grad = True
             self.trial_peak_offset_covar_ltri_offdiag.requires_grad = True
-            self.generate_trial_peak_offset_samples()
-            warped_factors = self.warp_all_latent_factors_for_all_trials()
         else:
             # update trial_peak_offset_proposal_means and trial_peak_offset_proposal_sds
             self.trial_peak_offset_proposal_means.requires_grad = True
             self.trial_peak_offset_proposal_sds.requires_grad = True
-            self.generate_trial_peak_offset_samples()
-            warped_factors = self.warp_all_latent_factors_for_all_trials()
+        self.generate_trial_peak_offset_samples()
+        warped_factors = self.warp_all_latent_factors_for_all_trials()
         likelihood_term = self.compute_log_elbo(Y, neuron_factor_access, warped_factors)
         # penalty terms
         penalty_term = self.compute_penalty_terms(tau_beta, tau_config, tau_sigma)

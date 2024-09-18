@@ -336,6 +336,10 @@ class LikelihoodELBOModel(nn.Module):
         W_CKL = (neuron_factor_access * F.softmax(U_tensor, dim=-1).reshape(*U_tensor.shape[:-2], self.n_factors)).detach()
         self.W_CKL = W_CKL  # for finding the posterior clustering probabilities
 
+        # a_CKL  # C x K x L
+        a_CKL = (Y_sum_rt_plus_alpha / R_plus_theta).detach()
+        self.a_CKL = a_CKL  # for finding the posterior neuron firing rates
+
         # V tensor terms
         # Y_times_warped_beta  # C x K x R x L x N x T
         Y_times_warped_beta = torch.einsum('ktrc,crlnt->ckrlnt', Y, log_warped_factors)
@@ -389,17 +393,12 @@ class LikelihoodELBOModel(nn.Module):
         # W_tensor # C x K x R x L x N
         W_tensor = W_CKL.unsqueeze(2).unsqueeze(4) * W_CRN.unsqueeze(1).unsqueeze(3)
 
-        # a_CKL  # C x K x L
-        a_CKL = (Y_sum_rt_plus_alpha / R_plus_theta).detach()
-        self.a_CKL = a_CKL  # for finding the posterior neuron firing rates
-        # b_CKL  # C x K x L
-        b_CKL = (torch.digamma(Y_sum_rt_plus_alpha) - log_R_plus_theta).detach()
-
         # E step theta updates
         theta = self.theta_value()
         log_theta = torch.log(theta)
         pi = self.pi_value(neuron_factor_access)
-        log_pi = torch.log(pi)
+        # b_CKL  # C x K x L
+        b_CKL = (torch.digamma(Y_sum_rt_plus_alpha) - torch.log(R + theta)).detach()
 
         # Liklelihood Terms (unsqueezed)
         # Y_sum_t_times_logsumexp_warped_beta  # C x K x R x L x N
@@ -407,14 +406,13 @@ class LikelihoodELBOModel(nn.Module):
         #alpha_times_log_theta_plus_b_CKL  # C x K x 1 x L x 1
         alpha_times_log_theta_plus_b_CKL = (alpha * (log_theta + b_CKL)).unsqueeze(2).unsqueeze(4)
         log_gamma_alpha = torch.lgamma(alpha).unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(4)  # 1 x 1 x 1 x L x 1
-        log_pi = log_pi.unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(4)  # 1 x 1 x 1 x L x 1
         # neg_log_P # C x 1 x R x 1 x N
         neg_log_P = neg_log_P.unsqueeze(1).unsqueeze(3)
         # logsumexp_VV_tensor #  C x 1 x R x 1 x 1
         logsumexp_VV_tensor = torch.logsumexp(VV_tensor, dim=-1).unsqueeze(1).unsqueeze(3).unsqueeze(4)
 
         elbo = (Y_times_warped_beta - Y_sum_t_times_logsumexp_warped_beta + (1/R) * (alpha_times_log_theta_plus_b_CKL -
-                log_gamma_alpha + log_pi) - (1/K) * (neg_log_P - logsumexp_VV_tensor))
+                log_gamma_alpha) - (1/K) * (neg_log_P - logsumexp_VV_tensor))
         elbo = W_tensor * elbo
 
         return torch.sum(elbo)

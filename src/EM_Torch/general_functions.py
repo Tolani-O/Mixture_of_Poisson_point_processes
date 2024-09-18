@@ -230,7 +230,7 @@ def write_log_and_model(output_str, output_dir, epoch, model, optimizer, schedul
     torch.save(scheduler.state_dict(), os.path.join(models_path, f'scheduler_{epoch}.pth'))
 
 
-def plot_outputs(model, output_dir, folder, epoch, ess_train, ess_test, offset_train, offset_test):
+def plot_outputs(model, neuron_factor_access, output_dir, folder, epoch, ess_train, ess_test, offset_train, offset_test):
 
     output_dir = os.path.join(output_dir, folder)
     if not os.path.exists(output_dir):
@@ -319,7 +319,7 @@ def plot_outputs(model, output_dir, folder, epoch, ess_train, ess_test, offset_t
         plt.savefig(os.path.join(theta_dir, f'theta_{epoch}.png'))
         plt.close()
 
-        pi = model.pi.numpy()
+        pi = model.pi_value(neuron_factor_access).numpy()
         plt.figure(figsize=(10, 10))
         plt.plot(pi, label='Pi')
         plt.title('Pi')

@@ -147,6 +147,7 @@ else:
                                 config_peak_offsets=data.config_peak_offsets,
                                 trial_peak_offset_covar_ltri=data.trial_peak_offset_covar_ltri,
                                 trial_peak_offset_proposal_means=trial_offsets_train.squeeze(),
+                                trial_peak_offset_proposal_sds=0.01*torch.ones(trial_offsets_train.shape[-1], dtype=torch.float64),
                                 init='')
     if init == 'Rand':
         model.init_random()

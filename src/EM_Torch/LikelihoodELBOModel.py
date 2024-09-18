@@ -73,7 +73,7 @@ class LikelihoodELBOModel(nn.Module):
         num_elements = n_dims * (n_dims - 1) // 2
         self.trial_peak_offset_covar_ltri_diag = nn.Parameter(torch.ones(n_dims, dtype=torch.float64))
         self.trial_peak_offset_covar_ltri_offdiag = nn.Parameter(torch.zeros(num_elements, dtype=torch.float64))
-        self.trial_peak_offset_proposal_means = nn.Parameter(torch.zeros(self.n_trials, self.n_configs, 2 * self.n_factors, dtype=torch.float64))
+        self.trial_peak_offset_proposal_means = nn.Parameter(torch.zeros(self.n_trials, self.n_configs, n_dims, dtype=torch.float64))
         self.trial_peak_offset_proposal_sds = nn.Parameter(torch.ones(n_dims, dtype=torch.float64))
         self.standard_init()
 
@@ -88,6 +88,7 @@ class LikelihoodELBOModel(nn.Module):
 
     def init_ground_truth(self, beta=None, alpha=None, theta=None, pi=None,
                           trial_peak_offset_proposal_means=None,
+                          trial_peak_offset_proposal_sds=None,
                           config_peak_offsets=None, trial_peak_offset_covar_ltri=None,
                           init='zeros'):
         if init == 'zeros':
@@ -104,6 +105,8 @@ class LikelihoodELBOModel(nn.Module):
             self.pi_init = pi
         if trial_peak_offset_proposal_means is not None:
             self.trial_peak_offset_proposal_means = nn.Parameter(trial_peak_offset_proposal_means)
+        if trial_peak_offset_proposal_sds is not None:
+            self.trial_peak_offset_proposal_sds = nn.Parameter(trial_peak_offset_proposal_sds)
         if config_peak_offsets is not None:
             self.config_peak_offsets = nn.Parameter(config_peak_offsets)
         if trial_peak_offset_covar_ltri is not None:

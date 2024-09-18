@@ -135,7 +135,7 @@ else:
         f'_factor{args.scheduler_factor}_threshold{args.scheduler_threshold}_notes-{args.notes}')
     output_dir = os.path.join(output_dir, args.folder_name, 'Run_0')
     os.makedirs(output_dir)
-    plot_outputs(model.cpu(), output_dir, 'Train', -2,
+    plot_outputs(model.cpu(), factor_access_train.permute(2, 0, 1).cpu(), output_dir, 'Train', -2,
                  effective_sample_size_train.cpu(), effective_sample_size_test.cpu(),
                  trial_peak_offsets_train.permute(1,0,2).cpu(), trial_peak_offsets_test.permute(1,0,2).cpu())
     # Initialize the model
@@ -184,7 +184,7 @@ else:
     plot_spikes(Y_train.cpu().numpy(), output_dir, data.dt, 'train')
     plot_spikes(Y_test.cpu().numpy(), output_dir, data.dt, 'test')
     plot_intensity_and_latents(data.time, np.exp(data.beta.cpu().numpy()), intensities_train.cpu().numpy(), output_dir)
-    plot_outputs(model.cpu(), output_dir, 'Train', -1,
+    plot_outputs(model.cpu(), factor_access_train.permute(2, 0, 1).cpu(), output_dir, 'Train', -1,
                  effective_sample_size_train.cpu(), effective_sample_size_test.cpu(),
                  trial_peak_offsets_train.permute(1,0,2).cpu(), trial_peak_offsets_test.permute(1,0,2).cpu())
     # plot_factor_assignments(factor_assignment_onehot_train-model_factor_assignment_train, output_dir, 'Train', -1)
@@ -274,7 +274,7 @@ if __name__ == "__main__":
                 theta_model = model.theta_value()[non_zero_model_train[:, 2]]
                 theta_data = data.theta[non_zero_data_train[:, 2]]
                 theta_mses.append(F.mse_loss(theta_model, theta_data).item())
-                pi_model = model.pi_value(factor_access_train)[non_zero_model_train[:, 2]]
+                pi_model = model.pi_value(factor_access_train.permute(2, 0, 1))[non_zero_model_train[:, 2]]
                 pi_data = F.softmax(data.pi.reshape(args.A, -1), dim=1).flatten()[non_zero_data_train[:, 2]]
                 pi_mses.append(F.mse_loss(pi_model, pi_data).item())
                 ltri_model = model.ltri_matix()
@@ -322,7 +322,7 @@ if __name__ == "__main__":
             with torch.no_grad():
                 # smoothness_budget_constrained = torch.exp(model.smoothness_budget).cpu().numpy().round(3)
                 # coupling = model.coupling.cpu().numpy().round(3)
-                pi = model.pi_value(factor_access_train).cpu().numpy().round(3)
+                pi = model.pi_value(factor_access_train.permute(2, 0, 1)).cpu().numpy().round(3)
                 alpha = F.softplus(model.alpha).cpu().numpy().round(3)
                 theta = model.theta_value().cpu().numpy().round(3)
             output_str = (
@@ -339,7 +339,7 @@ if __name__ == "__main__":
                 f"dataSeed: {args.data_seed},\n"
                 f"{args.notes}\n\n")
             write_log_and_model(output_str, output_dir, epoch, model, optimizer, scheduler)
-            plot_outputs(model.cpu(), output_dir, 'Train', epoch,
+            plot_outputs(model.cpu(), factor_access_train.permute(2, 0, 1).cpu(), output_dir, 'Train', epoch,
                          effective_sample_size_train.cpu(), effective_sample_size_test.cpu(),
                          model_trial_offsets_train.permute(1,0,2).cpu(), model_trial_offsets_test.permute(1,0,2).cpu())
             is_empty = epoch == 0

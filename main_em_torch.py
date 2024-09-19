@@ -49,11 +49,11 @@ args.notes = f'Learn all. {init} init. importance sampling {args.n_trial_samples
 args.scheduler_patience = 80000 #2000
 args.scheduler_threshold = 1e-10 #0.1
 args.scheduler_factor = 0.9
-args.lr = 0.0009
-args.num_epochs = 80000 #40000
+args.lr = 0.01
+args.num_epochs = 100000
 args.tau_beta = 8000
-args.tau_config = 1
-args.tau_sigma = 0
+args.tau_config = 10
+args.tau_sigma = 1
 trial_offsets_train_model = None
 trial_offsets_test_model = None
 
@@ -134,7 +134,7 @@ else:
         f'_iters{args.num_epochs}_BatchSize{args.batch_size}_lr{args.lr}_patience{args.scheduler_patience}'
         f'_factor{args.scheduler_factor}_threshold{args.scheduler_threshold}_notes-{args.notes}')
     output_dir = os.path.join(output_dir, args.folder_name, 'Run_0')
-    os.makedirs(output_dir)
+    os.makedirs(output_dir, exist_ok=True)
     plot_outputs(model.cpu(), factor_access_train.permute(2, 0, 1).cpu(), output_dir, 'Train', -2,
                  effective_sample_size_train.cpu(), effective_sample_size_test.cpu(),
                  trial_peak_offsets_train.permute(1,0,2).cpu(), trial_peak_offsets_test.permute(1,0,2).cpu())
@@ -147,7 +147,7 @@ else:
                                 config_peak_offsets=data.config_peak_offsets,
                                 trial_peak_offset_covar_ltri=data.trial_peak_offset_covar_ltri,
                                 trial_peak_offset_proposal_means=trial_offsets_train.squeeze(),
-                                trial_peak_offset_proposal_sds=0.01*torch.ones(trial_offsets_train.shape[-1], dtype=torch.float64),
+                                trial_peak_offset_proposal_sds=0.3*torch.ones(trial_offsets_train.shape[-1], dtype=torch.float64),
                                 init='')
     if init == 'Rand':
         model.init_random()
@@ -224,6 +224,8 @@ if __name__ == "__main__":
     pi_mses = []
     config_mses = []
     ltri_mses = []
+    Sigma_mses = []
+    proposal_means_mses = []
     ltriLkhd_train = []
     ltriLkhd_test = []
     gains_train = []
@@ -236,7 +238,7 @@ if __name__ == "__main__":
     for epoch in range(start_epoch, start_epoch + args.num_epochs):
         if args.cuda: model.cuda()
         model.train()
-        while stage < 4:
+        while stage < 3:
             train_gradient()
             stage += 1
         stage = 1
@@ -278,11 +280,16 @@ if __name__ == "__main__":
                 pi_model = model.pi_value(factor_access_train.permute(2, 0, 1))[non_zero_model_train[:, 2]]
                 pi_data = F.softmax(data.pi.reshape(args.A, -1), dim=1).flatten()[non_zero_data_train[:, 2]]
                 pi_mses.append(F.mse_loss(pi_model, pi_data).item())
-                ltri_model = model.ltri_matix()
-                ltri_model = ltri_model.reshape(ltri_model.shape[0], 2, model.n_factors)[:, :, non_zero_model_train[:, 2]]
-                ltri_data = data.trial_peak_offset_covar_ltri.reshape(ltri_model.shape[0], 2,
+                ltri_matrix = model.ltri_matix()
+                ltri_model = ltri_matrix.reshape(ltri_matrix.shape[0], 2, model.n_factors)[:, :, non_zero_model_train[:, 2]]
+                ltri_data = data.trial_peak_offset_covar_ltri.reshape(ltri_matrix.shape[0], 2,
                                                                       model.n_factors)[:, :, non_zero_data_train[:, 2]]
                 ltri_mses.append(F.mse_loss(ltri_model, ltri_data).item())
+                Sigma_model = ltri_matrix @ ltri_matrix.t()
+                Sigma_model = Sigma_model.reshape(ltri_matrix.shape[0], 2, model.n_factors)[:, :, non_zero_model_train[:, 2]]
+                Sigma_data = data.trial_peak_offset_covar_ltri @ data.trial_peak_offset_covar_ltri.t()
+                Sigma_data = Sigma_data.reshape(ltri_matrix.shape[0], 2, model.n_factors)[:, :, non_zero_data_train[:, 2]]
+                Sigma_mses.append(F.mse_loss(Sigma_model, Sigma_data).item())
                 config_model = model.config_peak_offsets.reshape(model.config_peak_offsets.shape[0], 2,
                                                                  model.n_factors)[non_zero_model_train[:, 0], :, non_zero_model_train[:, 2]]
                 config_data = data.config_peak_offsets.reshape(model.config_peak_offsets.shape[0], 2,
@@ -300,6 +307,10 @@ if __name__ == "__main__":
                                                                                                   model_trial_offsets_train.shape[1],
                                                                                                   2, model.n_factors)[non_zero_data_train[:, 0], :, :, non_zero_data_train[:, 2]]
                 offsets_train.append(F.mse_loss(trial_offsets_data_train, trial_offsets_model_train).item())
+                trial_offsets_proposal_means = model.trial_peak_offset_proposal_means.permute(1, 0, 2).reshape(model_trial_offsets_train.shape[0],
+                                                                                                               model_trial_offsets_train.shape[1],
+                                                                                                               2, model.n_factors)[non_zero_data_train[:, 0], :, :, non_zero_data_train[:, 2]]
+                proposal_means_mses.append(F.mse_loss(trial_offsets_data_train, trial_offsets_proposal_means).item())
                 trial_offsets_model_test = model_trial_offsets_test.reshape(model_trial_offsets_test.shape[0],
                                                                             model_trial_offsets_test.shape[1],
                                                                             2, model.n_factors)[non_zero_model_test[:, 0], :, :, non_zero_model_test[:, 2]]
@@ -355,6 +366,8 @@ if __name__ == "__main__":
             write_losses(pi_mses, 'Test', 'pi_MSE', output_dir, is_empty)
             write_losses(config_mses, 'Test', 'configoffset_MSE', output_dir, is_empty)
             write_losses(ltri_mses, 'Test', 'ltri_MSE', output_dir, is_empty)
+            write_losses(Sigma_mses, 'Test', 'Sigma_MSE', output_dir, is_empty)
+            write_losses(proposal_means_mses, 'Test', 'proposal_means_MSE', output_dir, is_empty)
             write_losses(ltriLkhd_train, 'Train', 'ltriLkhd', output_dir, is_empty)
             write_losses(ltriLkhd_test, 'Test', 'ltriLkhd', output_dir, is_empty)
             write_losses(log_likelihoods_batch, 'Batch', 'Likelihood', output_dir, is_empty)
@@ -376,6 +389,8 @@ if __name__ == "__main__":
             plot_losses(None, output_dir, 'Test', 'pi_MSE')
             plot_losses(None, output_dir, 'Test', 'configoffset_MSE')
             plot_losses(None, output_dir, 'Test', 'ltri_MSE')
+            plot_losses(None, output_dir, 'Test', 'Sigma_MSE')
+            plot_losses(None, output_dir, 'Test', 'proposal_means_MSE')
             plot_losses(true_offset_penalty_train, output_dir, 'Train', 'ltriLkhd', 10)
             plot_losses(true_offset_penalty_test, output_dir, 'Test', 'ltriLkhd', 10)
             plot_losses(true_ELBO_train, output_dir, 'Batch', 'Likelihood', 20)
@@ -399,6 +414,8 @@ if __name__ == "__main__":
             pi_mses = []
             config_mses = []
             ltri_mses = []
+            Sigma_mses = []
+            proposal_means_mses = []
             ltriLkhd_train = []
             ltriLkhd_test = []
             # clusr_misses_train = []

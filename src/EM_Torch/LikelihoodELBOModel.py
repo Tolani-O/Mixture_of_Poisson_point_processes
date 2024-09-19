@@ -429,15 +429,16 @@ class LikelihoodELBOModel(nn.Module):
         entropy_term = 0.5 * (n_dims * torch.log(torch.tensor(2 * torch.pi)) + torch.log(det_Sigma) + prod_term)
         return entropy_term # C x R x N
 
-    def compute_penalty_terms(self, tau_beta, tau_config, tau_sigma):
+    def compute_penalty_terms(self, tau_beta, tau_config, tau_sigma, tau_sd):
         # Penalty Terms
         config_Penalty = - tau_config * torch.sum(self.config_peak_offsets * self.config_peak_offsets)
+        proposal_sd_penalty = - tau_sd * torch.sum(self.trial_peak_offset_proposal_sds * self.trial_peak_offset_proposal_sds)
         ltri_matrix = self.ltri_matix()
         Sigma = ltri_matrix @ ltri_matrix.t()
         inv_Sigma = torch.linalg.inv(Sigma)
         sigma_Penalty = -tau_sigma * (torch.sum(torch.abs(inv_Sigma)) - torch.sum(torch.abs(torch.diag(inv_Sigma))))
         beta_s2_penalty = -tau_beta * torch.sum((self.beta @ self.Delta2TDelta2) * self.beta)
-        penalty_term = config_Penalty + sigma_Penalty + beta_s2_penalty
+        penalty_term = config_Penalty + sigma_Penalty + beta_s2_penalty + proposal_sd_penalty
         return penalty_term
 
 
@@ -451,12 +452,12 @@ class LikelihoodELBOModel(nn.Module):
         return neuron_factor_assignment, neuron_firing_rates, effective_sample_size, trial_peak_offsets
 
 
-    def forward(self, Y, neuron_factor_access, tau_beta, tau_config, tau_sigma):
+    def forward(self, Y, neuron_factor_access, tau_beta, tau_config, tau_sigma, tau_sd):
         self.generate_trial_peak_offset_samples()
         warped_factors = self.warp_all_latent_factors_for_all_trials()
         likelihood_term = self.compute_log_elbo(Y, neuron_factor_access, warped_factors)
         # penalty terms
-        penalty_term = self.compute_penalty_terms(tau_beta, tau_config, tau_sigma)
+        penalty_term = self.compute_penalty_terms(tau_beta, tau_config, tau_sigma, tau_sd)
         return likelihood_term, penalty_term
 
 

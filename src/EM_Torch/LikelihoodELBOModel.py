@@ -451,27 +451,7 @@ class LikelihoodELBOModel(nn.Module):
         return neuron_factor_assignment, neuron_firing_rates, effective_sample_size, trial_peak_offsets
 
 
-    def forward(self, Y, neuron_factor_access, tau_beta, tau_config, tau_sigma, stage=1):
-        self.beta.requires_grad = False
-        self.alpha.requires_grad = False
-        self.config_peak_offsets.requires_grad = False
-        self.trial_peak_offset_covar_ltri_diag.requires_grad = False
-        self.trial_peak_offset_covar_ltri_offdiag.requires_grad = False
-        self.trial_peak_offset_proposal_means.requires_grad = False
-        self.trial_peak_offset_proposal_sds.requires_grad = False
-        if stage == 1:
-            # update beta and alpha
-            self.beta.requires_grad = True
-            self.alpha.requires_grad = True
-        elif stage == 2:
-            # update config_peak_offsets and ltri maxtrix
-            self.config_peak_offsets.requires_grad = True
-            self.trial_peak_offset_covar_ltri_diag.requires_grad = True
-            self.trial_peak_offset_covar_ltri_offdiag.requires_grad = True
-        else:
-            # update trial_peak_offset_proposal_means and trial_peak_offset_proposal_sds
-            self.trial_peak_offset_proposal_means.requires_grad = True
-            self.trial_peak_offset_proposal_sds.requires_grad = True
+    def forward(self, Y, neuron_factor_access, tau_beta, tau_config, tau_sigma):
         self.generate_trial_peak_offset_samples()
         warped_factors = self.warp_all_latent_factors_for_all_trials()
         likelihood_term = self.compute_log_elbo(Y, neuron_factor_access, warped_factors)

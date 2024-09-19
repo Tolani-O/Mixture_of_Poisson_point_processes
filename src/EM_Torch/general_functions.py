@@ -193,8 +193,10 @@ def create_relevant_files(output_dir, output_str):
         'alpha_MSE_test',
         'theta_MSE_test',
         'pi_MSE_test',
+        'proposal_means_MSE_test',
         'configoffset_MSE_test',
         'ltri_MSE_test',
+        'Sigma_MSE_test',
         'ltriLkhd_train',
         'ltriLkhd_test',
         # 'clusr_misses_train',
@@ -256,6 +258,9 @@ def plot_outputs(model, neuron_factor_access, output_dir, folder, epoch, ess_tra
     ltri_dir = os.path.join(output_dir, 'ltri')
     if not os.path.exists(ltri_dir):
         os.makedirs(ltri_dir)
+    sigma_dir = os.path.join(output_dir, 'sigma')
+    if not os.path.exists(sigma_dir):
+        os.makedirs(sigma_dir)
     ess_train_dir = os.path.join(output_dir, 'ess_train')
     if not os.path.exists(ess_train_dir):
         os.makedirs(ess_train_dir)
@@ -268,9 +273,9 @@ def plot_outputs(model, neuron_factor_access, output_dir, folder, epoch, ess_tra
     offset_test_dir = os.path.join(output_dir, 'offset_test')
     if not os.path.exists(offset_test_dir):
         os.makedirs(offset_test_dir)
-    proposal_offsets_dir = os.path.join(output_dir, 'proposal_offsets')
-    if not os.path.exists(proposal_offsets_dir):
-        os.makedirs(proposal_offsets_dir)
+    proposal_means_dir = os.path.join(output_dir, 'proposal_means')
+    if not os.path.exists(proposal_means_dir):
+        os.makedirs(proposal_means_dir)
     trial_sd_dir = os.path.join(output_dir, 'trial_SDs')
     if not os.path.exists(trial_sd_dir):
         os.makedirs(trial_sd_dir)
@@ -340,6 +345,12 @@ def plot_outputs(model, neuron_factor_access, output_dir, folder, epoch, ess_tra
         plt.savefig(os.path.join(ltri_dir, f'ltri_{epoch}.png'))
         plt.close()
 
+        Sigma = (model.ltri_matix('cpu') @ model.ltri_matix('cpu').t()).flatten().numpy()
+        plt.figure(figsize=(10, 10))
+        plt.plot(Sigma, label='Sigma')
+        plt.title('Sigma')
+        plt.savefig(os.path.join(sigma_dir, f'Sigma_{epoch}.png'))
+
         plt.figure(figsize=(10, 10))
         plt.plot(ess_train.flatten().numpy(), label='Effective Sample Size Train')
         plt.title('Effective Sample Size Train')
@@ -366,9 +377,9 @@ def plot_outputs(model, neuron_factor_access, output_dir, folder, epoch, ess_tra
 
         proposal_offsets = model.trial_peak_offset_proposal_means.flatten().numpy()
         plt.figure(figsize=(10, 10))
-        plt.plot(proposal_offsets, label='Trial Offsets Proposals')
-        plt.title('Trial Offsets Proposals')
-        plt.savefig(os.path.join(proposal_offsets_dir, f'proposal_offsets_{epoch}.png'))
+        plt.plot(proposal_offsets, label='Trial means Proposals')
+        plt.title('Trial means Proposals')
+        plt.savefig(os.path.join(proposal_means_dir, f'proposal_means_{epoch}.png'))
         plt.close()
 
         trial_SDs = model.trial_peak_offset_proposal_sds.flatten().numpy()

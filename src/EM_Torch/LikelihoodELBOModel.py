@@ -190,6 +190,21 @@ class LikelihoodELBOModel(nn.Module):
         theta = self.alpha * (W_L / Wa_L)
         return theta.detach()
 
+    def validated_W_CKL(self, W_CKL, neuron_factor_access):
+        W_L = torch.sum(W_CKL, dim=(0, 1)).reshape(self.n_areas, -1)
+        neuron_factor_access_L = torch.sum(neuron_factor_access, dim=(0, 1)).reshape(self.n_areas, -1)
+        W_CKL_L = W_CKL.reshape(W_CKL.shape[0], W_CKL.shape[1], self.n_areas, -1) + 0
+        for i in range(W_L.shape[0]):
+            while torch.any(W_L[i] < 1):
+                min_idx = torch.argmin(W_L[i])
+                max_idx = torch.argmax(W_L[i])
+                W_L[i, min_idx] += 1
+                W_L[i, max_idx] -= 1
+                W_CKL_L[:, :, i, min_idx] += 1/neuron_factor_access_L[i, min_idx]
+                W_CKL_L[:, :, i, max_idx] -= 1/neuron_factor_access_L[i, max_idx]
+        W_CKL = W_CKL_L.reshape(*W_CKL.shape[:2], -1) * neuron_factor_access
+        return W_CKL
+
     def pi_value(self, neuron_factor_access):
         if self.W_CKL is None:
             return self.pi_init
@@ -337,6 +352,7 @@ class LikelihoodELBOModel(nn.Module):
         U_tensor = U_tensor.reshape(*U_tensor.shape[:-1], self.n_areas, L_a)
         # W_CKL # C x K x L
         W_CKL = (neuron_factor_access * F.softmax(U_tensor, dim=-1).reshape(*U_tensor.shape[:-2], self.n_factors)).detach()
+        W_CKL = self.validated_W_CKL(W_CKL, neuron_factor_access)
         self.W_CKL = W_CKL  # for finding the posterior clustering probabilities
 
         # a_CKL  # C x K x L
@@ -452,7 +468,27 @@ class LikelihoodELBOModel(nn.Module):
         return neuron_factor_assignment, neuron_firing_rates, effective_sample_size, trial_peak_offsets
 
 
-    def forward(self, Y, neuron_factor_access, tau_beta, tau_config, tau_sigma, tau_sd):
+    def forward(self, Y, neuron_factor_access, tau_beta, tau_config, tau_sigma, tau_sd, stage=1):
+        self.beta.requires_grad = False
+        self.alpha.requires_grad = False
+        self.config_peak_offsets.requires_grad = False
+        self.trial_peak_offset_covar_ltri_diag.requires_grad = False
+        self.trial_peak_offset_covar_ltri_offdiag.requires_grad = False
+        self.trial_peak_offset_proposal_means.requires_grad = False
+        self.trial_peak_offset_proposal_sds.requires_grad = False
+        if stage == 1:
+            # update beta and alpha
+            self.beta.requires_grad = True
+            self.alpha.requires_grad = True
+        elif stage == 2:
+            # update config_peak_offsets and ltri maxtrix
+            self.config_peak_offsets.requires_grad = True
+            self.trial_peak_offset_covar_ltri_diag.requires_grad = True
+            self.trial_peak_offset_covar_ltri_offdiag.requires_grad = True
+        else:
+            # update trial_peak_offset_proposal_means and trial_peak_offset_proposal_sds
+            self.trial_peak_offset_proposal_means.requires_grad = True
+            self.trial_peak_offset_proposal_sds.requires_grad = True
         self.generate_trial_peak_offset_samples()
         warped_factors = self.warp_all_latent_factors_for_all_trials()
         likelihood_term = self.compute_log_elbo(Y, neuron_factor_access, warped_factors)

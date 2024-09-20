@@ -116,7 +116,7 @@ class LikelihoodELBOModel(nn.Module):
             self.trial_peak_offset_covar_ltri_offdiag = nn.Parameter(trial_peak_offset_covar_ltri[indices[0], indices[1]])
 
 
-    def init_from_data(self, Y, factor_access, init='zeros'):
+    def init_from_data(self, Y, factor_access, sd_init, init='zeros'):
         Y, factor_access = Y.cpu(), factor_access.cpu()
         # Y # K x T x R x C
         # factor_access  # K x L x C
@@ -131,7 +131,9 @@ class LikelihoodELBOModel(nn.Module):
         spike_ct_sd = torch.sqrt(torch.sum(centered_spike_counts**2, dim=(0,1,3)) / (R * K * C))
         alpha = (avg_spike_counts/spike_ct_sd)**2
         theta = avg_spike_counts/(spike_ct_sd**2)
-        self.init_ground_truth(beta=beta, alpha=alpha, theta=theta, init=init)
+        trial_peak_offset_proposal_sds = sd_init * torch.ones(self.n_factors*self.n_areas, dtype=torch.float64)
+        self.init_ground_truth(beta=beta, alpha=alpha, theta=theta,
+                               trial_peak_offset_proposal_sds=trial_peak_offset_proposal_sds, init=init)
 
 
     def cuda(self, device=None):

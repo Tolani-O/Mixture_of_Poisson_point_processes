@@ -31,7 +31,7 @@ args.K = 100  # K
 # args.load = True
 # args.load_epoch = 39999
 # args.load_run = 0
-args.data_seed = 549775901
+# args.data_seed = 549775901
 
 
 init = 'Data'
@@ -45,7 +45,7 @@ the_rest = 'zeros'
 # args.batch_size = 15
 args.batch_size = 'All'
 args.param_seed = f'{init}Init'
-args.notes = f'Learn all. {init} init. importance sampling {args.n_trial_samples}.'
+args.notes = f'Learn all. sd pnlzd.'
 args.scheduler_patience = 80000 #2000
 args.scheduler_threshold = 1e-10 #0.1
 args.scheduler_factor = 0.9
@@ -54,6 +54,7 @@ args.num_epochs = 100000
 args.tau_beta = 8000
 args.tau_config = 10
 args.tau_sigma = 1
+args.tau_sd = 10
 trial_offsets_train_model = None
 trial_offsets_test_model = None
 
@@ -130,8 +131,8 @@ else:
     start_epoch = 0
     args.folder_name = (
         f'dataSeed{args.data_seed}_{args.param_seed}_K{args.K}_A{args.A}_C{args.n_configs}'
-        f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}'
-        f'_iters{args.num_epochs}_BatchSize{args.batch_size}_lr{args.lr}_patience{args.scheduler_patience}'
+        f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauSD{args.tau_sd}'
+        f'_IS{args.n_trial_samples}_iters{args.num_epochs}_BatchSize{args.batch_size}_lr{args.lr}_patience{args.scheduler_patience}'
         f'_factor{args.scheduler_factor}_threshold{args.scheduler_threshold}_notes-{args.notes}')
     output_dir = os.path.join(output_dir, args.folder_name, 'Run_0')
     os.makedirs(output_dir, exist_ok=True)
@@ -147,7 +148,7 @@ else:
                                 config_peak_offsets=data.config_peak_offsets,
                                 trial_peak_offset_covar_ltri=data.trial_peak_offset_covar_ltri,
                                 trial_peak_offset_proposal_means=trial_offsets_train.squeeze(),
-                                trial_peak_offset_proposal_sds=0.3*torch.ones(trial_offsets_train.shape[-1], dtype=torch.float64),
+                                trial_peak_offset_proposal_sds=0.5*torch.ones(trial_offsets_train.shape[-1], dtype=torch.float64),
                                 init='')
     if init == 'Rand':
         model.init_random()
@@ -203,7 +204,7 @@ print(output_str)
 def train_gradient():
     for Y, access in dataloader:
         optimizer.zero_grad()
-        likelihood_term, penalty_term = model.forward(Y, access, args.tau_beta, args.tau_config, args.tau_sigma)
+        likelihood_term, penalty_term = model.forward(Y, access, args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
         loss = -(likelihood_term + penalty_term)
         loss.backward()
         optimizer.step()
@@ -241,7 +242,7 @@ if __name__ == "__main__":
         if epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             model.eval()
             with torch.no_grad():
-                penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma)
+                penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
                 model.generate_trial_peak_offset_samples()
                 likelihood_term_train, model_factor_assignment_train, model_neuron_gains_train, effective_sample_size_train, model_trial_offsets_train = model.evaluate(
                     Y_train, factor_access_train)

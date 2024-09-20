@@ -205,7 +205,7 @@ print(output_str)
 def train_gradient():
     for Y, access in dataloader:
         optimizer.zero_grad()
-        likelihood_term, penalty_term = model.forward(Y, access, args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd, stage)
+        likelihood_term, penalty_term = model.forward(Y, access, args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
         loss = -(likelihood_term + penalty_term)
         loss.backward()
         optimizer.step()
@@ -236,14 +236,10 @@ if __name__ == "__main__":
     offsets_test = []
     total_time = 0
     start_time = time.time()
-    stage = 1
     for epoch in range(start_epoch, start_epoch + args.num_epochs):
         if args.cuda: model.cuda()
         model.train()
-        while stage <= 3:
-            train_gradient()
-            stage += 1
-        stage = 1
+        train_gradient()
         if epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             model.eval()
             with torch.no_grad():

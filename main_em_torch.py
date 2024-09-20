@@ -55,6 +55,7 @@ args.tau_beta = 8000
 args.tau_config = 10
 args.tau_sigma = 1
 args.tau_sd = 10
+sd_init = 0.5
 trial_offsets_train_model = None
 trial_offsets_test_model = None
 
@@ -148,14 +149,14 @@ else:
                                 config_peak_offsets=data.config_peak_offsets,
                                 trial_peak_offset_covar_ltri=data.trial_peak_offset_covar_ltri,
                                 trial_peak_offset_proposal_means=trial_offsets_train.squeeze(),
-                                trial_peak_offset_proposal_sds=0.5*torch.ones(trial_offsets_train.shape[-1], dtype=torch.float64),
+                                trial_peak_offset_proposal_sds=sd_init*torch.ones(trial_offsets_train.shape[-1], dtype=torch.float64),
                                 init='')
     if init == 'Rand':
         model.init_random()
     elif init == 'Zero':
         model.init_zero()
     elif 'Data' in init:
-        model.init_from_data(Y=Y_train, factor_access=factor_access_train, init=the_rest)
+        model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, init=the_rest)
 
     # DELETE: For when I want to partially init to Rand or Zero. Not used for data init, which can already handle the partial init
     # model.init_ground_truth(

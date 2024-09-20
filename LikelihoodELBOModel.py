@@ -131,7 +131,7 @@ class LikelihoodELBOModel(nn.Module):
         spike_ct_sd = torch.sqrt(torch.sum(centered_spike_counts**2, dim=(0,1,3)) / (R * K * C))
         alpha = (avg_spike_counts/spike_ct_sd)**2
         theta = avg_spike_counts/(spike_ct_sd**2)
-        trial_peak_offset_proposal_sds = sd_init * torch.ones(self.n_factors*self.n_areas, dtype=torch.float64)
+        trial_peak_offset_proposal_sds = sd_init * torch.ones(2*self.n_factors, dtype=torch.float64)
         self.init_ground_truth(beta=beta, alpha=alpha, theta=theta,
                                trial_peak_offset_proposal_sds=trial_peak_offset_proposal_sds, init=init)
 
@@ -470,27 +470,7 @@ class LikelihoodELBOModel(nn.Module):
         return neuron_factor_assignment, neuron_firing_rates, effective_sample_size, trial_peak_offsets
 
 
-    def forward(self, Y, neuron_factor_access, tau_beta, tau_config, tau_sigma, tau_sd, stage=1):
-        self.beta.requires_grad = False
-        self.alpha.requires_grad = False
-        self.config_peak_offsets.requires_grad = False
-        self.trial_peak_offset_covar_ltri_diag.requires_grad = False
-        self.trial_peak_offset_covar_ltri_offdiag.requires_grad = False
-        self.trial_peak_offset_proposal_means.requires_grad = False
-        self.trial_peak_offset_proposal_sds.requires_grad = False
-        if stage == 1:
-            # update beta and alpha
-            self.beta.requires_grad = True
-            self.alpha.requires_grad = True
-        elif stage == 2:
-            # update config_peak_offsets and ltri maxtrix
-            self.config_peak_offsets.requires_grad = True
-            self.trial_peak_offset_covar_ltri_diag.requires_grad = True
-            self.trial_peak_offset_covar_ltri_offdiag.requires_grad = True
-        else:
-            # update trial_peak_offset_proposal_means and trial_peak_offset_proposal_sds
-            self.trial_peak_offset_proposal_means.requires_grad = True
-            self.trial_peak_offset_proposal_sds.requires_grad = True
+    def forward(self, Y, neuron_factor_access, tau_beta, tau_config, tau_sigma, tau_sd):
         self.generate_trial_peak_offset_samples()
         warped_factors = self.warp_all_latent_factors_for_all_trials()
         likelihood_term = self.compute_log_elbo(Y, neuron_factor_access, warped_factors)

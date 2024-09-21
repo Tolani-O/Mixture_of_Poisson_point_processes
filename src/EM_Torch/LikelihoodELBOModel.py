@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from src.EM_Torch.general_functions import create_second_diff_matrix, create_first_diff_matrix
 import numpy as np
+import pandas as pd
 
 
 class LikelihoodELBOModel(nn.Module):
@@ -463,6 +464,14 @@ class LikelihoodELBOModel(nn.Module):
     def infer_latent_variables(self):
         # likelihoods # C x K x L
         neuron_factor_assignment = torch.where(self.W_CKL == torch.max(self.W_CKL, dim=-1, keepdim=True).values, 1, 0)
+        C, K, L = torch.where(self.W_CKL == torch.max(self.W_CKL, dim=-1, keepdim=True).values)
+        grouped = pd.DataFrame({
+            'C': C.cpu(),
+            'K': K.cpu(),
+            'L': L.cpu()
+        }).groupby(['C', 'K']).agg({'L': lambda x: np.random.choice(x)}).reset_index()
+        neuron_factor_assignment = torch.zeros_like(self.W_CKL)
+        neuron_factor_assignment[grouped['C'], grouped['K'], grouped['L']] = 1
         neuron_firing_rates = torch.sum(self.a_CKL * neuron_factor_assignment, dim=2)
         effective_sample_size = torch.sum(self.W_CRN**2, dim=-1)**(-1)
         # trial_peak_offset  R x C x 2AL

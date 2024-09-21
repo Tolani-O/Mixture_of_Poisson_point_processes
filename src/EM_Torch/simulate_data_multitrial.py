@@ -57,6 +57,7 @@ class DataAnalyzer:
         # mask = np.tril(np.random.binomial(1, 0.9*np.ones_like(corr)), k=-1)
         # mask = mask + mask.T + np.eye(mask.shape[0])
         cov_scaled = corr * (sdevs_scaled[:, None] * sdevs_scaled[None, :])
+        cov_scaled += np.eye(cov_scaled.shape[0]) * 1e-6
         self.trial_peak_offset_covar_ltri = np.linalg.cholesky(cov_scaled)
         # solely to check if the covariance matrix is positive semi-definite
         # trial_peak_offset_covar_matrix = self.trial_peak_offset_covar_ltri @ self.trial_peak_offset_covar_ltri.T

@@ -19,19 +19,19 @@ if args.param_seed == '':
 args.data_seed = np.random.randint(0, 2 ** 32 - 1)
 outputs_folder = 'outputs'
 
-# args.n_trials = 2  # R
-# args.n_configs = 1  # C
-args.n_trial_samples = 100  # N
+args.n_trials = 15  # R
+args.n_configs = 40  # C
+args.n_trial_samples = 10  # N
 args.K = 100  # K
 # args.intensity_bias = 10
-# args.A = 1  # A
+args.A = 7  # A
 
 
 # args.folder_name = ''
 # args.load = True
 # args.load_epoch = 39999
 # args.load_run = 0
-# args.data_seed = 549775901
+args.data_seed = 3518379454
 
 
 init = 'Data'
@@ -45,7 +45,7 @@ the_rest = 'zeros'
 # args.batch_size = 15
 args.batch_size = 'All'
 args.param_seed = f'{init}Init'
-args.notes = f'Learn all. sd pnlzd.'
+args.notes = f'Learn all. sd pnlzd. 1stg. Asymptotic.'
 args.scheduler_patience = 80000 #2000
 args.scheduler_threshold = 1e-10 #0.1
 args.scheduler_factor = 0.9
@@ -54,7 +54,7 @@ args.num_epochs = 100000
 args.tau_beta = 8000
 args.tau_config = 10
 args.tau_sigma = 1
-args.tau_sd = 10
+args.tau_sd = 5
 sd_init = 0.5
 trial_offsets_train_model = None
 trial_offsets_test_model = None
@@ -184,9 +184,9 @@ else:
                                                            patience=patience, threshold_mode='abs',
                                                            threshold=args.scheduler_threshold)
     create_relevant_files(output_dir, output_str)
-    plot_spikes(Y_train.cpu().numpy(), output_dir, data.dt, 'train')
-    plot_spikes(Y_test.cpu().numpy(), output_dir, data.dt, 'test')
-    plot_intensity_and_latents(data.time, np.exp(data.beta.cpu().numpy()), intensities_train.cpu().numpy(), output_dir)
+    # plot_spikes(Y_train.cpu().numpy(), output_dir, data.dt, 'train')
+    # plot_spikes(Y_test.cpu().numpy(), output_dir, data.dt, 'test')
+    # plot_intensity_and_latents(data.time, np.exp(data.beta.cpu().numpy()), intensities_train.cpu().numpy(), output_dir)
     plot_outputs(model.cpu(), factor_access_train.permute(2, 0, 1).cpu(), output_dir, 'Train', -1,
                  effective_sample_size_train.cpu(), effective_sample_size_test.cpu(),
                  trial_peak_offsets_train.permute(1,0,2).cpu(), trial_peak_offsets_test.permute(1,0,2).cpu())

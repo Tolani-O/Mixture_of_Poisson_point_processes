@@ -128,10 +128,14 @@ class LikelihoodELBOModel(nn.Module):
         beta = torch.log(latent_factors)
         spike_counts = torch.einsum('ktrc,klc->krlc', Y, factor_access)
         avg_spike_counts = torch.sum(spike_counts, dim=(0,1,3)) / (R * torch.sum(factor_access, dim=(0, 2)))
+        print('Average spike counts:')
+        print(avg_spike_counts)
         centered_spike_counts = torch.einsum('krlc,klc->krlc', spike_counts - avg_spike_counts.unsqueeze(0).unsqueeze(1).unsqueeze(3), factor_access)
-        spike_ct_sd = torch.sqrt(torch.sum(centered_spike_counts**2, dim=(0,1,3)) / (R * K * C))
-        alpha = (avg_spike_counts/spike_ct_sd)**2
-        theta = avg_spike_counts/(spike_ct_sd**2)
+        spike_ct_var = torch.sum(centered_spike_counts**2, dim=(0,1,3)) / ((R * torch.sum(factor_access, dim=(0, 2)))-1)
+        print('Spike count variance - Average spike counts:')
+        print(spike_ct_var-avg_spike_counts)
+        alpha = (avg_spike_counts)**2/(spike_ct_var-avg_spike_counts)
+        theta = avg_spike_counts/(spike_ct_var-avg_spike_counts)
         trial_peak_offset_proposal_sds = sd_init * torch.ones(2*self.n_factors, dtype=torch.float64)
         self.init_ground_truth(beta=beta, alpha=alpha, theta=theta,
                                trial_peak_offset_proposal_sds=trial_peak_offset_proposal_sds, init=init)

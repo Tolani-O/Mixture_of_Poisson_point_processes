@@ -8,7 +8,7 @@ import pickle
 
 class EcephysAnalyzer:
 
-    def __init__(self, input_dir='data', output_dir='outputs'):
+    def __init__(self, structure_list=None, input_dir='data', output_dir='outputs'):
         self.unit_ids_and_areas = None
         self.canrun = False
         self.session_to_analyze = None
@@ -23,7 +23,10 @@ class EcephysAnalyzer:
         self.manifest_path = os.path.join(self.input_dir, 'manifest.json')
         self.cache = EcephysProjectCache.from_warehouse(manifest=self.manifest_path)
         self.sessions = self.cache.get_session_table() # each session is a separate mouse experiment
-        self.structure_list = ['VISp', 'VISl', 'VISal', 'VISam', 'VISpm', 'VISrl', 'LGd']
+        if structure_list is None:
+            self.structure_list = ['VISp', 'VISl', 'VISal', 'VISam', 'VISpm', 'VISrl', 'LGd']
+        else:
+            self.structure_list = structure_list
         self.spike_train_start_offset = 0.05
 
     def collate_sessions(self):
@@ -57,6 +60,7 @@ class EcephysAnalyzer:
         self.session_data = self.cache.get_session_data(self.session_to_analyze)
         self.presentations = (self.session_data.get_stimulus_table(['drifting_gratings'])
                               .drop(['contrast', 'phase', 'size', 'spatial_frequency'], axis=1))
+        self.presentations = self.presentations[self.presentations['orientation'] != 'null']
         # SAME FUNCTIONALITY
         # presentations = session_data.stimulus_presentations
         # presentations = presentations[presentations['stimulus_name']. \

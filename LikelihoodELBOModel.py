@@ -7,7 +7,8 @@ import pandas as pd
 
 
 class LikelihoodELBOModel(nn.Module):
-    def __init__(self, time, n_factors, n_areas, n_configs, n_trials, n_trial_samples, spike_train_start_offset=0):
+    def __init__(self, time, n_factors, n_areas, n_configs, n_trials, n_trial_samples,
+                 left_landmark1=0.2, left_landmark2=1.2, landmark_spread=0.5, spike_train_start_offset=0):
         super(LikelihoodELBOModel, self).__init__()
 
         self.device = 'cpu'
@@ -15,11 +16,11 @@ class LikelihoodELBOModel(nn.Module):
         dt = round(time[1] - time[0], 3)
         self.dt = torch.tensor(dt)
         T = time.shape[0]
+        landmark_spread = int(landmark_spread/dt)
         self.spike_train_start_offset = int(spike_train_start_offset/dt)
-        landmark_spread = 50
-        self.left_landmark1 = 20 + self.spike_train_start_offset
+        self.left_landmark1 = int(left_landmark1/dt) + self.spike_train_start_offset
         self.right_landmark1 = self.left_landmark1 + landmark_spread
-        self.left_landmark2 = 120 + self.spike_train_start_offset
+        self.left_landmark2 = int(left_landmark2/dt) + self.spike_train_start_offset
         self.right_landmark2 = self.left_landmark2 + landmark_spread
         self.n_factors = n_factors
         self.n_areas = n_areas
@@ -27,7 +28,6 @@ class LikelihoodELBOModel(nn.Module):
         self.n_configs = n_configs
         self.n_trials = n_trials
         Delta2 = create_second_diff_matrix(T)
-        # Delta2 = create_first_diff_matrix(T)
         self.Delta2TDelta2 = torch.tensor(Delta2.T @ Delta2)  # T x T # tikhonov regularization
 
         # Storage for use in the forward pass
@@ -41,13 +41,11 @@ class LikelihoodELBOModel(nn.Module):
         # Parameters
         self.beta = None  # AL x P
         self.alpha = None  # 1 x AL
-        # self.coupling = None  # 1 x AL
         self.config_peak_offsets = None  # C x 2AL
         self.trial_peak_offset_covar_ltri_diag = None
         self.trial_peak_offset_covar_ltri_offdiag = None
         self.trial_peak_offset_proposal_means = None  # R x C x 2AL
         self.trial_peak_offset_proposal_sds = None  # 2AL
-        # self.smoothness_budget = None  # L x 1
 
 
     def init_random(self):
@@ -134,6 +132,7 @@ class LikelihoodELBOModel(nn.Module):
         print('Spike count variance - Average spike counts:')
         print(spike_ct_var-avg_spike_counts)
         alpha = (avg_spike_counts)**2/(spike_ct_var-avg_spike_counts)
+        alpha = alpha.expm1().clamp_min(1e-6).log()
         theta = avg_spike_counts/(spike_ct_var-avg_spike_counts)
         trial_peak_offset_proposal_sds = sd_init * torch.ones(2*self.n_factors, dtype=torch.float64)
         self.init_ground_truth(beta=beta, alpha=alpha, theta=theta,
@@ -193,7 +192,7 @@ class LikelihoodELBOModel(nn.Module):
         W_L = torch.sum(self.W_CKL, dim=(0, 1))
         # Wa_L  # L
         Wa_L = torch.sum(self.W_CKL * self.a_CKL, dim=(0, 1))
-        theta = self.alpha * (W_L / Wa_L)
+        theta = F.softplus(self.alpha) * (W_L / Wa_L)
         return theta.detach()
 
     def validated_W_CKL(self, W_CKL, neuron_factor_access):

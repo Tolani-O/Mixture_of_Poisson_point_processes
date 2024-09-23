@@ -21,7 +21,7 @@ init = 'Data'
 the_rest = 'zeros'
 args.batch_size = 'All'
 args.param_seed = f'Real_{init}Init'
-args.notes = f'Learn all. {init} init. importance sampling {args.n_trial_samples}. 2 stage reordered. penlzd 10 config'
+args.notes = f'Learn all. 1stg. RealData.'
 args.scheduler_patience = 80000 #2000
 args.scheduler_threshold = 1e-10 #0.1
 args.scheduler_factor = 0.9
@@ -31,13 +31,16 @@ args.tau_beta = 8000
 args.tau_config = 10
 args.tau_sigma = 1
 args.tau_sd = 50
+args.L = 3
 sd_init = 0.5
-trial_offsets_train_model = None
-trial_offsets_test_model = None
 
+regions = ['VISp', 'VISl', 'VISal', 'VISam', 'VISpm', 'VISrl', 'LGd']
+conditions = None
 regions = ['VISp', 'VISl']
 conditions = [246, 251]
 
+if args.eval_interval > args.log_interval:
+    args.log_interval = args.eval_interval
 # outputs_folder = '../../outputs'
 print('Start\n\n')
 output_dir = os.path.join(os.getcwd(), outputs_folder)
@@ -60,57 +63,46 @@ if Y_train is None:
     # data.plot_presentations_times()
     # data.plot_spike_times(regions='VISp', conditions=246)
     # data.plot_spike_counts()
-    Y_train, bin_time, factor_access_train, spike_time_info = data.sample_data(regions=regions, conditions=conditions, end_time=0.5, num_factors=3)
+    Y_train, bin_time, factor_access_train, spike_time_info = data.sample_data(regions=regions, conditions=conditions, end_time=0.5, num_factors=args.L)
     data.save_sample(Y_train, bin_time, factor_access_train, spike_time_info, 'sample_data.pkl')
+print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')
 Y_train, factor_access_train = load_tensors((Y_train, factor_access_train), args.cuda)
 
 args.K, T, args.n_trials, args.n_configs = Y_train.shape
 num_factors = factor_access_train.shape[1]
-args.A = len(regions)
+args.A = int(num_factors/args.L)
 args.n_trial_samples = 10  # N
-model = LikelihoodELBOModel(bin_time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples, data.spike_train_start_offset)
-
+model = LikelihoodELBOModel(bin_time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
+                            left_landmark1=0.01, left_landmark2=0.21, landmark_spread=0.18,
+                            spike_train_start_offset=data.spike_train_start_offset)
+# Initialize the model
+model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, init=the_rest)
 if args.cuda: model.cuda()
 model.eval()
+with (torch.no_grad()):
+    model.generate_trial_peak_offset_samples()
+    _, _, _, effective_sample_size_train, trial_peak_offsets_train = model.evaluate(Y_train, factor_access_train)
 
 output_str = f"Using CUDA: {torch.cuda.is_available()}\n"
 patience = args.scheduler_patience//args.eval_interval
-if args.load:
-    start_epoch = args.load_epoch + 1
-    output_dir = os.path.join(output_dir, args.folder_name, f'Run_{args.load_run}')
-    model_state, optimizer_state, scheduler_state = load_model_checkpoint(output_dir, args.load_epoch)
-    model.load_state_dict(model_state)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    optimizer.load_state_dict(optimizer_state)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=args.scheduler_factor,
-                                                           patience=patience, threshold_mode='abs',
-                                                           threshold=args.scheduler_threshold)
-    scheduler.load_state_dict(scheduler_state)
-else:
-    start_epoch = 0
-    args.folder_name = (
-        f'dataSeed{args.data_seed}_{args.param_seed}_K{args.K}_A{args.A}_C{args.n_configs}'
-        f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauSD{args.tau_sd}'
-        f'_IS{args.n_trial_samples}_iters{args.num_epochs}_BatchSize{args.batch_size}_lr{args.lr}_patience{args.scheduler_patience}'
-        f'_factor{args.scheduler_factor}_threshold{args.scheduler_threshold}_notes-{args.notes}')
-    output_dir = os.path.join(output_dir, args.folder_name, 'Run_0')
-    os.makedirs(output_dir, exist_ok=True)
-    # Initialize the model
-    model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, init=the_rest)
-    with (torch.no_grad()):
-        model.generate_trial_peak_offset_samples()
-        _, _, _, effective_sample_size_train, trial_peak_offsets_train = model.evaluate(Y_train, factor_access_train)
-
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
-                                                           factor=args.scheduler_factor,
-                                                           patience=patience, threshold_mode='abs',
-                                                           threshold=args.scheduler_threshold)
-    create_relevant_files(output_dir, output_str)
-    plot_spikes(Y_train.cpu().numpy(), output_dir, model.dt.item(), 'train')
-    plot_outputs(model.cpu(), factor_access_train.permute(2, 0, 1).cpu(), output_dir, 'Train', -1,
-                 effective_sample_size_train.cpu(), effective_sample_size_train.cpu(),
-                 trial_peak_offsets_train.permute(1,0,2).cpu(), trial_peak_offsets_train.permute(1,0,2).cpu())
+start_epoch = 0
+args.folder_name = (
+    f'dataSeed{args.data_seed}_{args.param_seed}_K{args.K}_A{args.A}_C{args.n_configs}'
+    f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauSD{args.tau_sd}'
+    f'_IS{args.n_trial_samples}_iters{args.num_epochs}_BatchSize{args.batch_size}_lr{args.lr}_patience{args.scheduler_patience}'
+    f'_factor{args.scheduler_factor}_threshold{args.scheduler_threshold}_notes-{args.notes}')
+output_dir = os.path.join(output_dir, args.folder_name, 'Run_0')
+os.makedirs(output_dir, exist_ok=True)
+optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
+                                                       factor=args.scheduler_factor,
+                                                       patience=patience, threshold_mode='abs',
+                                                       threshold=args.scheduler_threshold)
+create_relevant_files(output_dir, output_str)
+plot_spikes(Y_train.cpu().numpy(), output_dir, model.dt.item(), 'train')
+plot_outputs(model.cpu(), factor_access_train.permute(2, 0, 1).cpu(), output_dir, 'Train', -1,
+             effective_sample_size_train.cpu(), effective_sample_size_train.cpu(),
+             trial_peak_offsets_train.permute(1,0,2).cpu(), trial_peak_offsets_train.permute(1,0,2).cpu())
 
 # Instantiate the dataset and dataloader
 dataset = CustomDataset(Y_train, factor_access_train)

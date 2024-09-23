@@ -56,10 +56,9 @@ args.tau_config = 10
 args.tau_sigma = 1
 args.tau_sd = 5
 sd_init = 0.5
-trial_offsets_train_model = None
-trial_offsets_test_model = None
 
-
+if args.eval_interval > args.log_interval:
+    args.log_interval = args.eval_interval
 # outputs_folder = '../../outputs'
 print('Start\n\n')
 output_dir = os.path.join(os.getcwd(), outputs_folder)

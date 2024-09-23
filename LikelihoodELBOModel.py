@@ -7,7 +7,7 @@ import pandas as pd
 
 
 class LikelihoodELBOModel(nn.Module):
-    def __init__(self, time, n_factors, n_areas, n_configs, n_trials, n_trial_samples):
+    def __init__(self, time, n_factors, n_areas, n_configs, n_trials, n_trial_samples, spike_train_start_offset=0):
         super(LikelihoodELBOModel, self).__init__()
 
         self.device = 'cpu'
@@ -15,12 +15,11 @@ class LikelihoodELBOModel(nn.Module):
         dt = round(time[1] - time[0], 3)
         self.dt = torch.tensor(dt)
         T = time.shape[0]
+        self.spike_train_start_offset = int(spike_train_start_offset/dt)
         landmark_spread = 50
-        self.left_landmark1 = 20
-        self.mid_landmark1 = self.left_landmark1 + landmark_spread / 2
+        self.left_landmark1 = 20 + self.spike_train_start_offset
         self.right_landmark1 = self.left_landmark1 + landmark_spread
-        self.left_landmark2 = 120
-        self.mid_landmark2 = self.left_landmark2 + landmark_spread / 2
+        self.left_landmark2 = 120 + self.spike_train_start_offset
         self.right_landmark2 = self.left_landmark2 + landmark_spread
         self.n_factors = n_factors
         self.n_areas = n_areas
@@ -260,7 +259,7 @@ class LikelihoodELBOModel(nn.Module):
 
     def compute_warped_times(self, avg_peak_times, left_landmarks, right_landmarks, trial_peak_times):
         landmark_spead = self.right_landmark1 - self.left_landmark1
-        left_shifted_time = torch.arange(0, self.time[landmark_spead], self.dt)
+        left_shifted_time = self.time[self.spike_train_start_offset:landmark_spead+self.spike_train_start_offset]
         left_shifted_peak_times = trial_peak_times - left_landmarks
         right_shifted_peak_times = trial_peak_times - right_landmarks
         left_slope = (avg_peak_times - left_landmarks) / left_shifted_peak_times

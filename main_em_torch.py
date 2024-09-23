@@ -184,8 +184,8 @@ else:
                                                            patience=patience, threshold_mode='abs',
                                                            threshold=args.scheduler_threshold)
     create_relevant_files(output_dir, output_str)
-    # plot_spikes(Y_train.cpu().numpy(), output_dir, data.dt, 'train')
-    # plot_spikes(Y_test.cpu().numpy(), output_dir, data.dt, 'test')
+    # plot_spikes(Y_train.cpu().numpy(), output_dir, model.dt.item(), 'train')
+    # plot_spikes(Y_test.cpu().numpy(), output_dir, model.dt.item(), 'test')
     # plot_intensity_and_latents(data.time, np.exp(data.beta.cpu().numpy()), intensities_train.cpu().numpy(), output_dir)
     plot_outputs(model.cpu(), factor_access_train.permute(2, 0, 1).cpu(), output_dir, 'Train', -1,
                  effective_sample_size_train.cpu(), effective_sample_size_test.cpu(),

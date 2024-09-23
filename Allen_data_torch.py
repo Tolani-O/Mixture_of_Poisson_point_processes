@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from allensdk.brain_observatory.ecephys.ecephys_project_cache import EcephysProjectCache
+import pickle
 
 
 class EcephysAnalyzer:
@@ -100,14 +101,14 @@ class EcephysAnalyzer:
                               .nunique().reset_index(name='num_units'))
         print('Getting spike counts for session: ', self.session_to_analyze)
         time_bin_edges = np.linspace(-self.spike_train_start_offset, 2, 2050)  # 2050 edges, 2049 bins
-        # Dimensions: (stimulus_presentation_id, time_bin, unit_id)
+        # Dimensions: (stimulus_presentation_id, time_relative_to_stimulus_onset, unit_id)
         self.drifting_gratings_spike_counts = self.session_data.presentationwise_spike_counts(
             stimulus_presentation_ids=self.presentations.index.values,
             bin_edges=time_bin_edges,
             unit_ids=self.unit_ids_and_areas['unit_id'])
         #return self.session_to_analyze
 
-    def filter_spike_times(self, unit_ids, presentation_ids, regions, conditions):
+    def filter_spike_times(self, unit_ids, presentation_ids, regions, conditions, unit_as_index=True):
         if isinstance(unit_ids, int):
             unit_ids = [unit_ids]
         if isinstance(presentation_ids, int):
@@ -122,14 +123,17 @@ class EcephysAnalyzer:
         elif conditions is not None:
             data = data[data['stimulus_condition_id'].isin(conditions)]
         if unit_ids is not None:
-            unit_ids_for_index = self.unit_ids_and_areas[
-                self.unit_ids_and_areas['unit_id_int'].isin(unit_ids)]['unit_id'].values
+            if unit_as_index:
+                unit_ids_for_index = self.unit_ids_and_areas[
+                    self.unit_ids_and_areas['unit_id_int'].isin(unit_ids)]['unit_id'].values
+            else:
+                unit_ids_for_index = unit_ids
             data = data[data['unit_id'].isin(unit_ids_for_index)]
         elif regions is not None:
             data = data[data['ecephys_structure_acronym'].isin(regions)]
         return data
 
-    def filter_spike_counts(self, unit_ids, presentation_ids, regions, conditions):
+    def filter_spike_counts(self, unit_ids, presentation_ids, regions, conditions, unit_as_index=True):
         if isinstance(unit_ids, int):
             unit_ids = [unit_ids]
         if isinstance(presentation_ids, int):
@@ -146,8 +150,11 @@ class EcephysAnalyzer:
                 self.presentations['stimulus_condition_id'].isin(conditions)].index.values
             data = data.sel(stimulus_presentation_id=presentation_ids_for_condition)
         if unit_ids is not None:
-            unit_ids_for_index = self.unit_ids_and_areas[
-                self.unit_ids_and_areas['unit_id_int'].isin(unit_ids)]['unit_id'].values
+            if unit_as_index:
+                unit_ids_for_index = self.unit_ids_and_areas[
+                    self.unit_ids_and_areas['unit_id_int'].isin(unit_ids)]['unit_id'].values
+            else:
+                unit_ids_for_index = unit_ids
             data = data.sel(unit_id=unit_ids_for_index)
         elif regions is not None:
             unit_ids_for_region = self.unit_ids_and_areas[
@@ -177,7 +184,7 @@ class EcephysAnalyzer:
 
         data = self.filter_spike_times(conditions, presentation_ids, regions, unit_ids)
 
-        data['stimulus_presentation_id'] = data['stimulus_presentation_id'].astype(str)
+        data.loc[:, 'stimulus_presentation_id'] = data['stimulus_presentation_id'].astype(str)
         data.plot(x='time_since_stimulus_presentation_onset', y='stimulus_presentation_id', kind='scatter', s=1, yticks=[])
         plt.show()
 
@@ -210,18 +217,45 @@ class EcephysAnalyzer:
             plt.xlabel('Time relative to stimulus onset')
             # Save the plot to output_dir
             fig.savefig(os.path.join(self.output_dir, f'columns_{i + 1}-{i + per_plot}.png'))
+            plt.close(fig)
 
-    def sample_data(self, unit_ids=None, presentation_ids=None, regions=None, conditions=None, end_time=0.5):
+    def sample_data(self, unit_ids=None, presentation_ids=None, regions=None, conditions=None, end_time=0.5, num_factors=3):
 
-        spike_time_info = self.filter_spike_times(unit_ids, presentation_ids, regions, conditions)
+        spike_time_info = self.filter_spike_times(unit_ids, presentation_ids, regions, conditions) # these have those units that did not fire within 0.5 seconds of stimulus onset filtered out
+        C = spike_time_info['stimulus_condition_id'].unique().shape[0]
+        A = spike_time_info['ecephys_structure_acronym'].unique().shape[0]
         spike_time_info = spike_time_info[spike_time_info['time_since_stimulus_presentation_onset']<=end_time]
         times_data_units = spike_time_info['unit_id'].unique()
-        count_data = self.filter_spike_counts(unit_ids, presentation_ids, regions, conditions)
-        count_data = count_data.to_dataframe(name='spike_counts').pivot_table(index='time_relative_to_stimulus_onset',
-                                                                              columns='unit_id', values='spike_counts')
-        count_data = count_data[times_data_units].iloc[:((end_time+self.spike_train_start_offset)*1000), :]
-        time = count_data.index.values
-        return count_data.to_numpy().T, time, spike_time_info
+        count_data = self.filter_spike_counts(times_data_units, presentation_ids, regions, conditions,  unit_as_index=False)
+        count_data = count_data.where(count_data['time_relative_to_stimulus_onset']<=end_time, drop=True)
+        time = count_data['time_relative_to_stimulus_onset'].values
+        # Y # K x T x R x C
+        Y = count_data.to_numpy().T
+        Y = Y.reshape(*Y.shape[:2], -1, C)
+        # neuron_factor_access # K x L x C
+        neuron_factor_access = np.zeros((Y.shape[0], num_factors*A, C))
+        unit_areas = self.unit_ids_and_areas[self.unit_ids_and_areas['unit_id'].isin(count_data['unit_id'].values)]['ecephys_structure_acronym'].values
+        unique_regions = np.unique(unit_areas)
+        for idx, region in enumerate(unique_regions):
+            area_start_indx = idx * num_factors
+            neuron_factor_access[np.where(unit_areas==region), area_start_indx:(area_start_indx + num_factors), :] = 1
+        return Y, time, neuron_factor_access, spike_time_info
+
+
+    def save_sample(self, Y, time, neuron_factor_access, spike_time_info, filename):
+        print('Saving sample to: ', os.path.join(self.output_dir, filename))
+        with open(os.path.join(self.output_dir, filename), 'wb') as f:
+            pickle.dump({'Y': Y, 'time': time, 'neuron_factor_access': neuron_factor_access, 'spike_time_info': spike_time_info}, f)
+
+
+    def load_sample(self, filename):
+        if not os.path.exists(os.path.join(self.output_dir, filename)):
+            print('File not found: ', os.path.join(self.output_dir, filename))
+            return None, None, None, None
+        print('Loading sample from: ', os.path.join(self.output_dir, filename))
+        with open(os.path.join(self.output_dir, filename), 'rb') as f:
+            data = pickle.load(f)
+        return data['Y'], data['time'], data['neuron_factor_access'], data['spike_time_info']
 
 
     def plot_spikes_from_spike_time_info(self, spike_time_info):

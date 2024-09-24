@@ -120,7 +120,7 @@ class LikelihoodELBOModel(nn.Module):
         # factor_access  # K x L x C
         K, T, R, C = Y.shape
         summed_neurons = torch.einsum('ktrc,klc->lt', Y, factor_access)
-        latent_factors = summed_neurons + torch.sum(factor_access, dim=(0, 2)).unsqueeze(1) * torch.rand(self.n_factors, T)
+        latent_factors = summed_neurons #+ torch.sum(factor_access, dim=(0, 2)).unsqueeze(1) * torch.rand(self.n_factors, T)
         latent_factors = latent_factors / torch.sum(latent_factors, dim=-1, keepdim=True)
         beta = torch.log(latent_factors)
         spike_counts = torch.einsum('ktrc,klc->krlc', Y, factor_access)

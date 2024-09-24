@@ -8,7 +8,8 @@ import pickle
 
 class EcephysAnalyzer:
 
-    def __init__(self, structure_list=None, input_dir='data', output_dir='outputs'):
+    def __init__(self, structure_list=None, input_dir='data', output_dir='outputs',
+                 spike_train_start_offset=0, spike_train_end=0.5):
         self.unit_ids_and_areas = None
         self.canrun = False
         self.session_to_analyze = None
@@ -16,6 +17,7 @@ class EcephysAnalyzer:
         self.presentations = None
         self.presentations_count = None
         self.drifting_gratings_spike_times = None
+        self.drifting_gratings_spike_counts = None
         self.region_counts = None
         self.pivoted_df = None
         self.output_dir = output_dir
@@ -27,7 +29,10 @@ class EcephysAnalyzer:
             self.structure_list = ['VISp', 'VISl', 'VISal', 'VISam', 'VISpm', 'VISrl', 'LGd']
         else:
             self.structure_list = structure_list
-        self.spike_train_start_offset = 0.05
+        self.spike_train_start_offset = spike_train_start_offset
+        self.spike_train_end = spike_train_end
+        self.dt = 0.001
+
 
     def collate_sessions(self):
         all_units_with_metrics = self.cache.get_unit_analysis_metrics_by_session_type('brain_observatory_1.1')
@@ -47,7 +52,7 @@ class EcephysAnalyzer:
         self.pivoted_df = pd.pivot_table(summary, index='ecephys_session_id', columns='ecephys_structure_acronym',
                                          values='count')
         self.canrun = True
-        #return self.pivoted_df
+
 
     def get_best_session(self, session_to_analyze=None):
         if not self.canrun:
@@ -60,7 +65,7 @@ class EcephysAnalyzer:
         self.session_data = self.cache.get_session_data(self.session_to_analyze)
         self.presentations = (self.session_data.get_stimulus_table(['drifting_gratings'])
                               .drop(['contrast', 'phase', 'size', 'spatial_frequency'], axis=1))
-        self.presentations = self.presentations[self.presentations['orientation'] != 'null']
+        self.presentations = self.presentations[self.presentations['orientation'] != 'null'].sort_values('stimulus_condition_id')
         # SAME FUNCTIONALITY
         # presentations = session_data.stimulus_presentations
         # presentations = presentations[presentations['stimulus_name']. \
@@ -69,8 +74,9 @@ class EcephysAnalyzer:
         presentations_count = self.presentations.groupby(['stimulus_name', 'stimulus_condition_id']). \
             size().reset_index(name='num_trials')
         conditions = self.session_data.stimulus_conditions
-        conditions = conditions[conditions['stimulus_name'].isin(['drifting_gratings'])]
+        conditions = conditions[conditions['stimulus_name'] == 'drifting_gratings']
         conditions = conditions.drop(conditions.columns[conditions.eq('null').all()], axis=1)
+        conditions = conditions[conditions['orientation'] != 'null']
         conditions = conditions.drop(['contrast', 'mask', 'opacity', 'phase', 'size',
                                       'spatial_frequency', 'units', 'color_triplet',
                                       'stimulus_name'], axis=1)
@@ -78,24 +84,24 @@ class EcephysAnalyzer:
         self.presentations_count = presentations_count.merge(conditions, left_on='stimulus_condition_id',
                                                              right_index=True)
         print('Getting spike times for session: ', self.session_to_analyze)
-        drifting_gratings_spike_times = self.session_data.presentationwise_spike_times(
-            stimulus_presentation_ids=self.presentations.index.values).reset_index()
-        drifting_gratings_spike_times_count = (
-            drifting_gratings_spike_times.groupby(['unit_id', 'stimulus_presentation_id'])
-            .size().reset_index(name='unit_spike_count_on_trial'))
-        # select all units with more than 10 spikes over the course of the trial
-        drifting_gratings_spike_times_count = drifting_gratings_spike_times_count[
-            drifting_gratings_spike_times_count['unit_spike_count_on_trial'] > 10]
-        # select the minimum time since stimulus presentation onset for each unit_id, stimulus_presentation_id pair
-        unit_time_of_first_spike = (drifting_gratings_spike_times.groupby(['unit_id', 'stimulus_presentation_id'])
+        drifting_gratings_spike_times = self.session_data.presentationwise_spike_times(stimulus_presentation_ids=self.presentations.index.values).reset_index()
+        stop = self.spike_train_end + self.dt
+        # select only spikes that happen before stop
+        drifting_gratings_spike_times = drifting_gratings_spike_times[drifting_gratings_spike_times['time_since_stimulus_presentation_onset'] < stop]
+        drifting_gratings_spike_times_count = drifting_gratings_spike_times.groupby('unit_id').size().reset_index(name='unit_spike_count_across_trials')
+        # select all unit-trials with more than 5 spikes over the course of the trial
+        drifting_gratings_spike_times_count = drifting_gratings_spike_times_count[drifting_gratings_spike_times_count['unit_spike_count_across_trials'] > 0]
+        # compute the minimum time since stimulus presentation onset for each unit_id, stimulus_presentation_id pair
+        unit_time_of_first_spike = (drifting_gratings_spike_times.groupby('unit_id')
                                     .apply(lambda x: x['time_since_stimulus_presentation_onset'].min())
                                     .reset_index(name='unit_time_of_first_spike'))
-        # select units that started firing within 0.5 seconds of stimulus presentation onset
-        unit_time_of_first_spike = unit_time_of_first_spike[unit_time_of_first_spike['unit_time_of_first_spike'] < 0.5]
+        # select unit-trials where the first spike occurs within (stop/1.5) seconds of stimulus presentation onset
+        unit_time_of_first_spike = unit_time_of_first_spike[unit_time_of_first_spike['unit_time_of_first_spike'] < (stop/1.1)]
         # select the rows in the spike_times table where both the unit_id and stimulus_presentation_id are in the spike_times_count table
+        # drifting_gratings_spike_times restricts the session. unit_ids_and_areas restricts the regions. The other two tables restrict (exceptionally bad) units.
         self.drifting_gratings_spike_times = drifting_gratings_spike_times.merge(
-            drifting_gratings_spike_times_count, on=['unit_id', 'stimulus_presentation_id']).merge(
-            unit_time_of_first_spike, on=['unit_id', 'stimulus_presentation_id']).merge(
+            drifting_gratings_spike_times_count, on='unit_id').merge(
+            unit_time_of_first_spike, on='unit_id').merge(
             self.presentations, on='stimulus_presentation_id').merge(
             self.unit_ids_and_areas, on='unit_id')
         self.unit_ids_and_areas = self.drifting_gratings_spike_times[['unit_id', 'ecephys_structure_acronym']].drop_duplicates()
@@ -104,13 +110,15 @@ class EcephysAnalyzer:
         self.region_counts = (self.drifting_gratings_spike_times.groupby('ecephys_structure_acronym')['unit_id']
                               .nunique().reset_index(name='num_units'))
         print('Getting spike counts for session: ', self.session_to_analyze)
-        time_bin_edges = np.linspace(-self.spike_train_start_offset, 2, 2050)  # 2050 edges, 2049 bins
+        num = int((stop+self.spike_train_start_offset)/self.dt)
+        time_bin_edges = np.linspace(-self.spike_train_start_offset, stop, num)  # 2050 edges, 2049 bins
         # Dimensions: (stimulus_presentation_id, time_relative_to_stimulus_onset, unit_id)
+        # This will select all trials for each unit, so the fitering we did earlier was really to remove really bad units
         self.drifting_gratings_spike_counts = self.session_data.presentationwise_spike_counts(
             stimulus_presentation_ids=self.presentations.index.values,
             bin_edges=time_bin_edges,
             unit_ids=self.unit_ids_and_areas['unit_id'])
-        #return self.session_to_analyze
+
 
     def filter_spike_times(self, unit_ids, presentation_ids, regions, conditions, unit_as_index=True):
         if isinstance(unit_ids, int):
@@ -223,15 +231,14 @@ class EcephysAnalyzer:
             fig.savefig(os.path.join(self.output_dir, f'columns_{i + 1}-{i + per_plot}.png'))
             plt.close(fig)
 
-    def sample_data(self, unit_ids=None, presentation_ids=None, regions=None, conditions=None, end_time=0.5, num_factors=3):
+    def sample_data(self, unit_ids=None, presentation_ids=None, regions=None, conditions=None, num_factors=3):
 
-        spike_time_info = self.filter_spike_times(unit_ids, presentation_ids, regions, conditions) # these have those units that did not fire within 0.5 seconds of stimulus onset filtered out
-        C = spike_time_info['stimulus_condition_id'].unique().shape[0]
+        spike_time_info = self.filter_spike_times(unit_ids, presentation_ids, regions, conditions) # these have only those units that fired within 0.5 seconds of stimulus onset, and for those, it keeps the trials where the unit has more than 10 spikes over the course of the trial.
+        relevant_conditions = spike_time_info['stimulus_condition_id'].unique()
+        C = relevant_conditions.shape[0]
         A = spike_time_info['ecephys_structure_acronym'].unique().shape[0]
-        spike_time_info = spike_time_info[spike_time_info['time_since_stimulus_presentation_onset']<=end_time]
         times_data_units = spike_time_info['unit_id'].unique()
-        count_data = self.filter_spike_counts(times_data_units, presentation_ids, regions, conditions,  unit_as_index=False)
-        count_data = count_data.where(count_data['time_relative_to_stimulus_onset']<=end_time, drop=True)
+        count_data = self.filter_spike_counts(times_data_units, presentation_ids, regions, relevant_conditions, unit_as_index=False)
         time = count_data['time_relative_to_stimulus_onset'].values
         # Y # K x T x R x C
         Y = count_data.to_numpy().T

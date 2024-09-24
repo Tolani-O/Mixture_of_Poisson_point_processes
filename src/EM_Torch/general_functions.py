@@ -467,7 +467,7 @@ def plot_losses(true_likelihood, output_dir, name, metric, cutoff=0):
 
 
 def load_tensors(numpys, is_cuda):
-    tensors = [torch.tensor(numpy) for numpy in numpys]
+    tensors = [torch.tensor(numpy, dtype=torch.float64) for numpy in numpys]
     if is_cuda:
         return tuple([tensor.cuda() for tensor in tensors])
     else:

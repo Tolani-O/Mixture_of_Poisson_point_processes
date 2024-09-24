@@ -34,10 +34,10 @@ args.tau_sd = 50
 args.L = 3
 sd_init = 0.5
 
-regions = ['VISp', 'VISl', 'VISal', 'VISam', 'VISpm', 'VISrl', 'LGd']
+regions = None #  ['VISp', 'VISl', 'VISal', 'VISrl']
 conditions = None
-regions = ['VISp', 'VISl']
-conditions = [246, 251]
+# regions = ['VISp', 'VISl']
+# conditions = [246, 251]
 
 if args.eval_interval > args.log_interval:
     args.log_interval = args.eval_interval
@@ -55,16 +55,18 @@ if torch.cuda.is_available():
 else:
     args.cuda = False
 
-data = EcephysAnalyzer()
+data = EcephysAnalyzer(structure_list=regions, spike_train_start_offset=0, spike_train_end=0.5)
 # Training data
-Y_train, bin_time, factor_access_train, spike_time_info = data.load_sample('sample_data.pkl')
+region_ct = len(regions) if regions is not None else 7
+file_name = f'sample_data_{region_ct}_regions.pkl'
+Y_train, bin_time, factor_access_train, spike_time_info = data.load_sample(file_name)
 if Y_train is None:
     data.initialize()
     # data.plot_presentations_times()
     # data.plot_spike_times(regions='VISp', conditions=246)
     # data.plot_spike_counts()
-    Y_train, bin_time, factor_access_train, spike_time_info = data.sample_data(regions=regions, conditions=conditions, end_time=0.5, num_factors=args.L)
-    data.save_sample(Y_train, bin_time, factor_access_train, spike_time_info, 'sample_data.pkl')
+    Y_train, bin_time, factor_access_train, spike_time_info = data.sample_data(conditions=conditions, num_factors=args.L)
+    data.save_sample(Y_train, bin_time, factor_access_train, spike_time_info, file_name)
 print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')
 Y_train, factor_access_train = load_tensors((Y_train, factor_access_train), args.cuda)
 
@@ -99,7 +101,7 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
                                                        patience=patience, threshold_mode='abs',
                                                        threshold=args.scheduler_threshold)
 create_relevant_files(output_dir, output_str)
-plot_spikes(Y_train.cpu().numpy(), output_dir, model.dt.item(), 'train')
+# plot_spikes(Y_train.cpu().numpy(), output_dir, model.dt.item(), 'train')
 plot_outputs(model.cpu(), factor_access_train.permute(2, 0, 1).cpu(), output_dir, 'Train', -1,
              effective_sample_size_train.cpu(), effective_sample_size_train.cpu(),
              trial_peak_offsets_train.permute(1,0,2).cpu(), trial_peak_offsets_train.permute(1,0,2).cpu())

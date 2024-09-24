@@ -34,7 +34,7 @@ args.tau_sd = 50
 args.L = 3
 sd_init = 0.5
 
-regions = None #  ['VISp', 'VISl', 'VISal', 'VISrl']
+regions = ['VISp', 'VISl', 'VISal', 'VISam', 'VISpm', 'VISrl', 'LGd']
 conditions = None
 # regions = ['VISp', 'VISl']
 # conditions = [246, 251]
@@ -55,18 +55,18 @@ if torch.cuda.is_available():
 else:
     args.cuda = False
 
-data = EcephysAnalyzer(structure_list=regions, spike_train_start_offset=0, spike_train_end=0.5)
+data = EcephysAnalyzer(structure_list=regions, spike_train_start_offset=0, spike_train_end=0.35)
 # Training data
 region_ct = len(regions) if regions is not None else 7
-file_name = f'sample_data_{region_ct}_regions.pkl'
-Y_train, bin_time, factor_access_train, spike_time_info = data.load_sample(file_name)
+folder_name = f'sample_data_{region_ct}_regions'
+Y_train, bin_time, factor_access_train, spike_time_info = data.load_sample(folder_name)
 if Y_train is None:
     data.initialize()
-    # data.plot_presentations_times()
-    # data.plot_spike_times(regions='VISp', conditions=246)
-    # data.plot_spike_counts()
+    data.plot_presentations_times(folder_name)
+    data.plot_spike_times(folder_name)
+    data.plot_spike_counts(folder_name)
     Y_train, bin_time, factor_access_train, spike_time_info = data.sample_data(conditions=conditions, num_factors=args.L)
-    data.save_sample(Y_train, bin_time, factor_access_train, spike_time_info, file_name)
+    data.save_sample(Y_train, bin_time, factor_access_train, spike_time_info, folder_name)
 print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')
 Y_train, factor_access_train = load_tensors((Y_train, factor_access_train), args.cuda)
 
@@ -75,7 +75,7 @@ num_factors = factor_access_train.shape[1]
 args.A = int(num_factors/args.L)
 args.n_trial_samples = 10  # N
 model = LikelihoodELBOModel(bin_time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
-                            left_landmark1=0.01, left_landmark2=0.21, landmark_spread=0.18,
+                            left_landmark1=0.03, left_landmark2=0.15, landmark_spread=0.12,
                             spike_train_start_offset=data.spike_train_start_offset)
 # Initialize the model
 model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, init=the_rest)

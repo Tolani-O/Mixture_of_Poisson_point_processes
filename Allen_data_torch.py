@@ -20,7 +20,7 @@ class EcephysAnalyzer:
         self.drifting_gratings_spike_counts = None
         self.region_counts = None
         self.pivoted_df = None
-        self.output_dir = output_dir
+        self.output_dir = os.path.join(output_dir, 'metadata')
         self.input_dir = input_dir
         self.manifest_path = os.path.join(self.input_dir, 'manifest.json')
         self.cache = EcephysProjectCache.from_warehouse(manifest=self.manifest_path)
@@ -179,7 +179,11 @@ class EcephysAnalyzer:
         self.get_best_session()
         return self
 
-    def plot_presentations_times(self):
+    def plot_presentations_times(self, save_dir):
+
+        save_dir = os.path.join(self.output_dir, save_dir)
+        os.makedirs(save_dir, exist_ok=True)
+
         x_err = [self.presentations['duration'] / 2, self.presentations['duration'] / 2]
         plt.errorbar(self.presentations['start_time'] + x_err[0],
                      self.presentations['stimulus_name'],
@@ -190,33 +194,41 @@ class EcephysAnalyzer:
         plt.yticks([])
         plt.ylabel('Drifting Gratings')
         # Show the plot
-        plt.show()
+        plt.savefig(os.path.join(save_dir, 'presentation_times.png'))
+        plt.close()
 
-    def plot_spike_times(self, unit_ids=None, presentation_ids=None, regions=None, conditions=None):
+    def plot_spike_times(self, save_dir, unit_ids=None, presentation_ids=None, regions=None, conditions=None):
 
-        data = self.filter_spike_times(conditions, presentation_ids, regions, unit_ids)
+        save_dir = os.path.join(self.output_dir, save_dir)
+        os.makedirs(save_dir, exist_ok=True)
 
-        data.loc[:, 'stimulus_presentation_id'] = data['stimulus_presentation_id'].astype(str)
-        data.plot(x='time_since_stimulus_presentation_onset', y='stimulus_presentation_id', kind='scatter', s=1, yticks=[])
-        plt.show()
+        data = self.filter_spike_times(conditions, presentation_ids, regions, unit_ids).sort_values(['stimulus_presentation_id', 'unit_id', 'time_since_stimulus_presentation_onset'])
 
-    def plot_spike_counts(self, unit_ids=None, presentation_ids=None, regions=None, conditions=None, stop_time=0.5):
+        data.loc[:, 'y_axis'] = data['stimulus_presentation_id'].astype(str) + '_' + data['unit_id'].astype(str)
+        data.plot(x='time_since_stimulus_presentation_onset', y='y_axis', kind='scatter', s=1, yticks=[])
+        plt.xlabel('Time since stimulus onset')
+        plt.ylabel('Units grouped by trials')
+        plt.savefig(os.path.join(save_dir, 'spike_times.png'))
+        plt.close()
+
+    def plot_spike_counts(self, save_dir, unit_ids=None, presentation_ids=None, regions=None, conditions=None):
+
+        save_dir = os.path.join(self.output_dir, save_dir)
+        os.makedirs(save_dir, exist_ok=True)
 
         data = self.filter_spike_counts(unit_ids, presentation_ids, regions, conditions)
 
         # sum over the stimulus_presentation_id dimension anc convert to dataframe
         data = (data.sum(dim='stimulus_presentation_id').to_dataframe(name='spike_counts')
                 .pivot_table(index='time_relative_to_stimulus_onset', columns='unit_id', values='spike_counts'))
-        # Select only units for which the maximum value is greater than 2
-        stop_time = int((stop_time * 1000) + self.spike_train_start_offset*1000)
-        data = data.loc[:stop_time, data.max() > 2]
+        data = data.loc[:, data.sum().sort_values(ascending=False).index.values]
 
         # Iterate over sets of {per_plot} columns (units) and save to output folder
         c = data.shape[1]
         per_plot = 10
         for i in range(0, c, per_plot):
             # Select the next set of 10 columns
-            a_subset = data.iloc[:stop_time, i:i+per_plot]
+            a_subset = data.iloc[:, i:i+per_plot]
             # Create a figure with 10 subplots
             fig, axs = plt.subplots(nrows=per_plot, sharex=True)
             # Plot each column of a_subset on a separate subplot
@@ -228,8 +240,9 @@ class EcephysAnalyzer:
             fig.suptitle(f'Columns {i + 1}-{i + per_plot} of {c}')
             plt.xlabel('Time relative to stimulus onset')
             # Save the plot to output_dir
-            fig.savefig(os.path.join(self.output_dir, f'columns_{i + 1}-{i + per_plot}.png'))
+            fig.savefig(os.path.join(save_dir, f'units_{i + 1}-{i + per_plot}.png'))
             plt.close(fig)
+
 
     def sample_data(self, unit_ids=None, presentation_ids=None, regions=None, conditions=None, num_factors=3):
 
@@ -241,7 +254,7 @@ class EcephysAnalyzer:
         count_data = self.filter_spike_counts(times_data_units, presentation_ids, regions, relevant_conditions, unit_as_index=False)
         time = count_data['time_relative_to_stimulus_onset'].values
         # Y # K x T x R x C
-        Y = count_data.to_numpy().T
+        Y = count_data.to_numpy().T.astype(int)
         Y = Y.reshape(*Y.shape[:2], -1, C)
         # neuron_factor_access # K x L x C
         neuron_factor_access = np.zeros((Y.shape[0], num_factors*A, C))
@@ -253,23 +266,21 @@ class EcephysAnalyzer:
         return Y, time, neuron_factor_access, spike_time_info
 
 
-    def save_sample(self, Y, time, neuron_factor_access, spike_time_info, filename):
-        print('Saving sample to: ', os.path.join(self.output_dir, filename))
-        with open(os.path.join(self.output_dir, filename), 'wb') as f:
+    def save_sample(self, Y, time, neuron_factor_access, spike_time_info, folder_name):
+        save_dir = os.path.join(self.output_dir, folder_name)
+        os.makedirs(save_dir, exist_ok=True)
+        save_dir = os.path.join(save_dir, f'{folder_name}.pkl')
+        print('Saving sample to: ', save_dir)
+        with open(save_dir, 'wb') as f:
             pickle.dump({'Y': Y, 'time': time, 'neuron_factor_access': neuron_factor_access, 'spike_time_info': spike_time_info}, f)
 
 
-    def load_sample(self, filename):
-        if not os.path.exists(os.path.join(self.output_dir, filename)):
-            print('File not found: ', os.path.join(self.output_dir, filename))
+    def load_sample(self, folder_name):
+        save_dir = os.path.join(self.output_dir, folder_name, f'{folder_name}.pkl')
+        if not os.path.exists(save_dir):
+            print('File not found: ', save_dir)
             return None, None, None, None
-        print('Loading sample from: ', os.path.join(self.output_dir, filename))
-        with open(os.path.join(self.output_dir, filename), 'rb') as f:
+        print('Loading sample from: ', save_dir)
+        with open(save_dir, 'rb') as f:
             data = pickle.load(f)
         return data['Y'], data['time'], data['neuron_factor_access'], data['spike_time_info']
-
-
-    def plot_spikes_from_spike_time_info(self, spike_time_info):
-        spike_time_info['unit_id'] = spike_time_info['unit_id'].astype(str)
-        spike_time_info.plot(x='time_since_stimulus_presentation_onset', y='unit_id', kind='scatter', s=1, yticks=[])
-        plt.show()

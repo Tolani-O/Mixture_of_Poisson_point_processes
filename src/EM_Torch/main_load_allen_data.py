@@ -31,13 +31,26 @@ args.tau_beta = 8000
 args.tau_config = 10
 args.tau_sigma = 1
 args.tau_sd = 50
-args.L = 3
+left_landmarks = np.array([[0.02, 0.21], [0.05, 0.22], [0.06, 0.27], [0.07, 0.17]])
+# factor_landmarks = np.array([
+#     [[0.02, 0.08],
+#      [0.21, 0.27]],
+#
+#     [[0.05, 0.1],
+#      [0.22, 0.27]],
+#
+#     [[0.06, 0.14],
+#      [0.27, 0.33]],
+#
+#     [[0.07, 0.12],
+#      [0.17, 0.22]],
+# ])
 sd_init = 0.5
 
 regions = ['VISp', 'VISl', 'VISal', 'VISam', 'VISpm', 'VISrl', 'LGd']
 conditions = None
-# regions = ['VISp', 'VISl']
-# conditions = [246, 251]
+regions = ['VISp', 'VISl']
+conditions = [246, 251]
 
 if args.eval_interval > args.log_interval:
     args.log_interval = args.eval_interval
@@ -59,6 +72,7 @@ data = EcephysAnalyzer(structure_list=regions, spike_train_start_offset=0, spike
 # Training data
 region_ct = len(regions) if regions is not None else 7
 folder_name = f'sample_data_{region_ct}_regions'
+args.L = left_landmarks.shape[0]
 Y_train, bin_time, factor_access_train, spike_time_info = data.load_sample(folder_name)
 if Y_train is None:
     data.initialize()
@@ -68,15 +82,14 @@ if Y_train is None:
     Y_train, bin_time, factor_access_train, spike_time_info = data.sample_data(conditions=conditions, num_factors=args.L)
     data.save_sample(Y_train, bin_time, factor_access_train, spike_time_info, folder_name)
 print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')
-Y_train, factor_access_train = load_tensors((Y_train, factor_access_train), args.cuda)
+Y_train, factor_access_train, left_landmarks = load_tensors((Y_train, factor_access_train, left_landmarks), args.cuda)
 
 args.K, T, args.n_trials, args.n_configs = Y_train.shape
 num_factors = factor_access_train.shape[1]
 args.A = int(num_factors/args.L)
 args.n_trial_samples = 10  # N
 model = LikelihoodELBOModel(bin_time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
-                            left_landmark1=0.03, left_landmark2=0.15, landmark_spread=0.12,
-                            spike_train_start_offset=data.spike_train_start_offset)
+                            left_landmarks, landmark_spread=0.05, spike_train_start_offset=data.spike_train_start_offset)
 # Initialize the model
 model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, init=the_rest)
 if args.cuda: model.cuda()

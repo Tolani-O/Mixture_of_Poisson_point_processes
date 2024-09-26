@@ -8,7 +8,7 @@ import pandas as pd
 
 class LikelihoodELBOModel(nn.Module):
     def __init__(self, time, n_factors, n_areas, n_configs, n_trials, n_trial_samples,
-                 left_landmark1=0.2, left_landmark2=1.2, landmark_spread=0.5, spike_train_start_offset=0):
+                 left_landmarks, landmark_spread=0.05, spike_train_start_offset=0):
         super(LikelihoodELBOModel, self).__init__()
 
         self.device = 'cpu'
@@ -16,12 +16,11 @@ class LikelihoodELBOModel(nn.Module):
         dt = round(time[1] - time[0], 3)
         self.dt = torch.tensor(dt)
         T = time.shape[0]
-        self.landmark_spread = int(landmark_spread/dt)
         self.spike_train_start_offset = int(spike_train_start_offset/dt)
-        left_landmark1 = int(left_landmark1/dt) + self.spike_train_start_offset
-        self.left_landmark1 = torch.tensor(left_landmark1).expand(n_trial_samples, n_trials, n_configs, n_factors)
-        left_landmark2 = int(left_landmark2/dt) + self.spike_train_start_offset
-        self.left_landmark2 = torch.tensor(left_landmark2).expand(n_trial_samples, n_trials, n_configs, n_factors)
+        self.landmark_spread = int(landmark_spread/dt)
+        # self.left_landmarks # L x num_peaks (2)
+        self.left_landmarks = (left_landmarks/self.dt + self.spike_train_start_offset).int()
+        self.right_landmarks = self.left_landmarks + self.landmark_spread
         self.n_factors = n_factors
         self.n_areas = n_areas
         self.n_trial_samples = n_trial_samples
@@ -145,6 +144,8 @@ class LikelihoodELBOModel(nn.Module):
         self.theta_init = self.theta_init.cuda(device)
         self.pi_init = self.pi_init.cuda(device)
         self.Delta2TDelta2 = self.Delta2TDelta2.cuda(device)
+        self.left_landmarks = self.left_landmarks.cuda(device)
+        self.right_landmarks = self.right_landmarks.cuda(device)
         if self.W_CKL is not None:
             self.W_CKL = self.W_CKL.cuda(device)
             self.W_CRN = self.W_CRN.cuda(device)
@@ -159,6 +160,8 @@ class LikelihoodELBOModel(nn.Module):
         self.theta_init = self.theta_init.cpu()
         self.pi_init = self.pi_init.cpu()
         self.Delta2TDelta2 = self.Delta2TDelta2.cpu()
+        self.left_landmarks = self.left_landmarks.cpu()
+        self.right_landmarks = self.right_landmarks.cpu()
         if self.W_CKL is not None:
             self.W_CKL = self.W_CKL.cpu()
             self.W_CRN = self.W_CRN.cpu()
@@ -239,55 +242,31 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def compute_offsets_and_landmarks(self):
-        # this has been written to move away from fixed values of landmarks, to landmarks that move with the peak time.
-        # If the peak time moves to the left, the left landmark moves to the left before warping, and vice versa.
-        # The landmarks are then used to warp the factors.
-        # After warping, the right landmark is updated in the direction in which the peak time was warped.
-        # The movement of the landmarks is such that the spread of the landmarks around the peak time is constant.
-        # Code is a bit complicated here because of the need to handle the two peaks separately.
         factors = torch.exp(self.beta)
-        left_landmark1_flat = self.left_landmark1.permute(3, 0, 1, 2).reshape(self.n_factors, -1)
-        right_landmark1_flat = left_landmark1_flat + self.landmark_spread
-        left_landmark2_flat = self.left_landmark2.permute(3, 0, 1, 2).reshape(self.n_factors, -1)
-        right_landmark2_flat = left_landmark2_flat + self.landmark_spread
-        num_elements = left_landmark1_flat.shape
-        avg_peak1_times = torch.argmax(torch.cat([torch.cat([factors[j, left_landmark1_flat[j, i]:right_landmark1_flat[j, i]][None, :] for i in range(num_elements[1])], dim=0) for j in range(num_elements[0])], dim=0), dim=1).reshape(num_elements[0], *self.left_landmark1.shape[:-1])
-        avg_peak2_times = torch.argmax(torch.cat([torch.cat([factors[j, left_landmark2_flat[j, i]:right_landmark2_flat[j, i]][None, :] for i in range(num_elements[1])], dim=0) for j in range(num_elements[0])], dim=0), dim=1).reshape(num_elements[0], *self.left_landmark2.shape[:-1])
-        # avg_peak_times  # N x R x C x 2AL
-        avg_peak_times = self.time[torch.cat([self.left_landmark1, self.left_landmark2], dim=-1) + torch.cat([avg_peak1_times, avg_peak2_times], dim=0).permute(1, 2, 3, 0)]
-        # self.trial_peak_offset_proposal_samples # N x R x C x 2AL
+        left_landmarks = torch.cat([self.left_landmarks]*self.n_areas)
+        right_landmarks = torch.cat([self.right_landmarks]*self.n_areas)
+        avg_peak_times = self.time[torch.tensor([[left_landmarks[i,j] + torch.argmax(factors[i, left_landmarks[i,j]:right_landmarks[i,j]]) for j in range(2)] for i in range(factors.shape[0])])]
+        # avg_peak_times  # 2AL
+        avg_peak_times = avg_peak_times.t().flatten().expand_as(self.trial_peak_offset_proposal_samples)
+        # self.trial_peak_offset_proposal_samples  N x R x C x 2AL
         # self.config_peak_offsets  # C x 2AL
         offsets = self.trial_peak_offset_proposal_samples + self.config_peak_offsets.unsqueeze(0).unsqueeze(1)
-        # s_new # N x R x C x 2AL
         s_new = avg_peak_times + offsets
-        left_landmarks_indices = torch.cat([self.left_landmark1, self.left_landmark2], dim=-1)
-        left_landmarks = self.time[left_landmarks_indices]
-        right_landmarks = self.time[left_landmarks_indices + self.landmark_spread]
-        s_new[:,:,:,:self.n_factors] = torch.where(s_new[:,:,:,:self.n_factors] <= left_landmarks[:,:,:,:self.n_factors], left_landmarks[:,:,:,:self.n_factors] + self.dt, s_new[:,:,:,:self.n_factors])  # ensures that the first half stay in the first half and the second half stays in the second half
-        s_new[:,:,:,self.n_factors:] = torch.where(s_new[:, :, :, self.n_factors:] <= left_landmarks[:, :, :, self.n_factors:], left_landmarks[:, :, :, self.n_factors:] + self.dt, s_new[:, :, :, self.n_factors:])
-        s_new[:,:,:,:self.n_factors] = torch.where(s_new[:,:,:,:self.n_factors] >= right_landmarks[:,:,:,:self.n_factors], right_landmarks[:,:,:,:self.n_factors] - self.dt, s_new[:,:,:,:self.n_factors])
-        s_new[:,:,:,self.n_factors:] = torch.where(s_new[:, :, :, self.n_factors:] >= right_landmarks[:, :, :, self.n_factors:], right_landmarks[:, :, :, self.n_factors:] - self.dt, s_new[:, :, :, self.n_factors:])
-        left_or_right = [-1, 1]
-        new_landmarks = [s_new + self.landmark_spread * self.dt * 0.5 * torch.ones_like(s_new) * left_or_right[i] for i in range(2)]
-        new_landmarks = [torch.min(torch.max(lndmrk, self.time[0]), self.time[-1]) for lndmrk in new_landmarks]
-        # left_landmarks # N x R x C x 2AL
-        # if the peak update shifted the peak to the left from the average, the left landmark is updated to the new left landmark
-        # if the peak update shifted the peak to the right from the average, the right landmark is updated to the new right landmark
-        # the other landmark will be updated after warping
-        left_landmarks = torch.where(s_new <= avg_peak_times, new_landmarks[0], left_landmarks)
-        right_landmarks = torch.where(s_new > avg_peak_times, new_landmarks[1], right_landmarks)
+        left_landmarks = self.time[left_landmarks].t().flatten().expand_as(s_new)
+        right_landmarks = self.time[right_landmarks].t().flatten().expand_as(s_new)
+        s_new = torch.where(s_new <= left_landmarks, left_landmarks + self.dt, s_new)
+        s_new = torch.where(s_new >= right_landmarks, right_landmarks - self.dt, s_new)
         return avg_peak_times, left_landmarks, right_landmarks, s_new
 
 
     def compute_warped_times(self, avg_peak_times, left_landmarks, right_landmarks, trial_peak_times):
-        landmark_spead = self.right_landmark1 - self.left_landmark1
-        left_shifted_time = self.time[self.spike_train_start_offset:landmark_spead+self.spike_train_start_offset]
+        left_shifted_time = self.time[self.spike_train_start_offset:(self.landmark_spread+self.spike_train_start_offset)]
         left_shifted_peak_times = trial_peak_times - left_landmarks
         right_shifted_peak_times = trial_peak_times - right_landmarks
         left_slope = (avg_peak_times - left_landmarks) / left_shifted_peak_times
         right_slope = (avg_peak_times - right_landmarks) / right_shifted_peak_times
-        warped_times = torch.stack([torch.zeros_like(trial_peak_times)] * left_shifted_time.shape[0])
-        for i in range(left_shifted_time.shape[0]):
+        warped_times = torch.stack([torch.zeros_like(trial_peak_times)] * self.landmark_spread)
+        for i in range(self.landmark_spread):
             warped_times[i] = torch.where(left_shifted_time[i] < left_shifted_peak_times, (left_shifted_time[i] * left_slope) + left_landmarks,
                                          ((left_shifted_time[i] - left_shifted_peak_times) * right_slope) + avg_peak_times)
         # landmark_spead = 50
@@ -317,14 +296,15 @@ class LikelihoodELBOModel(nn.Module):
         warped_factors = weighted_floor_warped_factors + weighted_ceil_warped_factors
 
         # warped_factors  # L x 50 x N x R X C X 2
-        early = factors[:, :self.left_landmark1]
-        early = early.unsqueeze(2).unsqueeze(3).unsqueeze(4).expand(*early.shape,*warped_factors.shape[2:-1])
-        mid = factors[:, self.right_landmark1:self.left_landmark2]
-        mid = mid.unsqueeze(2).unsqueeze(3).unsqueeze(4).expand(*mid.shape,*warped_factors.shape[2:-1])
-        late = factors[:, self.right_landmark2:]
-        late = late.unsqueeze(2).unsqueeze(3).unsqueeze(4).expand(*late.shape,*warped_factors.shape[2:-1])
-        warped_factors = torch.cat([early, warped_factors[:, :, :, :, :, 0], mid, warped_factors[:, :, :, :, :, 1], late], dim=1)
-        return warped_factors
+        fact_per_area = self.left_landmarks.shape[0]
+        early = [factors[i, :self.left_landmarks[i%fact_per_area,0]] for i in range(self.n_factors)]
+        early = [x.unsqueeze(1).unsqueeze(2).unsqueeze(3).expand(x.shape[0], *warped_factors.shape[2:-1]) for x in early]
+        mid = [factors[i, self.right_landmarks[i%fact_per_area,0]:self.left_landmarks[i%fact_per_area,1]] for i in range(self.n_factors)]
+        mid = [x.unsqueeze(1).unsqueeze(2).unsqueeze(3).expand(x.shape[0], *warped_factors.shape[2:-1]) for x in mid]
+        late = [factors[i, self.right_landmarks[i%fact_per_area,1]:] for i in range(self.n_factors)]
+        late = [x.unsqueeze(1).unsqueeze(2).unsqueeze(3).expand(x.shape[0], *warped_factors.shape[2:-1]) for x in late]
+        full_warped_factors = torch.stack([torch.cat([early[i], warped_factors[i, :, :, :, :, 0], mid[i], warped_factors[i, :, :, :, :, 1], late[i]], dim=0) for i in range(self.n_factors)])
+        return full_warped_factors
 
 
     def compute_log_elbo(self, Y, neuron_factor_access, warped_factors):  # and first 2 entropy terms

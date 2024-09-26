@@ -202,13 +202,37 @@ class EcephysAnalyzer:
         save_dir = os.path.join(self.output_dir, save_dir)
         os.makedirs(save_dir, exist_ok=True)
 
-        data = self.filter_spike_times(conditions, presentation_ids, regions, unit_ids).sort_values(['stimulus_presentation_id', 'unit_id', 'time_since_stimulus_presentation_onset'])
+        data = self.filter_spike_times(conditions, presentation_ids, regions, unit_ids).sort_values([
+            'stimulus_condition_id',
+            'stimulus_presentation_id',
+            'ecephys_structure_acronym',
+            'unit_id',
+            'time_since_stimulus_presentation_onset'])
 
-        data.loc[:, 'y_axis'] = data['stimulus_presentation_id'].astype(str) + '_' + data['unit_id'].astype(str)
-        data.plot(x='time_since_stimulus_presentation_onset', y='y_axis', kind='scatter', s=1, yticks=[])
+        data.loc[:, 'y_axis'] = data[['stimulus_presentation_id', 'unit_id']].astype(str).agg('_'.join, axis=1)
+        data.plot(x='time_since_stimulus_presentation_onset', y='y_axis', kind='scatter', s=1,
+                  c=data['ecephys_structure_acronym'].astype('category').cat.codes, cmap='viridis', yticks=[])
+        plt.minorticks_on()
+        plt.grid(axis='x', which='major', linestyle='--', linewidth='0.4', color='grey')
         plt.xlabel('Time since stimulus onset')
-        plt.ylabel('Units grouped by trials')
-        plt.savefig(os.path.join(save_dir, 'spike_times.png'))
+        plt.ylabel('Units grouped by conditions')
+        plt.savefig(os.path.join(save_dir, 'spike_times_by_conditions.png'))
+
+        data = self.filter_spike_times(conditions, presentation_ids, regions, unit_ids).sort_values([
+            'ecephys_structure_acronym',
+            'stimulus_condition_id',
+            'stimulus_presentation_id',
+            'unit_id',
+            'time_since_stimulus_presentation_onset'])
+
+        data.loc[:, 'y_axis'] = data[['stimulus_presentation_id', 'unit_id']].astype(str).agg('_'.join, axis=1)
+        data.plot(x='time_since_stimulus_presentation_onset', y='y_axis', kind='scatter', s=1,
+                  c=data['stimulus_condition_id'].astype('category').cat.codes, cmap='viridis', yticks=[])
+        plt.minorticks_on()
+        plt.grid(axis='x', which='major', linestyle='--', linewidth='0.4', color='grey')
+        plt.xlabel('Time since stimulus onset')
+        plt.ylabel('Units grouped by regions')
+        plt.savefig(os.path.join(save_dir, 'spike_times_by_regions.png'))
         plt.close()
 
     def plot_spike_counts(self, save_dir, unit_ids=None, presentation_ids=None, regions=None, conditions=None):

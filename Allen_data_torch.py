@@ -211,12 +211,14 @@ class EcephysAnalyzer:
 
         data.loc[:, 'y_axis'] = data[['stimulus_presentation_id', 'unit_id']].astype(str).agg('_'.join, axis=1)
         data.plot(x='time_since_stimulus_presentation_onset', y='y_axis', kind='scatter', s=1,
-                  c=data['ecephys_structure_acronym'].astype('category').cat.codes, cmap='viridis', yticks=[])
+                  c=data['ecephys_structure_acronym'].astype('category').cat.codes, cmap='viridis',
+                  yticks=[], figsize=(7, 8))
         plt.minorticks_on()
         plt.grid(axis='x', which='major', linestyle='--', linewidth='0.4', color='grey')
         plt.xlabel('Time since stimulus onset')
         plt.ylabel('Units grouped by conditions')
         plt.savefig(os.path.join(save_dir, 'spike_times_by_conditions.png'))
+        plt.close()
 
         data = self.filter_spike_times(conditions, presentation_ids, regions, unit_ids).sort_values([
             'ecephys_structure_acronym',
@@ -227,7 +229,8 @@ class EcephysAnalyzer:
 
         data.loc[:, 'y_axis'] = data[['stimulus_presentation_id', 'unit_id']].astype(str).agg('_'.join, axis=1)
         data.plot(x='time_since_stimulus_presentation_onset', y='y_axis', kind='scatter', s=1,
-                  c=data['stimulus_condition_id'].astype('category').cat.codes, cmap='viridis', yticks=[])
+                  c=data['stimulus_condition_id'].astype('category').cat.codes, cmap='viridis',
+                  yticks=[], figsize=(7, 8))
         plt.minorticks_on()
         plt.grid(axis='x', which='major', linestyle='--', linewidth='0.4', color='grey')
         plt.xlabel('Time since stimulus onset')
@@ -249,12 +252,12 @@ class EcephysAnalyzer:
 
         # Iterate over sets of {per_plot} columns (units) and save to output folder
         c = data.shape[1]
-        per_plot = 10
+        per_plot = 9
         for i in range(0, c, per_plot):
             # Select the next set of 10 columns
             a_subset = data.iloc[:, i:i+per_plot]
             # Create a figure with 10 subplots
-            fig, axs = plt.subplots(nrows=per_plot, sharex=True)
+            fig, axs = plt.subplots(nrows=per_plot, sharex=True, figsize=(7, 12))
             # Plot each column of a_subset on a separate subplot
             for j, col in enumerate(a_subset.columns):
                 axs[j].plot(a_subset.index, a_subset[col])

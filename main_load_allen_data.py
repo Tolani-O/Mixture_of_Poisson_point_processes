@@ -31,26 +31,18 @@ args.tau_beta = 8000
 args.tau_config = 10
 args.tau_sigma = 1
 args.tau_sd = 50
-left_landmarks = np.array([[0.02, 0.21], [0.05, 0.22], [0.06, 0.27], [0.07, 0.17]])
-# factor_landmarks = np.array([
-#     [[0.02, 0.08],
-#      [0.21, 0.27]],
-#
-#     [[0.05, 0.1],
-#      [0.22, 0.27]],
-#
-#     [[0.06, 0.14],
-#      [0.27, 0.33]],
-#
-#     [[0.07, 0.12],
-#      [0.17, 0.22]],
-# ])
+left_landmarks = np.array([[0.03, 0.14],
+                           [0.03, 0.16],
+                           [0.03, 0.18],
+                           [0.03, 0.20]])
 sd_init = 0.5
+landmark_spread=0.09
+args.n_trial_samples = 10  # Number of samples to generate for each trial
 
-regions = ['VISp', 'VISl', 'VISal', 'VISam', 'VISpm', 'VISrl', 'LGd']
+regions = ['VISp', 'VISl', 'VISal', 'VISam', 'VISpm', 'VISrl']
 conditions = None
-regions = ['VISp', 'VISl']
-conditions = [246, 251]
+# regions = ['VISp', 'VISl']
+# conditions = [246, 251]
 
 if args.eval_interval > args.log_interval:
     args.log_interval = args.eval_interval
@@ -87,9 +79,8 @@ Y_train, factor_access_train, left_landmarks = load_tensors((Y_train, factor_acc
 args.K, T, args.n_trials, args.n_configs = Y_train.shape
 num_factors = factor_access_train.shape[1]
 args.A = int(num_factors/args.L)
-args.n_trial_samples = 10  # N
 model = LikelihoodELBOModel(bin_time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
-                            left_landmarks, landmark_spread=0.05, spike_train_start_offset=data.spike_train_start_offset)
+                            left_landmarks, landmark_spread=landmark_spread, spike_train_start_offset=data.spike_train_start_offset)
 # Initialize the model
 model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, init=the_rest)
 if args.cuda: model.cuda()
@@ -183,9 +174,9 @@ if __name__ == "__main__":
                 f"Epoch: {epoch:2d}, Elapsed Time: {elapsed_time / 60:.2f} mins, Total Time: {total_time / (60 * 60):.2f} hrs,\n"
                 f"Loss train: {cur_loss_train:.5f},\n"
                 f"Log Likelihood train: {cur_log_likelihood_train:.5f},\n"
-                f"pi: {pi.T},\n"
-                f"alpha: {alpha},\n"
-                f"theta: {theta},\n"
+                f"pi:\n{pi.T.reshape(model.n_areas, -1)},\n"
+                f"alpha:\n{alpha.reshape(model.n_areas, -1)},\n"
+                f"theta:\n{theta.reshape(model.n_areas, -1)},\n"
                 f"lr: {args.lr:.5f}, scheduler_lr: {scheduler._last_lr[0]:.5f},\n"
                 f"dataSeed: {args.data_seed},\n"
                 f"{args.notes}\n\n")

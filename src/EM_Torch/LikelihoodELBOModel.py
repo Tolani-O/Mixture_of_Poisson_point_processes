@@ -119,17 +119,17 @@ class LikelihoodELBOModel(nn.Module):
         # factor_access  # K x L x C
         K, T, R, C = Y.shape
         summed_neurons = torch.einsum('ktrc,klc->lt', Y, factor_access)
-        latent_factors = summed_neurons #+ torch.sum(factor_access, dim=(0, 2)).unsqueeze(1) * torch.rand(self.n_factors, T)
+        latent_factors = summed_neurons + torch.sqrt(torch.sum(summed_neurons, dim=-1)).unsqueeze(1) * torch.rand(self.n_factors, T)
         latent_factors = latent_factors / torch.sum(latent_factors, dim=-1, keepdim=True)
         beta = torch.log(latent_factors)
         spike_counts = torch.einsum('ktrc,klc->krlc', Y, factor_access)
         avg_spike_counts = torch.sum(spike_counts, dim=(0,1,3)) / (R * torch.sum(factor_access, dim=(0, 2)))
         print('Average spike counts:')
-        print(avg_spike_counts)
+        print(avg_spike_counts.reshape(self.n_areas, -1))
         centered_spike_counts = torch.einsum('krlc,klc->krlc', spike_counts - avg_spike_counts.unsqueeze(0).unsqueeze(1).unsqueeze(3), factor_access)
         spike_ct_var = torch.sum(centered_spike_counts**2, dim=(0,1,3)) / ((R * torch.sum(factor_access, dim=(0, 2)))-1)
         print('Spike count variance - Average spike counts:')
-        print(spike_ct_var-avg_spike_counts)
+        print((spike_ct_var-avg_spike_counts).reshape(self.n_areas, -1))
         alpha = (avg_spike_counts)**2/(spike_ct_var-avg_spike_counts)
         alpha = alpha.expm1().clamp_min(1e-6).log()
         theta = avg_spike_counts/(spike_ct_var-avg_spike_counts)
@@ -468,7 +468,6 @@ class LikelihoodELBOModel(nn.Module):
 
     def infer_latent_variables(self):
         # likelihoods # C x K x L
-        neuron_factor_assignment = torch.where(self.W_CKL == torch.max(self.W_CKL, dim=-1, keepdim=True).values, 1, 0)
         C, K, L = torch.where(self.W_CKL == torch.max(self.W_CKL, dim=-1, keepdim=True).values)
         grouped = pd.DataFrame({
             'C': C.cpu(),

@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import torch
@@ -8,6 +9,7 @@ from matplotlib.figure import figaspect
 import json
 import argparse
 from torch.utils.data import Dataset
+sns.set()
 plt.rcParams.update({'figure.max_open_warning': 0})
 
 def get_parser():
@@ -298,15 +300,18 @@ def plot_outputs(model, neuron_factor_access, output_dir, folder, epoch, ess_tra
         plt.close()
 
         latent_factors = torch.softmax(model.beta, dim=-1).numpy()
-        L = latent_factors.shape[0]
         global_max = np.max(latent_factors)
         upper_limit = global_max + 0.01
-        plt.figure(figsize=(10, L*5))
+        plt.figure(figsize=(model.n_areas*10, int(model.n_factors/model.n_areas)*5))
+        L = np.arange(model.n_factors).reshape(model.n_areas, -1).T.flatten()
+        c = 0
+        factors_per_area = int(model.n_factors/model.n_areas)
         for l in range(L):
-            plt.subplot(L, 1, l + 1)
-            plt.plot(latent_factors[l, :], label=f'Factor [{l}, :]')
-            plt.title(f'Factor [{l}, :]')
+            plt.subplot(factors_per_area, model.n_areas, c + 1)
+            plt.plot(x=model.time, y=latent_factors[l, :], label=f'Factor [{l}, :]')
+            plt.title(f'Factor {(l%factors_per_area)+1}, Area {(l//factors_per_area)+1}')
             plt.ylim(bottom=0, top=upper_limit)
+            c += 1
         plt.tight_layout()
         plt.savefig(os.path.join(beta_dir, f'LatentFactors_{epoch}.png'))
         plt.close()
@@ -389,19 +394,25 @@ def plot_outputs(model, neuron_factor_access, output_dir, folder, epoch, ess_tra
         plt.title('Trial Standard Deviations')
         plt.savefig(os.path.join(trial_sd_dir, f'trial_variances_{epoch}.png'))
         plt.close()
+
+        plot_factor_assignments(model.W_CKL.numpy(), neuron_factor_access.numpy(), output_dir, 'cluster', epoch, False)
         plt.close('all')
 
 
-def plot_factor_assignments(factor_assignment, output_dir, folder, epoch):
-    cluster_dir = os.path.join(output_dir, folder, 'Cluster')
+def plot_factor_assignments(factor_assignment, neuron_factor_access, output_dir, folder, epoch, annot=True):
+    cluster_dir = os.path.join(output_dir, folder)
     if not os.path.exists(cluster_dir):
         os.makedirs(cluster_dir)
-    neuron_factor_assignments = np.concatenate(factor_assignment, axis=0)
-    height, width = [a / b * 10 for a, b in zip(neuron_factor_assignments.shape, (5, 1))]
-    plt.figure(figsize=(20, 60))
-    sns.heatmap(neuron_factor_assignments, annot=True, fmt=".2f", annot_kws={"color": "blue"})
+    sorted_indices = (pd.DataFrame(np.concatenate(neuron_factor_access, axis=0)).
+                      sort_values(by=list(np.arange(neuron_factor_access.shape[-1])), ascending=False).index)
+    neuron_factor_assignments = np.concatenate(factor_assignment, axis=0)[sorted_indices]
+    plt.figure(figsize=(10, 30))
+    sns.heatmap(neuron_factor_assignments, cmap="YlOrRd", annot=annot,
+                cbar_kws={'label': 'Assignment probability', 'location': 'bottom'},
+                vmin=0, vmax=1)
     plt.title('Neuron factor cluster assignments')
-    plt.savefig(os.path.join(cluster_dir,  f'cluster_assn_{epoch}.png'))
+    plt.savefig(os.path.join(cluster_dir, f'cluster_assn_{epoch}.png'), dpi=200)
+    plt.close()
 
 
 def write_losses(list, name, metric, output_dir, starts_out_empty):

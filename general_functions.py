@@ -395,17 +395,15 @@ def plot_outputs(model, neuron_factor_access, output_dir, folder, epoch, ess_tra
         plt.savefig(os.path.join(trial_sd_dir, f'trial_variances_{epoch}.png'))
         plt.close()
 
-        plot_factor_assignments(model.W_CKL.numpy(), neuron_factor_access.numpy(), output_dir, 'cluster', epoch, False)
+        plot_factor_assignments(model.W_CKL.numpy(), output_dir, 'cluster', epoch, False)
         plt.close('all')
 
 
-def plot_factor_assignments(factor_assignment, neuron_factor_access, output_dir, folder, epoch, annot=True):
+def plot_factor_assignments(factor_assignment, output_dir, folder, epoch, annot=True):
     cluster_dir = os.path.join(output_dir, folder)
     if not os.path.exists(cluster_dir):
         os.makedirs(cluster_dir)
-    sorted_indices = (pd.DataFrame(np.concatenate(neuron_factor_access, axis=0)).
-                      sort_values(by=list(np.arange(neuron_factor_access.shape[-1])), ascending=False).index)
-    neuron_factor_assignments = np.concatenate(factor_assignment, axis=0)[sorted_indices]
+    neuron_factor_assignments = np.concatenate(factor_assignment, axis=0)
     plt.figure(figsize=(10, 30))
     sns.heatmap(neuron_factor_assignments, cmap="YlOrRd", annot=annot,
                 cbar_kws={'label': 'Assignment probability', 'location': 'bottom'},

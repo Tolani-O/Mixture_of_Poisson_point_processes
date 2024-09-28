@@ -84,7 +84,11 @@ class EcephysAnalyzer:
         self.presentations_count = presentations_count.merge(conditions, left_on='stimulus_condition_id',
                                                              right_index=True)
         print('Getting spike times for session: ', self.session_to_analyze)
-        drifting_gratings_spike_times = self.session_data.presentationwise_spike_times(stimulus_presentation_ids=self.presentations.index.values).reset_index()
+        for i, id in enumerate(self.presentations.index.values):
+            if i == 0:
+                drifting_gratings_spike_times = self.session_data.presentationwise_spike_times(stimulus_presentation_ids=id).reset_index()
+            else:
+                drifting_gratings_spike_times = pd.concat([drifting_gratings_spike_times, self.session_data.presentationwise_spike_times(stimulus_presentation_ids=id).reset_index()])
         stop = self.spike_train_end + self.dt
         # select only spikes that happen before stop
         drifting_gratings_spike_times = drifting_gratings_spike_times[drifting_gratings_spike_times['time_since_stimulus_presentation_onset'] < stop]
@@ -290,6 +294,11 @@ class EcephysAnalyzer:
         for idx, region in enumerate(unique_regions):
             area_start_indx = idx * num_factors
             neuron_factor_access[np.where(unit_areas==region), area_start_indx:(area_start_indx + num_factors), :] = 1
+        # Group neurons by region
+        sorted_indices = (pd.DataFrame(np.concatenate(neuron_factor_access, axis=-1).T).
+                          sort_values(by=list(np.arange(neuron_factor_access.shape[1])), ascending=False).index)
+        neuron_factor_access = np.concatenate(neuron_factor_access, axis=-1).T[sorted_indices].reshape(Y.shape[0], C, num_factors*A).transpose(0, 2, 1)
+        Y = np.concatenate(Y, axis=-1).T[sorted_indices].reshape(Y.shape[0], C, Y.shape[2], Y.shape[1]).transpose(0, 3, 2, 1)
         return Y, time, neuron_factor_access, spike_time_info
 
 

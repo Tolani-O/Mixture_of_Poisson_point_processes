@@ -334,10 +334,8 @@ class LikelihoodELBOModel(nn.Module):
         L_a = self.n_factors // self.n_areas
 
         # U tensor terms
-        # Y_times_beta  # C x K x R x L x T
-        Y_times_beta = torch.einsum('ktrc,lt->ckrlt', Y, beta)
         # Y_times_beta  # C x K x L
-        Y_times_beta = torch.sum(Y_times_beta, dim=(2, 4))
+        Y_times_beta = torch.einsum('ktrc,lt->ckl', Y, beta)
         # log_y_factorial_sum_rt # C x K x 1
         log_y_factorial_sum_rt = log_y_factorial_sum_rt.unsqueeze(2)
         # log_alpha_minus_logsumesp_beta  # L
@@ -368,10 +366,8 @@ class LikelihoodELBOModel(nn.Module):
         self.a_CKL = a_CKL  # for finding the posterior neuron firing rates
 
         # V tensor terms
-        # Y_times_warped_beta  # C x K x R x L x N x T
-        Y_times_warped_beta = torch.einsum('ktrc,crlnt->ckrlnt', Y, log_warped_factors)
         # Y_times_warped_beta  # C x K x R x L x N
-        Y_times_warped_beta = torch.sum(Y_times_warped_beta, dim=-1)
+        Y_times_warped_beta = torch.einsum('ktrc,crlnt->ckrln', Y, log_warped_factors)
         # log_y_factorial_sum_t # C x K x R x 1 x 1
         log_y_factorial_sum_t = log_y_factorial_sum_t.unsqueeze(3).unsqueeze(4)
         # logsumexp_warped_beta  # C x R x L x N

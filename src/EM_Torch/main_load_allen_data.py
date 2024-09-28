@@ -53,6 +53,7 @@ output_dir = os.path.join(os.getcwd(), outputs_folder)
 np.random.seed(args.data_seed)
 # Ground truth data
 if torch.cuda.is_available():
+    print("Number of available GPUs:", torch.cuda.device_count())
     if not args.cuda:
         print("WARNING: You have a CUDA device, so you should probably run with --cuda")
     else:
@@ -89,7 +90,8 @@ with (torch.no_grad()):
     model.generate_trial_peak_offset_samples()
     _, _, _, effective_sample_size_train, trial_peak_offsets_train = model.evaluate(Y_train, factor_access_train)
 
-output_str = f"Using CUDA: {args.cuda}\n"
+output_str = (f"Using CUDA: {args.cuda}\n"
+              f"Num available GPUs: {torch.cuda.device_count()}\n")
 patience = args.scheduler_patience//args.eval_interval
 start_epoch = 0
 args.folder_name = (
@@ -128,6 +130,7 @@ def train_gradient():
         optimizer.step()
         losses_batch.append((likelihood_term + penalty_term).item())
         log_likelihoods_batch.append(likelihood_term.item())
+        torch.cuda.empty_cache()
 
 
 if __name__ == "__main__":

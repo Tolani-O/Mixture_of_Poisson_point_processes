@@ -89,7 +89,7 @@ with (torch.no_grad()):
     model.generate_trial_peak_offset_samples()
     _, _, _, effective_sample_size_train, trial_peak_offsets_train = model.evaluate(Y_train, factor_access_train)
 
-output_str = f"Using CUDA: {torch.cuda.is_available()}\n"
+output_str = f"Using CUDA: {args.cuda}\n"
 patience = args.scheduler_patience//args.eval_interval
 start_epoch = 0
 args.folder_name = (

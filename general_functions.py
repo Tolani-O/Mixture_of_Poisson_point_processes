@@ -306,9 +306,9 @@ def plot_outputs(model, neuron_factor_access, output_dir, folder, epoch, ess_tra
         L = np.arange(model.n_factors).reshape(model.n_areas, -1).T.flatten()
         c = 0
         factors_per_area = int(model.n_factors/model.n_areas)
-        for l in range(L):
+        for l in L:
             plt.subplot(factors_per_area, model.n_areas, c + 1)
-            plt.plot(x=model.time, y=latent_factors[l, :], label=f'Factor [{l}, :]')
+            plt.plot(model.time, latent_factors[l, :], label=f'Factor [{l}, :]')
             plt.title(f'Factor {(l%factors_per_area)+1}, Area {(l//factors_per_area)+1}')
             plt.ylim(bottom=0, top=upper_limit)
             c += 1

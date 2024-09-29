@@ -4,6 +4,8 @@ import torch.nn.functional as F
 from src.EM_Torch.general_functions import create_second_diff_matrix, create_first_diff_matrix
 import numpy as np
 import pandas as pd
+from tslearn.clustering import TimeSeriesKMeans
+from scipy.ndimage import gaussian_filter1d
 
 
 class LikelihoodELBOModel(nn.Module):
@@ -87,6 +89,7 @@ class LikelihoodELBOModel(nn.Module):
                           trial_peak_offset_proposal_means=None,
                           trial_peak_offset_proposal_sds=None,
                           config_peak_offsets=None, trial_peak_offset_covar_ltri=None,
+                          W_CKL=None, neuron_factor_access=None,
                           init='zeros'):
         if init == 'zeros':
             self.init_zero()
@@ -98,7 +101,11 @@ class LikelihoodELBOModel(nn.Module):
             self.alpha = nn.Parameter(alpha)
         if theta is not None:
             self.theta_init = theta
-        if pi is not None:
+        if W_CKL is not None:
+            self.W_CKL = W_CKL
+            self.pi_init = self.pi_value(neuron_factor_access)
+            self.W_CKL = None
+        elif pi is not None:
             self.pi_init = pi
         if trial_peak_offset_proposal_means is not None:
             self.trial_peak_offset_proposal_means = nn.Parameter(trial_peak_offset_proposal_means)
@@ -113,15 +120,20 @@ class LikelihoodELBOModel(nn.Module):
             self.trial_peak_offset_covar_ltri_offdiag = nn.Parameter(trial_peak_offset_covar_ltri[indices[0], indices[1]])
 
 
-    def init_from_data(self, Y, factor_access, sd_init, init='zeros'):
+    def init_from_data(self, Y, factor_access, sd_init, n_jobs=15, bandwidth=8, init='zeros'):
         Y, factor_access = Y.cpu(), factor_access.cpu()
         # Y # K x T x R x C
         # factor_access  # K x L x C
         K, T, R, C = Y.shape
-        summed_neurons = torch.einsum('ktrc,klc->lt', Y, factor_access)
-        latent_factors = summed_neurons + torch.sqrt(torch.sum(summed_neurons, dim=-1)).unsqueeze(1) * torch.rand(self.n_factors, T)
-        latent_factors = latent_factors / torch.sum(latent_factors, dim=-1, keepdim=True)
-        beta = torch.log(latent_factors)
+        Y_train = gaussian_filter1d(Y.sum(axis=(2, 3)), sigma=bandwidth, axis=0)
+        n_clusters = int(self.n_factors / self.n_areas)
+        dba_km = TimeSeriesKMeans(n_clusters=n_clusters, n_init=10, metric='dtw', max_iter_barycenter=20, n_jobs=n_jobs)
+        print('Fitting DBA-KMeans')
+        y_pred = dba_km.fit_predict(Y_train)
+        neuron_factor_assignment = torch.zeros((K, C, n_clusters), dtype=torch.float64)
+        neuron_factor_assignment[torch.arange(K), :, y_pred] = 1
+        neuron_factor_assignment = torch.concat([neuron_factor_assignment]*self.n_areas, dim=-1).permute(1, 0, 2) * factor_access.permute(2, 0, 1)
+        beta = torch.log(torch.concat([torch.tensor(dba_km.cluster_centers_).squeeze()]*self.n_areas, dim=0))
         spike_counts = torch.einsum('ktrc,klc->krlc', Y, factor_access)
         avg_spike_counts = torch.sum(spike_counts, dim=(0,1,3)) / (R * torch.sum(factor_access, dim=(0, 2)))
         print('Average spike counts:')
@@ -135,7 +147,10 @@ class LikelihoodELBOModel(nn.Module):
         theta = avg_spike_counts/(spike_ct_var-avg_spike_counts)
         trial_peak_offset_proposal_sds = sd_init * torch.ones(2*self.n_factors, dtype=torch.float64)
         self.init_ground_truth(beta=beta, alpha=alpha, theta=theta,
-                               trial_peak_offset_proposal_sds=trial_peak_offset_proposal_sds, init=init)
+                               trial_peak_offset_proposal_sds=trial_peak_offset_proposal_sds,
+                               W_CKL=neuron_factor_assignment, neuron_factor_access=factor_access.permute(2, 0, 1),
+                               init=init)
+        return y_pred
 
 
     def cuda(self, device=None):

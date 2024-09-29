@@ -4,9 +4,8 @@ import sys
 sys.path.append(os.path.abspath('.'))
 from src.EM_Torch.Allen_data_torch import EcephysAnalyzer
 from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
-from src.EM_Torch.general_functions import load_model_checkpoint, plot_factor_assignments, plot_spikes, \
-    plot_intensity_and_latents, create_relevant_files, get_parser, plot_outputs, \
-    write_log_and_model, write_losses, plot_losses, CustomDataset, load_tensors, inv_softplus_torch
+from src.EM_Torch.general_functions import create_relevant_files, get_parser, plot_outputs, \
+    plot_initial_clusters, write_log_and_model, write_losses, plot_losses, CustomDataset, load_tensors
 import numpy as np
 import time
 import torch
@@ -31,15 +30,15 @@ args.tau_beta = 8000
 args.tau_config = 10
 args.tau_sigma = 1
 args.tau_sd = 50
-left_landmarks = np.array([[0.03, 0.14],
-                           [0.03, 0.16],
-                           [0.03, 0.18],
-                           [0.03, 0.20]])
+left_landmarks = np.array([[0.04, 0.18],
+                           [0.04, 0.18],
+                           [0.04, 0.18]])
 sd_init = 0.5
-landmark_spread=0.09
+landmark_spread=0.08
 args.n_trial_samples = 10  # Number of samples to generate for each trial
+# args.cuda = False
 
-regions = ['VISp', 'VISl', 'VISal', 'VISam', 'VISpm', 'VISrl']
+regions = ['VISp', 'VISl', 'VISal']
 conditions = None
 # regions = ['VISp', 'VISl']
 # conditions = [246, 251]
@@ -83,7 +82,8 @@ args.A = int(num_factors/args.L)
 model = LikelihoodELBOModel(bin_time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
                             left_landmarks, landmark_spread=landmark_spread, spike_train_start_offset=data.spike_train_start_offset)
 # Initialize the model
-model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, init=the_rest)
+y_pred = model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, init=the_rest)
+
 if args.cuda: model.cuda()
 model.eval()
 with (torch.no_grad()):
@@ -107,7 +107,7 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
                                                        patience=patience, threshold_mode='abs',
                                                        threshold=args.scheduler_threshold)
 create_relevant_files(output_dir, output_str)
-# plot_spikes(Y_train.cpu().numpy(), output_dir, model.dt.item(), 'train')
+plot_initial_clusters(Y_train.cpu(), y_pred, model.cpu(), output_dir)
 plot_outputs(model.cpu(), factor_access_train.permute(2, 0, 1).cpu(), output_dir, 'Train', -1,
              effective_sample_size_train.cpu(), effective_sample_size_train.cpu(),
              trial_peak_offsets_train.permute(1,0,2).cpu(), trial_peak_offsets_train.permute(1,0,2).cpu())

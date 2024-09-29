@@ -1,6 +1,5 @@
 import os
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import torch
@@ -397,6 +396,29 @@ def plot_outputs(model, neuron_factor_access, output_dir, folder, epoch, ess_tra
 
         plot_factor_assignments(model.W_CKL.numpy(), output_dir, 'cluster', epoch, False)
         plt.close('all')
+
+
+def plot_initial_clusters(Y, y_pred, model, output_dir):
+    # Y # K x T x R x C
+    with torch.no_grad():
+        factors = torch.exp(model.beta)
+        K = Y.shape[1]
+        Y_train = Y.sum(axis=(2, 3))
+        n_clusters = int(model.n_factors/model.n_areas)
+        y_upper = torch.max(factors).item()
+        for yi in range(n_clusters):
+            plt.subplot(n_clusters, 1, 1 + yi)
+            for xx in Y_train[y_pred == yi]:
+                plt.plot(xx.ravel(), "k-", alpha=.2)
+            plt.plot(factors[yi], "r-")
+            plt.xlim(0, K)
+            plt.ylim(-1, y_upper)
+            plt.text(0.55, 0.85, 'Cluster %d' % (yi + 1), transform=plt.gca().transAxes)
+        plt.tight_layout()
+        save_dir = os.path.join(output_dir, 'Train')
+        os.makedirs(save_dir, exist_ok=True)
+        plt.savefig(os.path.join(save_dir, 'cluster_initialization.png'))
+        plt.close()
 
 
 def plot_factor_assignments(factor_assignment, output_dir, folder, epoch, annot=True):

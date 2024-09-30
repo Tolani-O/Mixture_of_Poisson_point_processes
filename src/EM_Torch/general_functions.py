@@ -300,7 +300,7 @@ def plot_outputs(model, neuron_factor_access, output_dir, folder, epoch, ess_tra
 
         latent_factors = torch.softmax(model.beta, dim=-1).numpy()
         global_max = np.max(latent_factors)
-        upper_limit = global_max + 0.01
+        upper_limit = global_max + 0.005
         plt.figure(figsize=(model.n_areas*10, int(model.n_factors/model.n_areas)*5))
         L = np.arange(model.n_factors).reshape(model.n_areas, -1).T.flatten()
         c = 0
@@ -308,6 +308,12 @@ def plot_outputs(model, neuron_factor_access, output_dir, folder, epoch, ess_tra
         for l in L:
             plt.subplot(factors_per_area, model.n_areas, c + 1)
             plt.plot(model.time, latent_factors[l, :], label=f'Factor [{l}, :]')
+            plt.vlines(x=np.array([model.peak1_left_landmarks[l],
+                           model.peak1_left_landmarks[l]+model.peak1_landmark_spread,
+                           model.peak2_left_landmarks[l],
+                           model.peak2_left_landmarks[l]+model.peak2_landmark_spread])*model.dt.item(),
+                       ymin=0, ymax=upper_limit,
+                       color='grey', linestyle='--', alpha=0.5)
             plt.title(f'Factor {(l%factors_per_area)+1}, Area {(l//factors_per_area)+1}')
             plt.ylim(bottom=0, top=upper_limit)
             c += 1
@@ -409,9 +415,8 @@ def plot_initial_clusters(Y, y_pred, model, output_dir):
         for yi in range(n_clusters):
             plt.subplot(n_clusters, 1, 1 + yi)
             for xx in Y_train[y_pred == yi]:
-                plt.plot(xx.ravel(), "k-", alpha=.2)
-            plt.plot(factors[yi], "r-")
-            plt.xlim(0, K)
+                plt.plot(model.time, xx.ravel(), "k-", alpha=0.2)
+            plt.plot(model.time, factors[yi], "r-")
             plt.ylim(-1, y_upper)
             plt.text(0.55, 0.85, 'Cluster %d' % (yi + 1), transform=plt.gca().transAxes)
         plt.tight_layout()

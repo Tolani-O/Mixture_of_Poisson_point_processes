@@ -9,7 +9,7 @@ import pickle
 class EcephysAnalyzer:
 
     def __init__(self, structure_list=None, input_dir='data', output_dir='outputs',
-                 spike_train_start_offset=0, spike_train_end=0.5):
+                 spike_train_start_offset=0, spike_train_end=0.5, dt=0.001):
         self.unit_ids_and_areas = None
         self.canrun = False
         self.session_to_analyze = None
@@ -31,7 +31,7 @@ class EcephysAnalyzer:
             self.structure_list = structure_list
         self.spike_train_start_offset = spike_train_start_offset
         self.spike_train_end = spike_train_end
-        self.dt = 0.001
+        self.dt = dt
 
 
     def collate_sessions(self):

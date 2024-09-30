@@ -27,16 +27,17 @@ args.scheduler_factor = 0.9
 args.lr = 0.01
 args.num_epochs = 100000
 args.tau_beta = 8000
-args.tau_config = 10
+args.tau_config = 10 # Number of samples to generate for each trial
 args.tau_sigma = 1
 args.tau_sd = 50
-left_landmarks = np.array([[0.04, 0.18],
-                           [0.04, 0.18],
-                           [0.04, 0.18]])
 sd_init = 0.5
-landmark_spread=0.08
-args.n_trial_samples = 10  # Number of samples to generate for each trial
 # args.cuda = False
+args.n_trial_samples = 10
+peak1_left_landmarks = [0.04, 0.04, 0.04]
+peak1_landmark_spread = 0.04
+peak2_left_landmarks = [0.22, 0.22, 0.22]
+peak2_landmark_spread = 0.06
+dt = 0.002
 
 regions = ['VISp', 'VISl', 'VISal']
 conditions = None
@@ -60,11 +61,11 @@ if torch.cuda.is_available():
 else:
     args.cuda = False
 
-data = EcephysAnalyzer(structure_list=regions, spike_train_start_offset=0, spike_train_end=0.35)
+data = EcephysAnalyzer(structure_list=regions, spike_train_start_offset=0, spike_train_end=0.35, dt=dt)
 # Training data
 region_ct = len(regions) if regions is not None else 7
-folder_name = f'sample_data_{region_ct}_regions'
-args.L = left_landmarks.shape[0]
+args.L = len(peak1_left_landmarks)
+folder_name = f'sample_data_{region_ct}-regions_{args.L}-factors_{dt}_dt'
 Y_train, bin_time, factor_access_train, spike_time_info = data.load_sample(folder_name)
 if Y_train is None:
     data.initialize()
@@ -74,15 +75,16 @@ if Y_train is None:
     Y_train, bin_time, factor_access_train, spike_time_info = data.sample_data(conditions=conditions, num_factors=args.L)
     data.save_sample(Y_train, bin_time, factor_access_train, spike_time_info, folder_name)
 print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')
-Y_train, factor_access_train, left_landmarks = load_tensors((Y_train, factor_access_train, left_landmarks), args.cuda)
+Y_train, factor_access_train = load_tensors((Y_train, factor_access_train), args.cuda)
 
 args.K, T, args.n_trials, args.n_configs = Y_train.shape
 num_factors = factor_access_train.shape[1]
 args.A = int(num_factors/args.L)
 model = LikelihoodELBOModel(bin_time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
-                            left_landmarks, landmark_spread=landmark_spread, spike_train_start_offset=data.spike_train_start_offset)
+                            peak1_left_landmarks, peak1_landmark_spread, peak2_left_landmarks, peak2_landmark_spread,
+                            data.spike_train_start_offset)
 # Initialize the model
-y_pred = model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, init=the_rest)
+y_pred = model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, bandwidth=4, init=the_rest)
 
 if args.cuda: model.cuda()
 model.eval()

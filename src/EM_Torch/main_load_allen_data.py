@@ -20,7 +20,7 @@ init = 'Data'
 the_rest = 'zeros'
 args.batch_size = 'All'
 args.param_seed = f'Real_{init}Init'
-args.notes = f'Learn all. 1stg. RealData.'
+args.notes = f'var landmarks spread aligned'
 args.scheduler_patience = 80000 #2000
 args.scheduler_threshold = 1e-10 #0.1
 args.scheduler_factor = 0.9
@@ -33,10 +33,10 @@ args.tau_sd = 50
 sd_init = 0.5
 # args.cuda = False
 args.n_trial_samples = 10
-peak1_left_landmarks = [0.04, 0.04, 0.04]
-peak1_landmark_spread = 0.04
-peak2_left_landmarks = [0.22, 0.22, 0.22]
-peak2_landmark_spread = 0.06
+peak1_left_landmarks = [0.04, 0.05, 0.03]
+peak1_right_landmarks = [0.08, 0.1, 0.06]
+peak2_left_landmarks = [0.19, 0.26, 0.20]
+peak2_right_landmarks = [0.27, 0.34, 0.26]
 dt = 0.002
 
 regions = ['VISp', 'VISl', 'VISal']
@@ -81,7 +81,7 @@ args.K, T, args.n_trials, args.n_configs = Y_train.shape
 num_factors = factor_access_train.shape[1]
 args.A = int(num_factors/args.L)
 model = LikelihoodELBOModel(bin_time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
-                            peak1_left_landmarks, peak1_landmark_spread, peak2_left_landmarks, peak2_landmark_spread,
+                            peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
                             data.spike_train_start_offset)
 # Initialize the model
 y_pred = model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, bandwidth=4, init=the_rest)

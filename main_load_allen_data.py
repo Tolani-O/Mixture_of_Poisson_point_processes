@@ -4,7 +4,7 @@ import sys
 sys.path.append(os.path.abspath('.'))
 from src.EM_Torch.Allen_data_torch import EcephysAnalyzer
 from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
-from src.EM_Torch.general_functions import create_relevant_files, get_parser, plot_outputs, \
+from src.EM_Torch.general_functions import initialize_clusters, create_relevant_files, get_parser, plot_outputs, \
     plot_initial_clusters, write_log_and_model, write_losses, plot_losses, CustomDataset, load_tensors
 import numpy as np
 import time
@@ -20,11 +20,11 @@ init = 'Data'
 the_rest = 'zeros'
 args.batch_size = 'All'
 args.param_seed = f'Real_{init}Init'
-args.notes = f'var landmarks spread aligned'
+args.notes = f'var landmarks spread aligned low lr'
 args.scheduler_patience = 80000 #2000
 args.scheduler_threshold = 1e-10 #0.1
 args.scheduler_factor = 0.9
-args.lr = 0.01
+args.lr = 0.001
 args.num_epochs = 100000
 args.tau_beta = 8000
 args.tau_config = 10 # Number of samples to generate for each trial
@@ -33,10 +33,10 @@ args.tau_sd = 50
 sd_init = 0.5
 # args.cuda = False
 args.n_trial_samples = 10
-peak1_left_landmarks = [0.04, 0.05, 0.03]
-peak1_right_landmarks = [0.08, 0.1, 0.06]
-peak2_left_landmarks = [0.19, 0.26, 0.20]
-peak2_right_landmarks = [0.27, 0.34, 0.26]
+peak1_left_landmarks = [0.04, 0.04, 0.02]
+peak1_right_landmarks = [0.11, 0.11, 0.14]
+peak2_left_landmarks = [0.19, 0.20, 0.18]
+peak2_right_landmarks = [0.30, 0.31, 0.33]
 dt = 0.002
 
 regions = ['VISp', 'VISl', 'VISal']
@@ -80,11 +80,15 @@ Y_train, factor_access_train = load_tensors((Y_train, factor_access_train), args
 args.K, T, args.n_trials, args.n_configs = Y_train.shape
 num_factors = factor_access_train.shape[1]
 args.A = int(num_factors/args.L)
+if not os.path.exists(os.path.join(data.output_dir, folder_name, f'cluster_initialization.pkl')):
+    initialize_clusters(Y_train.cpu(), factor_access_train.cpu(), args.L, args.A, os.path.join(data.output_dir, folder_name), n_jobs=15, bandwidth=4)
+    plot_initial_clusters(data.output_dir, folder_name, args.L)
+    sys.exit()
 model = LikelihoodELBOModel(bin_time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
                             peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
                             data.spike_train_start_offset)
 # Initialize the model
-y_pred = model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, bandwidth=4, init=the_rest)
+model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, cluster_dir=os.path.join(data.output_dir, folder_name), init=the_rest)
 
 if args.cuda: model.cuda()
 model.eval()
@@ -109,7 +113,6 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
                                                        patience=patience, threshold_mode='abs',
                                                        threshold=args.scheduler_threshold)
 create_relevant_files(output_dir, output_str)
-plot_initial_clusters(Y_train.cpu(), y_pred, model.cpu(), output_dir)
 plot_outputs(model.cpu(), factor_access_train.permute(2, 0, 1).cpu(), output_dir, 'Train', -1,
              effective_sample_size_train.cpu(), effective_sample_size_train.cpu(),
              trial_peak_offsets_train.permute(1,0,2).cpu(), trial_peak_offsets_train.permute(1,0,2).cpu())

@@ -8,6 +8,9 @@ from matplotlib.figure import figaspect
 import json
 import argparse
 from torch.utils.data import Dataset
+from tslearn.clustering import TimeSeriesKMeans
+from scipy.ndimage import gaussian_filter1d
+import pickle
 sns.set()
 plt.rcParams.update({'figure.max_open_warning': 0})
 
@@ -308,10 +311,8 @@ def plot_outputs(model, neuron_factor_access, output_dir, folder, epoch, ess_tra
         for l in L:
             plt.subplot(factors_per_area, model.n_areas, c + 1)
             plt.plot(model.time, latent_factors[l, :], label=f'Factor [{l}, :]')
-            plt.vlines(x=np.array([model.peak1_left_landmarks[l],
-                           model.peak1_left_landmarks[l]+model.peak1_landmark_spread,
-                           model.peak2_left_landmarks[l],
-                           model.peak2_left_landmarks[l]+model.peak2_landmark_spread])*model.dt.item(),
+            plt.vlines(x=np.array([model.peak1_left_landmarks[l], model.peak1_right_landmarks[l],
+                                   model.peak2_left_landmarks[l], model.peak2_right_landmarks[l]])*model.dt.item(),
                        ymin=0, ymax=upper_limit,
                        color='grey', linestyle='--', alpha=0.5)
             plt.title(f'Factor {(l%factors_per_area)+1}, Area {(l//factors_per_area)+1}')
@@ -404,26 +405,53 @@ def plot_outputs(model, neuron_factor_access, output_dir, folder, epoch, ess_tra
         plt.close('all')
 
 
-def plot_initial_clusters(Y, y_pred, model, output_dir):
+def initialize_clusters(Y, factor_access, n_clusters, n_areas, output_dir, n_jobs=15, bandwidth=4):
     # Y # K x T x R x C
-    with torch.no_grad():
-        factors = torch.exp(model.beta)
-        K = Y.shape[1]
-        Y_train = Y.sum(axis=(2, 3))
-        n_clusters = int(model.n_factors/model.n_areas)
-        y_upper = torch.max(factors).item()
-        for yi in range(n_clusters):
-            plt.subplot(n_clusters, 1, 1 + yi)
-            for xx in Y_train[y_pred == yi]:
-                plt.plot(model.time, xx.ravel(), "k-", alpha=0.2)
-            plt.plot(model.time, factors[yi], "r-")
-            plt.ylim(-1, y_upper)
-            plt.text(0.55, 0.85, 'Cluster %d' % (yi + 1), transform=plt.gca().transAxes)
-        plt.tight_layout()
-        save_dir = os.path.join(output_dir, 'Train')
-        os.makedirs(save_dir, exist_ok=True)
-        plt.savefig(os.path.join(save_dir, 'cluster_initialization.png'))
-        plt.close()
+    # factor_access  # K x L x C
+    K, T, R, C = Y.shape
+    Y_train = gaussian_filter1d(Y.sum(axis=(2, 3)), sigma=bandwidth, axis=0)
+    dba_km = TimeSeriesKMeans(n_clusters=n_clusters, n_init=10, metric='dtw', max_iter_barycenter=20, n_jobs=n_jobs)
+    print('Fitting DBA-KMeans')
+    y_pred = dba_km.fit_predict(Y_train)
+    neuron_factor_assignment = torch.zeros((K, C, n_clusters), dtype=torch.float64)
+    neuron_factor_assignment[torch.arange(K), :, y_pred] = 1
+    neuron_factor_assignment = torch.concat([neuron_factor_assignment] * n_areas, dim=-1).permute(1, 0, 2) * factor_access.permute(2, 0, 1)
+    beta = torch.log(torch.concat([torch.tensor(dba_km.cluster_centers_).squeeze()] * n_areas, dim=0))
+    # save to disk
+    os.makedirs(output_dir, exist_ok=True)
+    save_dir = os.path.join(output_dir, 'cluster_initialization.pkl')
+    print('Saving clusters to: ', save_dir)
+    with open(save_dir, 'wb') as f:
+        pickle.dump({'y_pred': y_pred, 'neuron_factor_assignment': neuron_factor_assignment, 'beta': beta}, f)
+
+
+def plot_initial_clusters(output_dir, data_folder, n_clusters):
+    # Y # K x T x R x C
+    data_dir = os.path.join(output_dir, data_folder, f'{data_folder}.pkl')
+    cluster_dir = os.path.join(output_dir, data_folder, 'cluster_initialization.pkl')
+    if not os.path.exists(data_dir):
+        raise FileNotFoundError(f"Data directory not found: {data_dir}")
+    if not os.path.exists(cluster_dir):
+        raise FileNotFoundError(f"Cluster directory not found: {cluster_dir}")
+    with open(data_dir, 'rb') as f:
+        data = pickle.load(f)
+    Y, time, neuron_factor_access = data['Y'], data['time'], data['neuron_factor_access']
+    with open(cluster_dir, 'rb') as f:
+        data = pickle.load(f)
+    y_pred, neuron_factor_assignment, beta = data['y_pred'], data['neuron_factor_assignment'], data['beta']
+    factors = torch.exp(beta)
+    Y_train = Y.sum(axis=(2, 3))
+    y_upper = torch.max(factors).item()
+    for yi in range(n_clusters):
+        plt.subplot(n_clusters, 1, 1 + yi)
+        for xx in Y_train[y_pred == yi]:
+            plt.plot(time, xx.ravel(), "k-", alpha=0.2)
+        plt.plot(time, factors[yi], "r-")
+        plt.ylim(-1, y_upper)
+        plt.text(0.55, 0.85, 'Cluster %d' % (yi + 1), transform=plt.gca().transAxes)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, data_folder, 'cluster_initialization.png'))
+    plt.close()
 
 
 def plot_factor_assignments(factor_assignment, output_dir, folder, epoch, annot=True):

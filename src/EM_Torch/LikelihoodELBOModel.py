@@ -1,11 +1,11 @@
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from src.EM_Torch.general_functions import create_second_diff_matrix, create_first_diff_matrix
+from src.EM_Torch.general_functions import create_second_diff_matrix
 import numpy as np
 import pandas as pd
-from tslearn.clustering import TimeSeriesKMeans
-from scipy.ndimage import gaussian_filter1d
+import pickle
 
 
 class LikelihoodELBOModel(nn.Module):
@@ -127,20 +127,18 @@ class LikelihoodELBOModel(nn.Module):
             self.trial_peak_offset_covar_ltri_offdiag = nn.Parameter(trial_peak_offset_covar_ltri[indices[0], indices[1]])
 
 
-    def init_from_data(self, Y, factor_access, sd_init, n_jobs=15, bandwidth=8, init='zeros'):
+    def init_from_data(self, Y, factor_access, sd_init, cluster_dir, init='zeros'):
         Y, factor_access = Y.cpu(), factor_access.cpu()
         # Y # K x T x R x C
         # factor_access  # K x L x C
-        K, T, R, C = Y.shape
-        Y_train = gaussian_filter1d(Y.sum(axis=(2, 3)), sigma=bandwidth, axis=0)
-        n_clusters = int(self.n_factors / self.n_areas)
-        dba_km = TimeSeriesKMeans(n_clusters=n_clusters, n_init=10, metric='dtw', max_iter_barycenter=20, n_jobs=n_jobs)
-        print('Fitting DBA-KMeans')
-        y_pred = dba_km.fit_predict(Y_train)
-        neuron_factor_assignment = torch.zeros((K, C, n_clusters), dtype=torch.float64)
-        neuron_factor_assignment[torch.arange(K), :, y_pred] = 1
-        neuron_factor_assignment = torch.concat([neuron_factor_assignment]*self.n_areas, dim=-1).permute(1, 0, 2) * factor_access.permute(2, 0, 1)
-        beta = torch.log(torch.concat([torch.tensor(dba_km.cluster_centers_).squeeze()]*self.n_areas, dim=0))
+        _, _, R, _ = Y.shape
+        cluster_dir = os.path.join(cluster_dir, 'cluster_initialization.pkl')
+        if not os.path.exists(cluster_dir):
+            raise FileNotFoundError(f"Cluster directory not found: {cluster_dir}")
+        print('Loading clusters from: ', cluster_dir)
+        with open(cluster_dir, 'rb') as f:
+            data = pickle.load(f)
+        neuron_factor_assignment, beta = data['neuron_factor_assignment'], data['beta']
         spike_counts = torch.einsum('ktrc,klc->krlc', Y, factor_access)
         avg_spike_counts = torch.sum(spike_counts, dim=(0,1,3)) / (R * torch.sum(factor_access, dim=(0, 2)))
         print('Average spike counts:')
@@ -157,7 +155,6 @@ class LikelihoodELBOModel(nn.Module):
                                trial_peak_offset_proposal_sds=trial_peak_offset_proposal_sds,
                                W_CKL=neuron_factor_assignment, neuron_factor_access=factor_access.permute(2, 0, 1),
                                init=init)
-        return y_pred
 
 
     def cuda(self, device=None):
@@ -336,11 +333,11 @@ class LikelihoodELBOModel(nn.Module):
             peak2 = weighted_floor_warped_factor_l + weighted_ceil_warped_factor_l
 
             early = factors[l, :left_landmarks[l]]
-            early = early.unsqueeze(1).unsqueeze(2).unsqueeze(3).expand(early.shape[0], *warped_factors[0].shape[1:])
+            early = early.unsqueeze(1).unsqueeze(2).unsqueeze(3).expand(early.shape[0], *peak1.shape[1:])
             mid = factors[l, right_landmarks[l]:left_landmarks[l+self.n_factors]]
-            mid = mid.unsqueeze(1).unsqueeze(2).unsqueeze(3).expand(mid.shape[0], *warped_factors[0].shape[1:])
+            mid = mid.unsqueeze(1).unsqueeze(2).unsqueeze(3).expand(mid.shape[0], *peak1.shape[1:])
             late = factors[l, right_landmarks[l+self.n_factors]:]
-            late = late.unsqueeze(1).unsqueeze(2).unsqueeze(3).expand(late.shape[0], *warped_factors[0].shape[1:])
+            late = late.unsqueeze(1).unsqueeze(2).unsqueeze(3).expand(late.shape[0], *peak1.shape[1:])
             full_warped_factors.append(torch.cat([early, peak1, mid, peak2, late], dim=0))
         full_warped_factors = torch.stack(full_warped_factors)
         # full_warped_factors  # AL x T x N x R x C

@@ -20,11 +20,11 @@ init = 'Data'
 the_rest = 'zeros'
 args.batch_size = 'All'
 args.param_seed = f'Real_{init}Init'
-args.notes = f'var landmarks spread aligned low lr'
+args.notes = f'var landmarks spread aligned lr 1e-4'
 args.scheduler_patience = 80000 #2000
 args.scheduler_threshold = 1e-10 #0.1
 args.scheduler_factor = 0.9
-args.lr = 0.001
+args.lr = 0.0001
 args.num_epochs = 100000
 args.tau_beta = 8000
 args.tau_config = 10 # Number of samples to generate for each trial
@@ -33,10 +33,10 @@ args.tau_sd = 50
 sd_init = 0.5
 # args.cuda = False
 args.n_trial_samples = 10
-peak1_left_landmarks = [0.04, 0.04, 0.02]
-peak1_right_landmarks = [0.11, 0.11, 0.14]
-peak2_left_landmarks = [0.19, 0.20, 0.18]
-peak2_right_landmarks = [0.30, 0.31, 0.33]
+peak1_left_landmarks = [0.02, 0.03, 0.02]
+peak1_right_landmarks = [0.11, 0.13, 0.11]
+peak2_left_landmarks = [0.18, 0.18, 0.18]
+peak2_right_landmarks = [0.30, 0.30, 0.30]
 dt = 0.002
 
 regions = ['VISp', 'VISl', 'VISal']
@@ -66,14 +66,14 @@ data = EcephysAnalyzer(structure_list=regions, spike_train_start_offset=0, spike
 region_ct = len(regions) if regions is not None else 7
 args.L = len(peak1_left_landmarks)
 folder_name = f'sample_data_{region_ct}-regions_{args.L}-factors_{dt}_dt'
-Y_train, bin_time, factor_access_train, spike_time_info = data.load_sample(folder_name)
+Y_train, bin_time, factor_access_train, unique_regions = data.load_sample(folder_name)
 if Y_train is None:
     data.initialize()
     data.plot_presentations_times(folder_name)
     data.plot_spike_times(folder_name)
     data.plot_spike_counts(folder_name)
-    Y_train, bin_time, factor_access_train, spike_time_info = data.sample_data(conditions=conditions, num_factors=args.L)
-    data.save_sample(Y_train, bin_time, factor_access_train, spike_time_info, folder_name)
+    Y_train, bin_time, factor_access_train, unique_regions = data.sample_data(conditions=conditions, num_factors=args.L)
+    data.save_sample(Y_train, bin_time, factor_access_train, unique_regions, folder_name)
 print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')
 Y_train, factor_access_train = load_tensors((Y_train, factor_access_train), args.cuda)
 
@@ -97,7 +97,11 @@ with (torch.no_grad()):
     _, _, _, effective_sample_size_train, trial_peak_offsets_train = model.evaluate(Y_train, factor_access_train)
 
 output_str = (f"Using CUDA: {args.cuda}\n"
-              f"Num available GPUs: {torch.cuda.device_count()}\n")
+              f"Num available GPUs: {torch.cuda.device_count()}\n"
+              f"peak1_left_landmarks: {peak1_left_landmarks}\n"
+              f"peak1_right_landmarks: {peak1_right_landmarks}\n"
+              f"peak2_left_landmarks: {peak2_left_landmarks}\n"
+              f"peak2_right_landmarks: {peak2_right_landmarks}\n")
 patience = args.scheduler_patience//args.eval_interval
 start_epoch = 0
 args.folder_name = (
@@ -113,7 +117,7 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
                                                        patience=patience, threshold_mode='abs',
                                                        threshold=args.scheduler_threshold)
 create_relevant_files(output_dir, output_str)
-plot_outputs(model.cpu(), factor_access_train.permute(2, 0, 1).cpu(), output_dir, 'Train', -1,
+plot_outputs(model.cpu(), factor_access_train.permute(2, 0, 1).cpu(), unique_regions, output_dir, 'Train', -1,
              effective_sample_size_train.cpu(), effective_sample_size_train.cpu(),
              trial_peak_offsets_train.permute(1,0,2).cpu(), trial_peak_offsets_train.permute(1,0,2).cpu())
 
@@ -189,7 +193,7 @@ if __name__ == "__main__":
                 f"dataSeed: {args.data_seed},\n"
                 f"{args.notes}\n\n")
             write_log_and_model(output_str, output_dir, epoch, model, optimizer, scheduler)
-            plot_outputs(model.cpu(), factor_access_train.permute(2, 0, 1).cpu(), output_dir, 'Train', epoch,
+            plot_outputs(model.cpu(), factor_access_train.permute(2, 0, 1).cpu(), unique_regions, output_dir, 'Train', epoch,
                          effective_sample_size_train.cpu(), effective_sample_size_train.cpu(),
                          model_trial_offsets_train.permute(1,0,2).cpu(), model_trial_offsets_train.permute(1,0,2).cpu())
             is_empty = epoch == 0

@@ -24,7 +24,7 @@ args.notes = f'var landmarks spread aligned lr 1e-4'
 args.scheduler_patience = 80000 #2000
 args.scheduler_threshold = 1e-10 #0.1
 args.scheduler_factor = 0.9
-args.lr = 0.01
+args.lr = 0.0001
 args.num_epochs = 100000
 args.tau_beta = 8000
 args.tau_config = 10 # Number of samples to generate for each trial
@@ -33,10 +33,10 @@ args.tau_sd = 50
 sd_init = 0.5
 # args.cuda = False
 args.n_trial_samples = 10
-peak1_left_landmarks = [0.02, 0.03, 0.02]
-peak1_right_landmarks = [0.11, 0.13, 0.11]
-peak2_left_landmarks = [0.18, 0.18, 0.18]
-peak2_right_landmarks = [0.30, 0.30, 0.30]
+peak1_left_landmarks = [0.03, 0.03, 0.03]
+peak1_right_landmarks = [0.11, 0.14, 0.13]
+peak2_left_landmarks = [0.17, 0.18, 0.18]
+peak2_right_landmarks = [0.31, 0.32, 0.30]
 dt = 0.002
 
 regions = ['VISp', 'VISl', 'VISal']
@@ -85,8 +85,7 @@ if not os.path.exists(os.path.join(data.output_dir, folder_name, f'cluster_initi
     plot_initial_clusters(data.output_dir, folder_name, args.L)
     sys.exit()
 model = LikelihoodELBOModel(bin_time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
-                            peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
-                            data.spike_train_start_offset)
+                            peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks)
 # Initialize the model
 model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, cluster_dir=os.path.join(data.output_dir, folder_name), init=the_rest)
 
@@ -98,10 +97,10 @@ with (torch.no_grad()):
 
 output_str = (f"Using CUDA: {args.cuda}\n"
               f"Num available GPUs: {torch.cuda.device_count()}\n"
-              f"peak1_left_landmarks: {peak1_left_landmarks}\n"
-              f"peak1_right_landmarks: {peak1_right_landmarks}\n"
-              f"peak2_left_landmarks: {peak2_left_landmarks}\n"
-              f"peak2_right_landmarks: {peak2_right_landmarks}\n")
+              f"peak1_left_landmarks:\n{model.time[model.peak1_left_landmarks.reshape(model.n_areas, -1)]}\n"
+              f"peak1_right_landmarks:\n{model.time[model.peak1_right_landmarks.reshape(model.n_areas, -1)]}\n"
+              f"peak2_left_landmarks:\n{model.time[model.peak2_left_landmarks.reshape(model.n_areas, -1)]}\n"
+              f"peak2_right_landmarks:\n{model.time[model.peak2_right_landmarks.reshape(model.n_areas, -1)]}\n")
 patience = args.scheduler_patience//args.eval_interval
 start_epoch = 0
 args.folder_name = (

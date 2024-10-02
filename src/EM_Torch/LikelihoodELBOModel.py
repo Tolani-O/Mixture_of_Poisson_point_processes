@@ -57,8 +57,7 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def init_random(self):
-        latent_factors = torch.softmax(torch.randn(self.n_factors, self.time.shape[0], dtype=torch.float64), dim=-1)
-        self.beta = nn.Parameter(torch.log(latent_factors))
+        self.beta = nn.Parameter(torch.log(torch.randn(self.n_factors, self.time.shape[0]-1, dtype=torch.float64)))
         self.alpha = nn.Parameter(torch.randn(self.n_factors, dtype=torch.float64))
         self.config_peak_offsets = nn.Parameter(torch.randn(self.n_configs, 2 * self.n_factors, dtype=torch.float64))
         n_dims = 2 * self.n_factors
@@ -71,8 +70,7 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def init_zero(self):
-        latent_factors = torch.softmax(torch.zeros(self.n_factors, self.time.shape[0], dtype=torch.float64), dim=-1)
-        self.beta = nn.Parameter(torch.log(latent_factors))
+        self.beta = nn.Parameter(torch.zeros(self.n_factors, self.time.shape[0]-1, dtype=torch.float64))
         self.alpha = nn.Parameter(torch.ones(self.n_factors, dtype=torch.float64))
         self.config_peak_offsets = nn.Parameter(torch.zeros(self.n_configs, 2 * self.n_factors, dtype=torch.float64))
         n_dims = 2 * self.n_factors
@@ -211,6 +209,9 @@ class LikelihoodELBOModel(nn.Module):
         sd_matrix[torch.arange(n_dims), torch.arange(n_dims)] = self.trial_peak_offset_proposal_sds
         return sd_matrix
 
+    def unnormalized_log_factors(self):
+        return torch.cat([torch.zeros(self.n_factors, 1, device=self.device, dtype=torch.float64), self.beta], dim=1)
+
     def theta_value(self):
         if self.W_CKL is None or self.a_CKL is None:
             return self.theta_init
@@ -265,7 +266,7 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def compute_offsets_and_landmarks(self):
-        factors = torch.exp(self.beta)
+        factors = torch.exp(self.unnormalized_log_factors())
         avg_peak1_times = self.time[torch.tensor([self.peak1_left_landmarks[i] + torch.argmax(factors[i, self.peak1_left_landmarks[i]:self.peak1_right_landmarks[i]])
                                                   for i in range(self.peak1_left_landmarks.shape[0])])]
         avg_peak2_times = self.time[torch.tensor([self.peak2_left_landmarks[i] + torch.argmax(factors[i, self.peak2_left_landmarks[i]:self.peak2_right_landmarks[i]])
@@ -308,7 +309,7 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def compute_warped_factors(self, warped_times):
-        factors = torch.exp(self.beta)
+        factors = torch.exp(self.unnormalized_log_factors())
         # warped_time  # len(peak_landmark_spread) x N x R X C X AL
         warped_indices = [warped_times[i]/self.dt for i in range(len(warped_times))]
         floor_warped_indices = [torch.floor(warped_indices[i]).int() for i in range(len(warped_times))]
@@ -354,7 +355,7 @@ class LikelihoodELBOModel(nn.Module):
         neuron_factor_access = neuron_factor_access.permute(2, 0, 1)  # C x K x L
         warped_factors = warped_factors.permute(4,3,0,2,1)  # C x R x L x N x T
         log_warped_factors = torch.log(warped_factors)  # warped beta # C x R x L x N x T
-        beta = self.beta  # beta # L x T
+        beta = self.unnormalized_log_factors()  # beta # L x T
         Y_sum_t = torch.sum(Y, dim=1).permute(2, 0, 1)  # C x K x R
         Y_sum_rt = torch.sum(Y_sum_t, dim=-1)  # C x K
         log_y_factorial = torch.lgamma(Y + 1)  # K x T x R x C
@@ -494,7 +495,7 @@ class LikelihoodELBOModel(nn.Module):
         Sigma = ltri_matrix @ ltri_matrix.t()
         inv_Sigma = torch.linalg.inv(Sigma)
         sigma_Penalty = -tau_sigma * (torch.sum(torch.abs(inv_Sigma)) - torch.sum(torch.abs(torch.diag(inv_Sigma))))
-        beta_s2_penalty = -tau_beta * torch.sum((self.beta @ self.Delta2TDelta2) * self.beta)
+        beta_s2_penalty = -tau_beta * torch.sum((self.unnormalized_log_factors() @ self.Delta2TDelta2) * self.unnormalized_log_factors())
         penalty_term = config_Penalty + sigma_Penalty + beta_s2_penalty + proposal_sd_penalty
         return penalty_term
 

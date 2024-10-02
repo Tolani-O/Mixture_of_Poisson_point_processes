@@ -302,6 +302,7 @@ def plot_outputs(model, neuron_factor_access, unique_regions, output_dir, folder
         plt.close()
 
         pi = model.pi_value(neuron_factor_access).numpy()
+        W_L = torch.sum(model.W_CKL, dim=(0, 1)).numpy()
         latent_factors = torch.softmax(model.unnormalized_log_factors(), dim=-1).numpy()
         global_max = np.max(latent_factors)
         upper_limit = global_max + 0.005
@@ -311,12 +312,16 @@ def plot_outputs(model, neuron_factor_access, unique_regions, output_dir, folder
         factors_per_area = int(model.n_factors/model.n_areas)
         for l in L:
             plt.subplot(factors_per_area, model.n_areas, c + 1)
-            plt.plot(model.time, latent_factors[l, :], label=f'Factor [{l}, :]', alpha=np.max([pi[l], 0.5]), linewidth=np.max([2.5*pi[l], 0.5]))
-            plt.vlines(x=np.array([model.peak1_left_landmarks[l], model.peak1_right_landmarks[l],
-                                   model.peak2_left_landmarks[l], model.peak2_right_landmarks[l]])*model.dt.item(),
+            plt.plot(model.time, latent_factors[l, :], label=f'Factor [{l}, :]', alpha=np.max([pi[l], 0.7]), linewidth=np.exp(2.5*pi[l]))
+            plt.vlines(x=model.time[torch.tensor([
+                model.peak1_left_landmarks[l], model.peak1_right_landmarks[l],
+                model.peak2_left_landmarks[l], model.peak2_right_landmarks[l]])],
                        ymin=0, ymax=upper_limit,
                        color='grey', linestyle='--', alpha=0.5)
-            plt.title(f'Factor {(l%factors_per_area)+1}, Area {unique_regions[l//factors_per_area]}, Membership: {pi[l]:.2f}', fontsize=20)
+            plt.title(f'Factor {(l%factors_per_area)+1}, '
+                      f'Area {unique_regions[l//factors_per_area]}, '
+                      f'Membership: {pi[l]:.2f}, '
+                      f'Count: {W_L[l]:.2f}', fontsize=20)
             plt.ylim(bottom=0, top=upper_limit)
             c += 1
         plt.tight_layout()

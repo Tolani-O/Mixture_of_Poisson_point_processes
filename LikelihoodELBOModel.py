@@ -10,8 +10,7 @@ import pickle
 
 class LikelihoodELBOModel(nn.Module):
     def __init__(self, time, n_factors, n_areas, n_configs, n_trials, n_trial_samples,
-                 peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
-                 spike_train_start_offset=0):
+                 peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks):
         super(LikelihoodELBOModel, self).__init__()
 
         self.device = 'cpu'
@@ -19,17 +18,14 @@ class LikelihoodELBOModel(nn.Module):
         dt = round(time[1] - time[0], 3)
         self.dt = torch.tensor(dt)
         T = time.shape[0]
-        self.spike_train_start_offset = int(spike_train_start_offset/dt)
-        self.peak1_left_landmarks = ((torch.tensor(peak1_left_landmarks)/self.dt) + self.spike_train_start_offset).int()
-        self.peak1_left_landmarks = torch.cat([self.peak1_left_landmarks]*n_areas)
-        self.peak1_right_landmarks = ((torch.tensor(peak1_right_landmarks)/self.dt) + self.spike_train_start_offset).int()
-        self.peak1_right_landmarks = torch.cat([self.peak1_right_landmarks]*n_areas)
-        self.peak2_left_landmarks = ((torch.tensor(peak2_left_landmarks)/self.dt) + self.spike_train_start_offset).int()
-        self.peak2_left_landmarks = torch.cat([self.peak2_left_landmarks]*n_areas)
-        self.peak2_right_landmarks = ((torch.tensor(peak2_right_landmarks)/self.dt) + self.spike_train_start_offset).int()
-        self.peak2_right_landmarks = torch.cat([self.peak2_right_landmarks]*n_areas)
-        self.left_landmarks = 0
-        self.right_landmarks = 0
+        self.peak1_left_landmarks = torch.searchsorted(self.time, torch.tensor(peak1_left_landmarks), side='left')-1
+        self.peak1_left_landmarks = torch.cat([self.peak1_left_landmarks] * n_areas)
+        self.peak1_right_landmarks = torch.searchsorted(self.time, torch.tensor(peak1_right_landmarks), side='left')
+        self.peak1_right_landmarks = torch.cat([self.peak1_right_landmarks] * n_areas)
+        self.peak2_left_landmarks = torch.searchsorted(self.time, torch.tensor(peak2_left_landmarks), side='left')-1
+        self.peak2_left_landmarks = torch.cat([self.peak2_left_landmarks] * n_areas)
+        self.peak2_right_landmarks = torch.searchsorted(self.time, torch.tensor(peak2_right_landmarks), side='left')
+        self.peak2_right_landmarks = torch.cat([self.peak2_right_landmarks] * n_areas)
         self.n_factors = n_factors
         self.n_areas = n_areas
         self.n_trial_samples = n_trial_samples
@@ -287,7 +283,8 @@ class LikelihoodELBOModel(nn.Module):
 
     def compute_warped_times(self, avg_peak_times, left_landmarks, right_landmarks, trial_peak_times):
         landmark_speads = ((right_landmarks - left_landmarks).squeeze()/self.dt).int()
-        left_shifted_time = [self.time[self.spike_train_start_offset:(landmark_speads[i] + self.spike_train_start_offset)] for i in range(landmark_speads.shape[0])]
+        spike_train_start_offset = torch.searchsorted(self.time, 0, side='left')
+        left_shifted_time = [self.time[spike_train_start_offset:(landmark_speads[i] + spike_train_start_offset)] for i in range(landmark_speads.shape[0])]
         left_shifted_peak_times = trial_peak_times - left_landmarks
         right_shifted_peak_times = trial_peak_times - right_landmarks
         left_slope = (avg_peak_times - left_landmarks) / left_shifted_peak_times
@@ -318,7 +315,6 @@ class LikelihoodELBOModel(nn.Module):
         floor_weights = [1 - ceil_weights[i] for i in range(len(warped_times))]
         left_landmarks = torch.cat([self.peak1_left_landmarks, self.peak2_left_landmarks])
         right_landmarks = torch.cat([self.peak1_right_landmarks, self.peak2_right_landmarks])
-        warped_factors = []
         full_warped_factors = []
         for l in range(self.n_factors):
             floor_warped_factor_l = factors[l, floor_warped_indices[l]]

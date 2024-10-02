@@ -339,4 +339,4 @@ class EcephysAnalyzer:
         print('Loading sample from: ', save_dir)
         with open(save_dir, 'rb') as f:
             data = pickle.load(f)
-        return data['Y'], data['time'], data['neuron_factor_access'], data['spike_time_info']
+        return data['Y'], data['time'], data['neuron_factor_access'], data['unique_regions']

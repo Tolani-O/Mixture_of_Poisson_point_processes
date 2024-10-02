@@ -285,7 +285,7 @@ def plot_outputs(model, neuron_factor_access, unique_regions, output_dir, folder
     if not os.path.exists(trial_sd_dir):
         os.makedirs(trial_sd_dir)
     with torch.no_grad():
-        beta = model.beta.numpy()
+        beta = model.unnormalized_log_factors().numpy()
         L = beta.shape[0]
         global_max = np.max(beta)
         upper_limit = global_max + 0.1
@@ -302,7 +302,7 @@ def plot_outputs(model, neuron_factor_access, unique_regions, output_dir, folder
         plt.close()
 
         pi = model.pi_value(neuron_factor_access).numpy()
-        latent_factors = torch.softmax(model.beta, dim=-1).numpy()
+        latent_factors = torch.softmax(model.unnormalized_log_factors(), dim=-1).numpy()
         global_max = np.max(latent_factors)
         upper_limit = global_max + 0.005
         plt.figure(figsize=(model.n_areas*10, int(model.n_factors/model.n_areas)*5))
@@ -423,7 +423,7 @@ def initialize_clusters(Y, factor_access, n_clusters, n_areas, output_dir, n_job
     save_dir = os.path.join(output_dir, 'cluster_initialization.pkl')
     print('Saving clusters to: ', save_dir)
     with open(save_dir, 'wb') as f:
-        pickle.dump({'y_pred': y_pred, 'neuron_factor_assignment': neuron_factor_assignment, 'beta': beta}, f)
+        pickle.dump({'y_pred': y_pred, 'neuron_factor_assignment': neuron_factor_assignment, 'beta': beta[:,1:]}, f)
 
 
 def plot_initial_clusters(output_dir, data_folder, n_clusters):
@@ -440,7 +440,7 @@ def plot_initial_clusters(output_dir, data_folder, n_clusters):
     with open(cluster_dir, 'rb') as f:
         data = pickle.load(f)
     y_pred, neuron_factor_assignment, beta = data['y_pred'], data['neuron_factor_assignment'], data['beta']
-    factors = torch.exp(beta)
+    factors = torch.exp(torch.concat([torch.zeros(beta.shape[0], 1), beta], dim=1))
     Y_train = Y.sum(axis=(2, 3))
     y_upper = torch.max(factors).item()
     for yi in range(n_clusters):

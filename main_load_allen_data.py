@@ -24,7 +24,7 @@ args.notes = f'var landmarks spread aligned lr 1e-4'
 args.scheduler_patience = 80000 #2000
 args.scheduler_threshold = 1e-10 #0.1
 args.scheduler_factor = 0.9
-args.lr = 0.0001
+args.lr = 0.01
 args.num_epochs = 100000
 args.tau_beta = 8000
 args.tau_config = 10 # Number of samples to generate for each trial
@@ -41,7 +41,7 @@ dt = 0.002
 
 regions = ['VISp', 'VISl', 'VISal']
 conditions = None
-# regions = ['VISp', 'VISl']
+regions = ['VISp', 'VISl']
 # conditions = [246, 251]
 
 if args.eval_interval > args.log_interval:

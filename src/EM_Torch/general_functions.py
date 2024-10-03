@@ -150,12 +150,19 @@ def plot_latent_coupling(latent_coupling, output_dir):
 
 def load_model_checkpoint(output_dir, load_epoch):
     load_model_dir = os.path.join(output_dir, 'models', f'model_{load_epoch}.pth')
+    intermediate_vars_dir = os.path.join(output_dir, 'models', f'intermediate_vars_{load_epoch}.pkl')
     load_optimizer_dir = os.path.join(output_dir, 'models', f'optimizer_{load_epoch}.pth')
     scheduler_dir = os.path.join(output_dir, 'models', f'scheduler_{load_epoch}.pth')
     if os.path.isfile(load_model_dir):
         model = torch.load(load_model_dir, map_location=torch.device('cpu'))
     else:
         raise Exception(f'No model_{load_epoch}.pth file found at {load_model_dir}')
+    if os.path.isfile(intermediate_vars_dir):
+        with open(intermediate_vars_dir, 'rb') as f:
+            intermediate_vars = pickle.load(f)
+            W_CKL, a_CKL = intermediate_vars['W_CKL'], intermediate_vars['a_CKL']
+    else:
+        raise Exception(f'No intermediate_vars_{load_epoch}.pkl file found at {intermediate_vars_dir}')
     if os.path.isfile(load_optimizer_dir):
         optimizer = torch.load(load_optimizer_dir, map_location=torch.device('cpu'))
     else:
@@ -164,7 +171,7 @@ def load_model_checkpoint(output_dir, load_epoch):
         scheduler = torch.load(scheduler_dir, map_location=torch.device('cpu'))
     else:
         raise Exception(f'No scheduler_{load_epoch}.pth file found at {scheduler_dir}')
-    return model, optimizer, scheduler
+    return model, optimizer, scheduler, W_CKL, a_CKL
 
 
 def reset_metric_checkpoint(output_dir, folder_name, sub_folder_name, metric_files, start_epoch):
@@ -233,11 +240,14 @@ def write_log_and_model(output_str, output_dir, epoch, model, optimizer, schedul
     if not os.path.exists(models_path):
         os.makedirs(models_path)
     torch.save(model.state_dict(), os.path.join(models_path, f'model_{epoch}.pth'))
+    with open(os.path.join(models_path, f'intermediate_vars_{epoch}.pkl'), 'wb') as f:
+        pickle.dump({'W_CKL': model.W_CKL, 'a_CKL': model.a_CKL}, f)
     torch.save(optimizer.state_dict(), os.path.join(models_path, f'optimizer_{epoch}.pth'))
     torch.save(scheduler.state_dict(), os.path.join(models_path, f'scheduler_{epoch}.pth'))
 
 
-def plot_outputs(model, neuron_factor_access, unique_regions, output_dir, folder, epoch, ess_train, ess_test, offset_train, offset_test):
+def plot_outputs(model, neuron_factor_access, unique_regions, output_dir, folder, epoch,
+                 ess_train=None, ess_test=None, offset_train=None, offset_test=None):
 
     output_dir = os.path.join(output_dir, folder)
     if not os.path.exists(output_dir):
@@ -266,18 +276,22 @@ def plot_outputs(model, neuron_factor_access, unique_regions, output_dir, folder
     sigma_dir = os.path.join(output_dir, 'sigma')
     if not os.path.exists(sigma_dir):
         os.makedirs(sigma_dir)
-    ess_train_dir = os.path.join(output_dir, 'ess_train')
-    if not os.path.exists(ess_train_dir):
-        os.makedirs(ess_train_dir)
-    ess_test_dir = os.path.join(output_dir, 'ess_test')
-    if not os.path.exists(ess_test_dir):
-        os.makedirs(ess_test_dir)
-    offset_train_dir = os.path.join(output_dir, 'offset_train')
-    if not os.path.exists(offset_train_dir):
-        os.makedirs(offset_train_dir)
-    offset_test_dir = os.path.join(output_dir, 'offset_test')
-    if not os.path.exists(offset_test_dir):
-        os.makedirs(offset_test_dir)
+    if ess_train is not None:
+        ess_train_dir = os.path.join(output_dir, 'ess_train')
+        if not os.path.exists(ess_train_dir):
+            os.makedirs(ess_train_dir)
+    if ess_test is not None:
+        ess_test_dir = os.path.join(output_dir, 'ess_test')
+        if not os.path.exists(ess_test_dir):
+            os.makedirs(ess_test_dir)
+    if offset_train is not None:
+        offset_train_dir = os.path.join(output_dir, 'offset_train')
+        if not os.path.exists(offset_train_dir):
+            os.makedirs(offset_train_dir)
+    if offset_test is not None:
+        offset_test_dir = os.path.join(output_dir, 'offset_test')
+        if not os.path.exists(offset_test_dir):
+            os.makedirs(offset_test_dir)
     proposal_means_dir = os.path.join(output_dir, 'proposal_means')
     if not os.path.exists(proposal_means_dir):
         os.makedirs(proposal_means_dir)
@@ -369,29 +383,33 @@ def plot_outputs(model, neuron_factor_access, unique_regions, output_dir, folder
         plt.title('Sigma')
         plt.savefig(os.path.join(sigma_dir, f'Sigma_{epoch}.png'))
 
-        plt.figure(figsize=(10, 10))
-        plt.plot(ess_train.flatten().numpy(), label='Effective Sample Size Train')
-        plt.title('Effective Sample Size Train')
-        plt.savefig(os.path.join(ess_train_dir, f'ess_train_{epoch}.png'))
-        plt.close()
+        if ess_train is not None:
+            plt.figure(figsize=(10, 10))
+            plt.plot(ess_train.flatten().numpy(), label='Effective Sample Size Train')
+            plt.title('Effective Sample Size Train')
+            plt.savefig(os.path.join(ess_train_dir, f'ess_train_{epoch}.png'))
+            plt.close()
 
-        plt.figure(figsize=(10, 10))
-        plt.plot(ess_test.flatten().numpy(), label='Effective Sample Size Test')
-        plt.title('Effective Sample Size Test')
-        plt.savefig(os.path.join(ess_test_dir, f'ess_test_{epoch}.png'))
-        plt.close()
+        if ess_test is not None:
+            plt.figure(figsize=(10, 10))
+            plt.plot(ess_test.flatten().numpy(), label='Effective Sample Size Test')
+            plt.title('Effective Sample Size Test')
+            plt.savefig(os.path.join(ess_test_dir, f'ess_test_{epoch}.png'))
+            plt.close()
 
-        plt.figure(figsize=(10, 10))
-        plt.plot(offset_train.flatten().numpy(), label='Trial Offsets Train')
-        plt.title('Trial Offset Train')
-        plt.savefig(os.path.join(offset_train_dir, f'offset_train_{epoch}.png'))
-        plt.close()
+        if offset_train is not None:
+            plt.figure(figsize=(10, 10))
+            plt.plot(offset_train.flatten().numpy(), label='Trial Offsets Train')
+            plt.title('Trial Offset Train')
+            plt.savefig(os.path.join(offset_train_dir, f'offset_train_{epoch}.png'))
+            plt.close()
 
-        plt.figure(figsize=(10, 10))
-        plt.plot(offset_test.flatten().numpy(), label='Trial Offset Test')
-        plt.title('Trial Offset Test')
-        plt.savefig(os.path.join(offset_test_dir, f'offset_test_{epoch}.png'))
-        plt.close()
+        if offset_test is not None:
+            plt.figure(figsize=(10, 10))
+            plt.plot(offset_test.flatten().numpy(), label='Trial Offset Test')
+            plt.title('Trial Offset Test')
+            plt.savefig(os.path.join(offset_test_dir, f'offset_test_{epoch}.png'))
+            plt.close()
 
         proposal_offsets = model.trial_peak_offset_proposal_means.flatten().numpy()
         plt.figure(figsize=(10, 10))

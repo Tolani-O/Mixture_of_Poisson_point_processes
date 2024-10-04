@@ -21,18 +21,20 @@ the_rest = 'zeros'
 args.batch_size = 'All'
 args.param_seed = f'Real_{init}Init'
 args.notes = f'var landmarks spread aligned lr 1e-4'
+args.log_interval = 500
+args.eval_interval = 500
 args.scheduler_patience = 80000 #2000
 args.scheduler_threshold = 1e-10 #0.1
 args.scheduler_factor = 0.9
 args.lr = 0.0001
-args.num_epochs = 100000
+args.num_epochs = 200000
 args.tau_beta = 8000
-args.tau_config = 10 # Number of samples to generate for each trial
+args.tau_config = 10
 args.tau_sigma = 1
 args.tau_sd = 50
 sd_init = 0.5
 # args.cuda = False
-args.n_trial_samples = 10
+args.n_trial_samples = 10  # Number of samples to generate for each trial
 peak1_left_landmarks = [0.03, 0.03, 0.03]
 peak1_right_landmarks = [0.11, 0.14, 0.13]
 peak2_left_landmarks = [0.17, 0.18, 0.18]
@@ -97,10 +99,10 @@ with (torch.no_grad()):
 
 output_str = (f"Using CUDA: {args.cuda}\n"
               f"Num available GPUs: {torch.cuda.device_count()}\n"
-              f"peak1_left_landmarks:\n{model.time[model.peak1_left_landmarks.reshape(model.n_areas, -1)]}\n"
-              f"peak1_right_landmarks:\n{model.time[model.peak1_right_landmarks.reshape(model.n_areas, -1)]}\n"
-              f"peak2_left_landmarks:\n{model.time[model.peak2_left_landmarks.reshape(model.n_areas, -1)]}\n"
-              f"peak2_right_landmarks:\n{model.time[model.peak2_right_landmarks.reshape(model.n_areas, -1)]}\n")
+              f"peak1_left_landmarks:\n{model.time[model.peak1_left_landmarks.reshape(model.n_areas, -1)].cpu().numpy()}\n"
+              f"peak1_right_landmarks:\n{model.time[model.peak1_right_landmarks.reshape(model.n_areas, -1)].cpu().numpy()}\n"
+              f"peak2_left_landmarks:\n{model.time[model.peak2_left_landmarks.reshape(model.n_areas, -1)].cpu().numpy()}\n"
+              f"peak2_right_landmarks:\n{model.time[model.peak2_right_landmarks.reshape(model.n_areas, -1)].cpu().numpy()}\n")
 patience = args.scheduler_patience//args.eval_interval
 start_epoch = 0
 args.folder_name = (
@@ -129,7 +131,7 @@ print(f'folder_name: {args.folder_name}\n\n')
 print(output_str)
 # torch.autograd.set_detect_anomaly(True)
 
-def train_gradient():
+def train_gradient(batch_ct):
     for Y, access in dataloader:
         optimizer.zero_grad()
         likelihood_term, penalty_term = model.forward(Y, access, args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
@@ -138,20 +140,26 @@ def train_gradient():
         optimizer.step()
         losses_batch.append((likelihood_term + penalty_term).item())
         log_likelihoods_batch.append(likelihood_term.item())
+        epoch_batch.append(batch_ct)
+        batch_ct += 1
         torch.cuda.empty_cache()
+        return batch_ct
 
 
 if __name__ == "__main__":
     log_likelihoods_batch = []
     losses_batch = []
+    epoch_batch = []
     log_likelihoods_train = []
     losses_train = []
+    epoch_train = []
     total_time = 0
     start_time = time.time()
+    batch_ct = 0
     for epoch in range(start_epoch, start_epoch + args.num_epochs):
         if args.cuda: model.cuda()
         model.train()
-        train_gradient()
+        batch_ct = train_gradient(batch_ct)
         if epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             model.eval()
             with torch.no_grad():
@@ -163,6 +171,7 @@ if __name__ == "__main__":
                                      (1 / (args.n_trials * args.n_configs)) * penalty_term).item())
                 log_likelihoods_train.append(
                     (1 / (args.K * args.n_trials * args.n_configs)) * likelihood_term_train.item())
+                epoch_train.append(epoch)
                 scheduler.step(log_likelihoods_train[-1])
 
                 non_zero_model_train = torch.nonzero(model_factor_assignment_train)
@@ -198,16 +207,20 @@ if __name__ == "__main__":
             is_empty = epoch == 0
             write_losses(log_likelihoods_train, 'Train', 'Likelihood', output_dir, is_empty)
             write_losses(losses_train, 'Train', 'Loss', output_dir, is_empty)
+            write_losses(epoch_train, 'Train', 'Epoch', output_dir, is_empty)
             write_losses(log_likelihoods_batch, 'Batch', 'Likelihood', output_dir, is_empty)
             write_losses(losses_batch, 'Batch', 'Loss', output_dir, is_empty)
+            write_losses(epoch_batch, 'Batch', 'Epoch', output_dir, is_empty)
             plot_losses(None, output_dir, 'Train', 'Likelihood', 10)
             plot_losses(None, output_dir, 'Train', 'Loss', 10)
             plot_losses(None, output_dir, 'Batch', 'Likelihood', 20)
             plot_losses(None, output_dir, 'Batch', 'Loss', 20)
             log_likelihoods_batch = []
             losses_batch = []
+            epoch_batch = []
             log_likelihoods_train = []
             losses_train = []
+            epoch_train = []
             print(output_str)
             start_time = time.time()
             if scheduler._last_lr[0] < 1e-5:

@@ -196,12 +196,13 @@ def create_relevant_files(output_dir, output_str):
     file_names = [
         'log_likelihoods_batch',
         'losses_batch',
+        'epoch_batch',
         'log_likelihoods_train',
         'losses_train',
+        'epoch_train',
         'log_likelihoods_test',
         'losses_test',
         'beta_MSE_test',
-        # 'coupling_MSE_test',
         'alpha_MSE_test',
         'theta_MSE_test',
         'pi_MSE_test',
@@ -211,8 +212,6 @@ def create_relevant_files(output_dir, output_str):
         'Sigma_MSE_test',
         'ltriLkhd_train',
         'ltriLkhd_test',
-        # 'clusr_misses_train',
-        # 'clusr_misses_test',
         'gains_MSE_train',
         'gains_MSE_test',
         'trialoffsets_MSE_train',
@@ -223,14 +222,6 @@ def create_relevant_files(output_dir, output_str):
     for file_name in file_names:
         with open(os.path.join(output_dir, '.'.join([file_name, 'json'])), 'w+b') as file:
             file.write(b'[]')
-
-    # command_str = (f"python src/psplines_gradient_method/main.py "
-    #                f"--K {args.K} --R {args.n_trials} --L {args.L} --intensity_mltply {args.intensity_mltply} "
-    #                f"--intensity_bias {args.intensity_bias} --tau_beta {args.tau_beta} --tau_sigma1 {args.tau_sigma1} "
-    #                f"--num_epochs {args.num_epochs} --notes {args.notes} "
-    #                f"--data_seed {args.data_seed} --param_seed {args.param_seed} --load_and_train 1")
-    # with open(os.path.join(output_dir, 'command.txt'), 'w') as file:
-    #     file.write(command_str)
 
 
 def write_log_and_model(output_str, output_dir, epoch, model, optimizer, scheduler):
@@ -316,7 +307,7 @@ def plot_outputs(model, neuron_factor_access, unique_regions, output_dir, folder
         plt.close()
 
         pi = model.pi_value(neuron_factor_access).numpy()
-        W_L = torch.sum(model.W_CKL, dim=(0, 1)).numpy()
+        W_L = np.round((torch.sum(model.W_CKL, dim=(0, 1))/model.W_CKL.shape[0]).numpy())
         latent_factors = torch.softmax(model.unnormalized_log_factors(), dim=-1).numpy()
         global_max = np.max(latent_factors)
         upper_limit = global_max + 0.005
@@ -497,6 +488,8 @@ def write_losses(list, name, metric, output_dir, starts_out_empty):
         file_name = 'log_likelihoods'
     elif 'loss' in metric.lower():
         file_name = 'losses'
+    elif 'epoch' in metric.lower():
+        file_name = 'epoch'
     else:
         file_name = metric
     file_name = f'{file_name}_{name.lower()}.json'
@@ -523,6 +516,8 @@ def plot_losses(true_likelihood, output_dir, name, metric, cutoff=0):
         file_name = 'log_likelihoods'
     elif 'loss' in metric.lower():
         file_name = 'losses'
+    elif 'epoch' in metric.lower():
+        file_name = 'epoch'
     else:
         file_name = metric
     file_name = f'{file_name}_{name.lower()}.json'
@@ -530,15 +525,23 @@ def plot_losses(true_likelihood, output_dir, name, metric, cutoff=0):
         folder = 'Test'
     else:
         folder = 'Train'
+    if name.lower()=='batch':
+        epoch_file_name = 'epoch_batch.json'
+    else:
+        epoch_file_name = 'epoch_train.json'
     plt_path = os.path.join(output_dir, folder)
     if not os.path.exists(plt_path):
         os.makedirs(plt_path)
     json_path = os.path.join(output_dir, file_name)
     with open(json_path, 'r') as file:
         metric_data = json.load(file)
+    epoch_json_path = os.path.join(output_dir, epoch_file_name)
+    with open(epoch_json_path, 'r') as file:
+        epoch_data = json.load(file)
     metric_data = metric_data[cutoff:]
+    epoch_data = epoch_data[cutoff:]
     plt.figure(figsize=(10, 6))
-    plt.plot(metric_data, label=metric)
+    plt.plot(epoch_data, metric_data, label=metric)
     if true_likelihood is not None:
         true_likelihood_vector = [true_likelihood] * len(metric_data)
         plt.plot(true_likelihood_vector, label='True Log Likelihood')

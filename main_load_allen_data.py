@@ -28,7 +28,7 @@ args.scheduler_threshold = 1e-10 #0.1
 args.scheduler_factor = 0.9
 args.lr = 0.0001
 args.num_epochs = 200000
-args.tau_beta = 8000
+args.tau_beta = 3000
 args.tau_config = 10
 args.tau_sigma = 1
 args.tau_sd = 50
@@ -92,11 +92,6 @@ model = LikelihoodELBOModel(bin_time, num_factors, args.A, args.n_configs, args.
 model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, cluster_dir=os.path.join(data.output_dir, folder_name), init=the_rest)
 
 if args.cuda: model.cuda()
-model.eval()
-with (torch.no_grad()):
-    model.generate_trial_peak_offset_samples()
-    _, _, _, effective_sample_size_train, trial_peak_offsets_train = model.evaluate(Y_train, factor_access_train)
-
 output_str = (f"Using CUDA: {args.cuda}\n"
               f"Num available GPUs: {torch.cuda.device_count()}\n"
               f"peak1_left_landmarks:\n{model.time[model.peak1_left_landmarks.reshape(model.n_areas, -1)].cpu().numpy()}\n"
@@ -118,9 +113,7 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
                                                        patience=patience, threshold_mode='abs',
                                                        threshold=args.scheduler_threshold)
 create_relevant_files(output_dir, output_str)
-plot_outputs(model.cpu(), factor_access_train.permute(2, 0, 1).cpu(), unique_regions, output_dir, 'Train', -1,
-             effective_sample_size_train.cpu(), None,
-             trial_peak_offsets_train.permute(1,0,2).cpu(), None)
+plot_outputs(model.cpu(), factor_access_train.permute(2, 0, 1).cpu(), unique_regions, output_dir, 'Train', -1)
 
 # Instantiate the dataset and dataloader
 dataset = CustomDataset(Y_train, factor_access_train)
@@ -164,22 +157,13 @@ if __name__ == "__main__":
             model.eval()
             with torch.no_grad():
                 penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
-                model.generate_trial_peak_offset_samples()
-                likelihood_term_train, model_factor_assignment_train, model_neuron_gains_train, effective_sample_size_train, model_trial_offsets_train = model.evaluate(
-                    Y_train, factor_access_train)
+                likelihood_term_train, model_factor_assignment_train, model_neuron_gains_train = model.evaluate(Y_train, factor_access_train)
                 losses_train.append(((1 / (args.K * args.n_trials * args.n_configs)) * likelihood_term_train +
                                      (1 / (args.n_trials * args.n_configs)) * penalty_term).item())
                 log_likelihoods_train.append(
                     (1 / (args.K * args.n_trials * args.n_configs)) * likelihood_term_train.item())
                 epoch_train.append(epoch)
                 scheduler.step(log_likelihoods_train[-1])
-
-                non_zero_model_train = torch.nonzero(model_factor_assignment_train)
-                trial_offsets_model_train = model_trial_offsets_train.reshape(model_trial_offsets_train.shape[0],
-                                                                              model_trial_offsets_train.shape[1],
-                                                                              2, model.n_factors)[
-                                            non_zero_model_train[:, 0], :, :, non_zero_model_train[:, 2]]
-
         if epoch % args.log_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             end_time = time.time()  # Record the end time of the epoch
             elapsed_time = end_time - start_time  # Calculate the elapsed time for the epoch
@@ -201,9 +185,7 @@ if __name__ == "__main__":
                 f"dataSeed: {args.data_seed},\n"
                 f"{args.notes}\n\n")
             write_log_and_model(output_str, output_dir, epoch, model.cpu(), optimizer, scheduler)
-            plot_outputs(model.cpu(), factor_access_train.permute(2, 0, 1).cpu(), unique_regions, output_dir, 'Train',
-                         epoch, effective_sample_size_train.cpu(), None,
-                         model_trial_offsets_train.permute(1,0,2).cpu(), None)
+            plot_outputs(model.cpu(), factor_access_train.permute(2, 0, 1).cpu(), unique_regions, output_dir, 'Train', epoch)
             is_empty = epoch == 0
             write_losses(log_likelihoods_train, 'Train', 'Likelihood', output_dir, is_empty)
             write_losses(losses_train, 'Train', 'Loss', output_dir, is_empty)

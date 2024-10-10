@@ -188,7 +188,7 @@ def reset_metric_checkpoint(output_dir, folder_name, sub_folder_name, metric_fil
             json.dump(file_contents, file, indent=4)
 
 
-def create_relevant_files(output_dir, output_str):
+def create_relevant_files(output_dir, output_str, ground_truth=False):
     with open(os.path.join(output_dir, 'log.txt'), 'w') as file:
         file.write(output_str)
 
@@ -200,23 +200,26 @@ def create_relevant_files(output_dir, output_str):
         'log_likelihoods_train',
         'losses_train',
         'epoch_train',
-        'log_likelihoods_test',
-        'losses_test',
-        'beta_MSE_test',
-        'alpha_MSE_test',
-        'theta_MSE_test',
-        'pi_MSE_test',
-        'proposal_means_MSE_test',
-        'configoffset_MSE_test',
-        'ltri_MSE_test',
-        'Sigma_MSE_test',
-        'ltriLkhd_train',
-        'ltriLkhd_test',
-        'gains_MSE_train',
-        'gains_MSE_test',
-        'trialoffsets_MSE_train',
-        'trialoffsets_MSE_test',
+
     ]
+    if ground_truth:
+        test_file_names = [
+            'log_likelihoods_test',
+            'losses_test',
+            'beta_MSE_test',
+            'alpha_MSE_test',
+            'theta_MSE_test',
+            'pi_MSE_test',
+            'proposal_means_MSE_test',
+            'configoffset_MSE_test',
+            'ltri_MSE_test',
+            'Sigma_MSE_test',
+            'ltriLkhd_train',
+            'ltriLkhd_test',
+            'gains_MSE_train',
+            'gains_MSE_test',
+        ]
+        file_names.extend(test_file_names)
 
     # Iterate over the filenames and create each file
     for file_name in file_names:
@@ -237,8 +240,7 @@ def write_log_and_model(output_str, output_dir, epoch, model, optimizer, schedul
     torch.save(scheduler.state_dict(), os.path.join(models_path, f'scheduler_{epoch}.pth'))
 
 
-def plot_outputs(model, neuron_factor_access, unique_regions, output_dir, folder, epoch,
-                 ess_train=None, ess_test=None, offset_train=None, offset_test=None):
+def plot_outputs(model, neuron_factor_access, unique_regions, output_dir, folder, epoch):
 
     output_dir = os.path.join(output_dir, folder)
     if not os.path.exists(output_dir):
@@ -267,22 +269,6 @@ def plot_outputs(model, neuron_factor_access, unique_regions, output_dir, folder
     sigma_dir = os.path.join(output_dir, 'sigma')
     if not os.path.exists(sigma_dir):
         os.makedirs(sigma_dir)
-    if ess_train is not None:
-        ess_train_dir = os.path.join(output_dir, 'ess_train')
-        if not os.path.exists(ess_train_dir):
-            os.makedirs(ess_train_dir)
-    if ess_test is not None:
-        ess_test_dir = os.path.join(output_dir, 'ess_test')
-        if not os.path.exists(ess_test_dir):
-            os.makedirs(ess_test_dir)
-    if offset_train is not None:
-        offset_train_dir = os.path.join(output_dir, 'offset_train')
-        if not os.path.exists(offset_train_dir):
-            os.makedirs(offset_train_dir)
-    if offset_test is not None:
-        offset_test_dir = os.path.join(output_dir, 'offset_test')
-        if not os.path.exists(offset_test_dir):
-            os.makedirs(offset_test_dir)
     proposal_means_dir = os.path.join(output_dir, 'proposal_means')
     if not os.path.exists(proposal_means_dir):
         os.makedirs(proposal_means_dir)
@@ -373,34 +359,6 @@ def plot_outputs(model, neuron_factor_access, unique_regions, output_dir, folder
         plt.plot(Sigma, label='Sigma')
         plt.title('Sigma')
         plt.savefig(os.path.join(sigma_dir, f'Sigma_{epoch}.png'))
-
-        if ess_train is not None:
-            plt.figure(figsize=(10, 10))
-            plt.plot(ess_train.flatten().numpy(), label='Effective Sample Size Train')
-            plt.title('Effective Sample Size Train')
-            plt.savefig(os.path.join(ess_train_dir, f'ess_train_{epoch}.png'))
-            plt.close()
-
-        if ess_test is not None:
-            plt.figure(figsize=(10, 10))
-            plt.plot(ess_test.flatten().numpy(), label='Effective Sample Size Test')
-            plt.title('Effective Sample Size Test')
-            plt.savefig(os.path.join(ess_test_dir, f'ess_test_{epoch}.png'))
-            plt.close()
-
-        if offset_train is not None:
-            plt.figure(figsize=(10, 10))
-            plt.plot(offset_train.flatten().numpy(), label='Trial Offsets Train')
-            plt.title('Trial Offset Train')
-            plt.savefig(os.path.join(offset_train_dir, f'offset_train_{epoch}.png'))
-            plt.close()
-
-        if offset_test is not None:
-            plt.figure(figsize=(10, 10))
-            plt.plot(offset_test.flatten().numpy(), label='Trial Offset Test')
-            plt.title('Trial Offset Test')
-            plt.savefig(os.path.join(offset_test_dir, f'offset_test_{epoch}.png'))
-            plt.close()
 
         proposal_offsets = model.trial_peak_offset_proposal_means.flatten().numpy()
         plt.figure(figsize=(10, 10))

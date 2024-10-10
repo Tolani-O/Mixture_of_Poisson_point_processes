@@ -237,14 +237,15 @@ class LikelihoodELBOModel(nn.Module):
     def generate_trial_peak_offset_samples(self):
         gaussian_sample = torch.randn(self.n_trial_samples, self.n_trials, self.n_configs, 2 * self.n_factors,
                                       device=self.device, dtype=torch.float64)
+        gaussian_sample = torch.concat([gaussian_sample, torch.zeros(1, *gaussian_sample.shape[1:], device=self.device, dtype=torch.float64)], dim=0)
         sd_matrix = self.sd_matrix()
         # trial_peak_offset_proposal_samples N x R x C x 2AL
         self.trial_peak_offset_proposal_samples = (self.trial_peak_offset_proposal_means.unsqueeze(0) +
                                                    torch.einsum('lj,nrcj->nrcl', sd_matrix, gaussian_sample)).detach()
 
 
-    def generate_trial_peak_offset_single_sample(self):
-        self.trial_peak_offset_proposal_samples = self.trial_peak_offset_proposal_means.unsqueeze(0).detach()
+    # def generate_trial_peak_offset_single_sample(self):
+    #     self.trial_peak_offset_proposal_samples = self.trial_peak_offset_proposal_means.unsqueeze(0).detach()
 
 
     def warp_all_latent_factors_for_all_trials(self):
@@ -463,10 +464,11 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def forward(self, Y, neuron_factor_access, tau_beta, tau_config, tau_sigma, tau_sd):
-        self.generate_trial_peak_offset_single_sample()
-        posterior_warped_factors = self.warp_all_latent_factors_for_all_trials()
         self.generate_trial_peak_offset_samples()
-        warped_factors = self.warp_all_latent_factors_for_all_trials()
+        all_warped_factors = self.warp_all_latent_factors_for_all_trials()
+        warped_factors = all_warped_factors[:, :, :-1, :, :]
+        posterior_warped_factors = all_warped_factors[:, :, -1, :, :].unsqueeze(2)
+        self.trial_peak_offset_proposal_samples = self.trial_peak_offset_proposal_samples[:-1]
         likelihood_term = self.compute_log_elbo(Y, neuron_factor_access, warped_factors, posterior_warped_factors)
         # penalty terms
         penalty_term = self.compute_penalty_terms(tau_beta, tau_config, tau_sigma, tau_sd)
@@ -474,8 +476,12 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def evaluate(self, Y, neuron_factor_access):
-        self.generate_trial_peak_offset_single_sample()
-        warped_factors = self.warp_all_latent_factors_for_all_trials()
-        likelihood_term = self.compute_log_elbo(Y, neuron_factor_access, warped_factors, warped_factors)
+        self.generate_trial_peak_offset_samples()
+        all_warped_factors = self.warp_all_latent_factors_for_all_trials()
+        warped_factors = all_warped_factors[:, :, :-1, :, :]
+        posterior_warped_factors = all_warped_factors[:, :, -1, :, :].unsqueeze(2)
+        self.trial_peak_offset_proposal_samples = self.trial_peak_offset_proposal_samples[:-1]
+        likelihood_term = self.compute_log_elbo(Y, neuron_factor_access, warped_factors, posterior_warped_factors)
+        # inference terms
         neuron_factor_assignment, neuron_firing_rates = self.infer_latent_variables()
         return likelihood_term, neuron_factor_assignment, neuron_firing_rates

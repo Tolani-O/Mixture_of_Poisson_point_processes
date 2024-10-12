@@ -241,11 +241,7 @@ class LikelihoodELBOModel(nn.Module):
         sd_matrix = self.sd_matrix()
         # trial_peak_offset_proposal_samples N x R x C x 2AL
         self.trial_peak_offset_proposal_samples = (self.trial_peak_offset_proposal_means.unsqueeze(0) +
-                                                   torch.einsum('lj,nrcj->nrcl', sd_matrix, gaussian_sample)).detach()
-
-
-    # def generate_trial_peak_offset_single_sample(self):
-    #     self.trial_peak_offset_proposal_samples = self.trial_peak_offset_proposal_means.unsqueeze(0).detach()
+                                                   torch.einsum('lj,nrcj->nrcl', sd_matrix, gaussian_sample))
 
 
     def warp_all_latent_factors_for_all_trials(self):
@@ -360,9 +356,9 @@ class LikelihoodELBOModel(nn.Module):
 
         # U tensor terms
         # log_posterior_warped_factors_minus_logsumexp_posterior_warped_factors # C x R x L x 1 x T
-        log_posterior_warped_factors_minus_logsumexp_posterior_warped_factors = torch.log(posterior_warped_factors) - torch.log(torch.sum(posterior_warped_factors, dim=-1)).unsqueeze(-1)
+        log_posterior_warped_factors_minus_logsum_t_posterior_warped_factors = torch.log(posterior_warped_factors) - torch.log(torch.sum(posterior_warped_factors, dim=-1)).unsqueeze(-1)
         # Y_times_posterior_warped_beta  # C x K x L
-        Y_times_posterior_warped = torch.einsum('ktrc,crlt->ckl', Y, log_posterior_warped_factors_minus_logsumexp_posterior_warped_factors.squeeze())
+        Y_times_posterior_warped = torch.einsum('ktrc,crlt->ckl', Y, log_posterior_warped_factors_minus_logsum_t_posterior_warped_factors.squeeze())
         # log_y_factorial_sum_rt # C x K x 1
         log_y_factorial_sum_rt = torch.sum(torch.lgamma(Y + 1), dim=(1,2)).t().unsqueeze(2)
         # Y_sum_rt_times_log_alpha_minus_logsumesp_beta  # C x K x L
@@ -463,25 +459,70 @@ class LikelihoodELBOModel(nn.Module):
         return neuron_factor_assignment, neuron_firing_rates
 
 
-    def forward(self, Y, neuron_factor_access, tau_beta, tau_config, tau_sigma, tau_sd):
+    def forward(self, Y, neuron_factor_access):
         self.generate_trial_peak_offset_samples()
         all_warped_factors = self.warp_all_latent_factors_for_all_trials()
         warped_factors = all_warped_factors[:, :, :-1, :, :]
         posterior_warped_factors = all_warped_factors[:, :, -1, :, :].unsqueeze(2)
         self.trial_peak_offset_proposal_samples = self.trial_peak_offset_proposal_samples[:-1]
         likelihood_term = self.compute_log_elbo(Y, neuron_factor_access, warped_factors, posterior_warped_factors)
-        # penalty terms
-        penalty_term = self.compute_penalty_terms(tau_beta, tau_config, tau_sigma, tau_sd)
-        return likelihood_term, penalty_term
+        return likelihood_term
 
 
-    def evaluate(self, Y, neuron_factor_access):
-        self.generate_trial_peak_offset_samples()
-        all_warped_factors = self.warp_all_latent_factors_for_all_trials()
-        warped_factors = all_warped_factors[:, :, :-1, :, :]
-        posterior_warped_factors = all_warped_factors[:, :, -1, :, :].unsqueeze(2)
-        self.trial_peak_offset_proposal_samples = self.trial_peak_offset_proposal_samples[:-1]
-        likelihood_term = self.compute_log_elbo(Y, neuron_factor_access, warped_factors, posterior_warped_factors)
-        # inference terms
-        neuron_factor_assignment, neuron_firing_rates = self.infer_latent_variables()
-        return likelihood_term, neuron_factor_assignment, neuron_firing_rates
+    def compute_uncertainty(self, Y, neuron_factor_access):
+        likelihood_term = self.forward(Y, neuron_factor_access)
+        param_names = ['beta', 'alpha', 'config_peak_offsets', 'trial_peak_offset_covar_ltri_diag',
+                       'trial_peak_offset_covar_ltri_offdiag']
+        param_values = [p for n, p in self.named_parameters() if n in param_names]
+        first_grads = torch.autograd.grad(likelihood_term, param_values, create_graph=True)
+        # Compute second derivatives (Hessian diagonal)
+        hessian_diagonal = []
+        for i in range(len(first_grads)):
+            grad = first_grads[i].flatten()  # Flatten gradient tensor to vector
+            second_grad_diag = []
+            num_iter = len(grad)
+            for j in range(num_iter):  # Iterate over each element in the gradient vector
+                # Compute second derivative (diagonal element)
+                second_grad = torch.autograd.grad(grad, param_values[i], torch.eye(num_iter)[0], retain_graph=True)[0]
+                second_grad2 = torch.autograd.grad(grad[j], param_values[i], retain_graph=True)[0]
+                # Append second derivative for the corresponding parameter
+                second_grad_diag.append(second_grad[0].flatten()[j])
+            hessian_diagonal.append(torch.cat(second_grad_diag))
+
+        grad = first_grads[0]
+        second_grads = torch.autograd.grad(grad, param_values['beta'])
+
+        return param_values
+
+
+    # def compute_uncertainty(self, Y, neuron_factor_access):
+    #     from functools import partial
+    #     from torch.func import vjp, jacfwd
+    #
+    #     likelihood_term = self.forward(Y, neuron_factor_access)
+    #
+    #     _, vjp_fn = vjp(likelihood_term, param_values)
+    #     def f(params, inputs):
+    #         return torch.func.functional_call(self, params, inputs)
+    #
+    #     jacobian = jacfwd(f)({'beta': dict(self.named_parameters())['beta']}, (Y, neuron_factor_access))
+    #     likelihood_term = self.likelihood_term(Y, neuron_factor_access)
+    #     param_names = ['beta', 'alpha', 'config_peak_offsets', 'trial_peak_offset_covar_ltri_diag', 'trial_peak_offset_covar_ltri_offdiag']
+    #     param_values = [p for n, p in self.named_parameters() if n in param_names]
+    #     first_grads = torch.autograd.grad(likelihood_term, param_values, create_graph=True)
+    #     # Compute second derivatives (Hessian diagonal)
+    #     hessian_diagonal = []
+    #     for i in range(len(first_grads)):
+    #         grad = first_grads[i].flatten()  # Flatten gradient tensor to vector
+    #         second_grad_diag = []
+    #         for j in range(len(grad)):  # Iterate over each element in the gradient vector
+    #             # Compute second derivative (diagonal element)
+    #             second_grad = torch.autograd.grad(grad[j], param_values[i], retain_graph=True)
+    #             # Append second derivative for the corresponding parameter
+    #             second_grad_diag.append(second_grad[0].flatten()[j])
+    #         hessian_diagonal.append(torch.cat(second_grad_diag))
+    #
+    #     grad = first_grads[0]
+    #     second_grads = torch.autograd.grad(grad, param_values['beta'])
+    #
+    #     return param_values

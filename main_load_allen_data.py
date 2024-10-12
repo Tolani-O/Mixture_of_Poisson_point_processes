@@ -20,7 +20,7 @@ init = 'Data'
 the_rest = 'zeros'
 args.batch_size = 'All'
 args.param_seed = f'Real_{init}Init'
-args.notes = f'var landmarks spread aligned lr 1e-4'
+args.notes = f'var landmarks spread aligned lr 1e-4 warp posterior sample grads'
 args.log_interval = 500
 args.eval_interval = 500
 args.scheduler_patience = 80000 #2000
@@ -127,7 +127,8 @@ print(output_str)
 def train_gradient(batch_ct):
     for Y, access in dataloader:
         optimizer.zero_grad()
-        likelihood_term, penalty_term = model.forward(Y, access, args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
+        likelihood_term = model.forward(Y, access)
+        penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
         loss = -(likelihood_term + penalty_term)
         loss.backward()
         optimizer.step()
@@ -156,8 +157,9 @@ if __name__ == "__main__":
         if epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             model.eval()
             with torch.no_grad():
+                likelihood_term_train = model.forward(Y_train, factor_access_train)
                 penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
-                likelihood_term_train, model_factor_assignment_train, model_neuron_gains_train = model.evaluate(Y_train, factor_access_train)
+                model_factor_assignment_train, model_neuron_gains_train = model.infer_latent_variables()
                 losses_train.append(((1 / (args.K * args.n_trials * args.n_configs)) * likelihood_term_train +
                                      (1 / (args.n_trials * args.n_configs)) * penalty_term).item())
                 log_likelihoods_train.append(

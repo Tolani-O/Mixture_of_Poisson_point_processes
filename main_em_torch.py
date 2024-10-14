@@ -21,14 +21,14 @@ outputs_folder = 'outputs'
 
 args.n_trials = 15  # R
 args.n_configs = 40  # C
-args.K = 100  # K
+args.K = 300  # K
 # args.intensity_bias = 10
 args.A = 7  # A
 
-args.n_trials = 5
-args.n_configs = 3
-args.K = 6
-args.A = 2
+# args.n_trials = 5
+# args.n_configs = 3
+# args.K = 10
+# args.A = 2
 
 init = 'Data'
 # init = 'Rand'
@@ -40,7 +40,7 @@ the_rest = 'zeros'
 # init = 'DataAndZeroBeta'
 args.batch_size = 'All'
 args.param_seed = f'Real_{init}Init'
-args.notes = f'var landmarks spread aligned lr 1e-4 changed hyperparameters'
+args.notes = f'simulated'
 args.log_interval = 500
 args.eval_interval = 500
 args.scheduler_patience = 80000  # 2000
@@ -53,11 +53,11 @@ args.tau_config = 5
 args.tau_sigma = 0.01
 args.tau_sd = 10
 sd_init = 0.5
-args.n_trial_samples = 4 # 10  # Number of samples to generate for each trial
-peak1_left_landmarks = [0.03, 0.03, 0.03]
-peak1_right_landmarks = [0.11, 0.14, 0.13]
-peak2_left_landmarks = [0.17, 0.18, 0.18]
-peak2_right_landmarks = [0.31, 0.32, 0.30]
+args.n_trial_samples = 10  # Number of samples to generate for each trial
+peak1_left_landmarks = [0.20, 0.20, 0.20]
+peak1_right_landmarks = [0.70, 0.70, 0.70]
+peak2_left_landmarks = [1.20, 1.20, 1.20]
+peak2_right_landmarks = [1.70, 1.70, 1.70]
 
 if args.eval_interval > args.log_interval:
     args.log_interval = args.eval_interval
@@ -75,7 +75,8 @@ if torch.cuda.is_available():
         print("Using CUDA!")
 else:
     args.cuda = False
-data = DataAnalyzer().initialize(configs=args.n_configs, A=args.A, intensity_mltply=args.intensity_mltply,
+args.L = len(peak1_left_landmarks)
+data = DataAnalyzer().initialize(configs=args.n_configs, A=args.A, L=args.L, intensity_mltply=args.intensity_mltply,
                                  intensity_bias=args.intensity_bias)
 # Training data
 Y_train, factor_access_train = load_tensors(data.sample_data(K=args.K, A=args.A, n_trials=args.n_trials), is_numpy=True)
@@ -98,30 +99,37 @@ if args.cuda:
     model.cuda()
     Y_test, factor_access_test, Y_train, factor_access_train = load_tensors((Y_test, factor_access_test, Y_train, factor_access_train), to_cuda=args.cuda)
 model.eval()
-with (torch.no_grad()):
+with torch.no_grad():
     model.init_ground_truth(beta=data.beta[:, 1:],
                             alpha=inv_softplus_torch(data.alpha),
                             config_peak_offsets=data.config_peak_offsets,
+                            trial_peak_offset_proposal_means=trial_offsets_test.squeeze(),
                             trial_peak_offset_covar_ltri=data.trial_peak_offset_covar_ltri,
                             theta=data.theta,
                             pi=F.softmax(data.pi.reshape(args.A, -1), dim=1).flatten(),
-                            trial_peak_offset_proposal_sds=sd_init * torch.ones(2 * data.beta.shape[0], dtype=torch.float64, device=model.device),
-                            init='')
-
-    model.init_ground_truth(trial_peak_offset_proposal_means=trial_offsets_test.squeeze(), init='')
+                            trial_peak_offset_proposal_sds=sd_init * torch.ones(2 * data.beta.shape[0],
+                                                                                dtype=torch.float64,
+                                                                                device=model.device))
     true_ELBO_test = model.forward(Y_test, factor_access_test)
-    model.init_ground_truth(trial_peak_offset_proposal_means=trial_offsets_train.squeeze(), init='')
-    model.W_CKL = None
+    model.init_ground_truth(beta=data.beta[:, 1:],
+                            alpha=inv_softplus_torch(data.alpha),
+                            config_peak_offsets=data.config_peak_offsets,
+                            trial_peak_offset_proposal_means=trial_offsets_train.squeeze(),
+                            trial_peak_offset_covar_ltri=data.trial_peak_offset_covar_ltri,
+                            theta=data.theta,
+                            pi=F.softmax(data.pi.reshape(args.A, -1), dim=1).flatten(),
+                            trial_peak_offset_proposal_sds=sd_init * torch.ones(2 * data.beta.shape[0],
+                                                                                dtype=torch.float64,
+                                                                                device=model.device))
     true_ELBO_train = model.forward(Y_train, factor_access_train)
-    model.cpu()
-    Y_train, factor_access_train = load_tensors((Y_train, factor_access_train))
-
 true_ELBO_train = (1 / (args.K * args.n_trials * args.n_configs)) * true_ELBO_train.item()
 true_ELBO_test = (1 / (args.K * args.n_trials * args.n_configs)) * true_ELBO_test.item()
 true_offset_penalty_train = (1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_train,
                                                                                                 model.ltri_matix()).sum().item()
 true_offset_penalty_test = (1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_test,
                                                                                                model.ltri_matix()).sum().item()
+model.cpu()
+Y_train, factor_access_train = load_tensors((Y_train, factor_access_train))
 args.folder_name = (
     f'dataSeed{args.data_seed}_{args.param_seed}_K{args.K}_A{args.A}_C{args.n_configs}'
     f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauSD{args.tau_sd}'
@@ -254,7 +262,7 @@ if __name__ == "__main__":
                 non_zero_data_train = torch.nonzero(factor_assignment_onehot_train)
                 non_zero_data_test = torch.nonzero(factor_assignment_onehot_test)
 
-                beta_model = model.beta[non_zero_model_train[:, 2]]
+                beta_model = model.unnormalized_log_factors()[non_zero_model_train[:, 2]]
                 beta_data = data.beta[non_zero_data_train[:, 2]]
                 beta_mses.append(F.mse_loss(beta_model, beta_data).item())
                 alpha_model = F.softplus(model.alpha[non_zero_model_train[:, 2]])

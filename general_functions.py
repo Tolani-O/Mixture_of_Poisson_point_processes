@@ -293,7 +293,11 @@ def plot_outputs(model, neuron_factor_access, unique_regions, output_dir, folder
         plt.close()
 
         pi = model.pi_value(neuron_factor_access).numpy()
-        W_L = np.round((torch.sum(model.W_CKL, dim=(0, 1))/model.W_CKL.shape[0]).numpy(), 1)
+        if model.W_CKL is None:
+            W_L = np.zeros(model.n_factors)
+        else:
+            plot_factor_assignments(model.W_CKL.numpy(), output_dir, 'cluster', epoch, False)
+            W_L = np.round((torch.sum(model.W_CKL, dim=(0, 1))/model.W_CKL.shape[0]).numpy(), 1)
         latent_factors = torch.softmax(model.unnormalized_log_factors(), dim=-1).numpy()
         global_max = np.max(latent_factors)
         upper_limit = global_max + 0.005
@@ -373,8 +377,6 @@ def plot_outputs(model, neuron_factor_access, unique_regions, output_dir, folder
         plt.title('Trial Standard Deviations')
         plt.savefig(os.path.join(trial_sd_dir, f'trial_variances_{epoch}.png'))
         plt.close()
-
-        plot_factor_assignments(model.W_CKL.numpy(), output_dir, 'cluster', epoch, False)
         plt.close('all')
 
 
@@ -502,7 +504,7 @@ def plot_losses(true_likelihood, output_dir, name, metric, cutoff=0):
     plt.plot(epoch_data, metric_data, label=metric)
     if true_likelihood is not None:
         true_likelihood_vector = [true_likelihood] * len(metric_data)
-        plt.plot(true_likelihood_vector, label='True Log Likelihood')
+        plt.plot(epoch_data, true_likelihood_vector, label='True Log Likelihood')
     if 'MSE' in metric:
         plt.ylim(bottom=0)
     plt.xlabel('Iterations')

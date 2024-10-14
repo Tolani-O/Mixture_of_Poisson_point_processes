@@ -33,13 +33,13 @@ class DataAnalyzer:
         self.neuron_factor_assignments_onehot = None  # unobserved
         self.neuron_intensities = None  # unobserved
 
-    def initialize(self, configs=3, A=2, T=200, intensity_type=('constant', '1peak', '2peaks'),
+    def initialize(self, configs=3, A=2, L=3, T=200, intensity_type=('constant', '1peak', '2peaks'),
                    intensity_mltply=15, intensity_bias=1):
         time = np.arange(0, T, 1) / 100
         self.time = time
         self.dt = round(self.time[1] - self.time[0], 3)
 
-        n_factors = len(intensity_type) * A
+        n_factors = L * A
         # define parameters on terms of mean and sqrt variance
         # alpha = (mu/sigma)^2, theta = mu/sigma^2
         mu = 90*np.ones(n_factors, dtype=np.float64)
@@ -66,6 +66,7 @@ class DataAnalyzer:
         # corr = np.diag(1/std_dev) @ trial_peak_offset_covar_matrix @ np.diag(1/std_dev)
         # self.trial_peak_offset_covar_ltri = 1e-10 * np.eye(2 * n_factors)
         latent_factors = self.generate_latent_factors(intensity_type, intensity_mltply, intensity_bias)
+        latent_factors = np.vstack([latent_factors[i%len(intensity_type)] for i in range(L)])
         latent_factors = np.vstack([latent_factors] * A)
         self.beta = np.log(latent_factors)
         return self

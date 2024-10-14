@@ -14,6 +14,7 @@ class LikelihoodELBOModel(nn.Module):
         super(LikelihoodELBOModel, self).__init__()
 
         self.device = 'cpu'
+        self.is_eval = True
         self.time = torch.tensor(time)
         dt = round(time[1] - time[0], 3)
         self.dt = torch.tensor(dt)
@@ -165,7 +166,6 @@ class LikelihoodELBOModel(nn.Module):
         if self.a_CKL is not None:
             self.a_CKL = self.a_CKL.cuda(device)
         super(LikelihoodELBOModel, self).cuda(device)
-        return self
 
 
     def cpu(self):
@@ -183,7 +183,11 @@ class LikelihoodELBOModel(nn.Module):
         if self.a_CKL is not None:
             self.a_CKL = self.a_CKL.cpu()
         super(LikelihoodELBOModel, self).cpu()
-        return self
+
+
+    def train(self, mode=True):
+        self.is_eval = not mode
+        super(LikelihoodELBOModel, self).train(mode)
 
 
     def ltri_matix(self, device=None):
@@ -241,8 +245,12 @@ class LikelihoodELBOModel(nn.Module):
         return pi.detach()
 
     def generate_trial_peak_offset_samples(self):
-        gaussian_sample = torch.randn(self.n_trial_samples, self.n_trials, self.n_configs, 2 * self.n_factors,
-                                      device=self.device, dtype=torch.float64)
+        if self.is_eval:
+            gaussian_sample = torch.zeros(1, self.n_trials, self.n_configs, 2 * self.n_factors,
+                                          device=self.device, dtype=torch.float64)
+        else:
+            gaussian_sample = torch.randn(self.n_trial_samples, self.n_trials, self.n_configs, 2 * self.n_factors,
+                                          device=self.device, dtype=torch.float64)
         gaussian_sample = torch.concat([gaussian_sample, torch.zeros(1, *gaussian_sample.shape[1:], device=self.device, dtype=torch.float64)], dim=0)
         sd_matrix = self.sd_matrix()
         # trial_peak_offset_proposal_samples N x R x C x 2AL
@@ -278,7 +286,7 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def compute_warped_times(self, avg_peak_times, left_landmarks, right_landmarks, trial_peak_times):
-        landmark_speads = ((right_landmarks - left_landmarks).squeeze()/self.dt).int()
+        landmark_speads = ((right_landmarks - left_landmarks).squeeze()/self.dt).round().int()
         spike_train_start_offset = torch.searchsorted(self.time, 0, side='left')
         left_shifted_time = [self.time[spike_train_start_offset:(landmark_speads[i] + spike_train_start_offset)] for i in range(landmark_speads.shape[0])]
         left_shifted_peak_times = trial_peak_times - left_landmarks

@@ -20,7 +20,7 @@ init = 'Data'
 the_rest = 'zeros'
 args.batch_size = 'All'
 args.param_seed = f'Real_{init}Init'
-args.notes = f'var landmarks spread aligned lr 1e-4 warp posterior sample grads'
+args.notes = f'var landmarks spread aligned lr 1e-4 changed hyperparameters'
 args.log_interval = 500
 args.eval_interval = 500
 args.scheduler_patience = 80000 #2000
@@ -28,10 +28,10 @@ args.scheduler_threshold = 1e-10 #0.1
 args.scheduler_factor = 0.9
 args.lr = 0.0001
 args.num_epochs = 200000
-args.tau_beta = 3000
-args.tau_config = 10
-args.tau_sigma = 1
-args.tau_sd = 50
+args.tau_beta = 1000
+args.tau_config = 5
+args.tau_sigma = 0.01
+args.tau_sd = 10
 sd_init = 0.5
 # args.cuda = False
 args.n_trial_samples = 10  # Number of samples to generate for each trial
@@ -41,9 +41,9 @@ peak2_left_landmarks = [0.17, 0.18, 0.18]
 peak2_right_landmarks = [0.31, 0.32, 0.30]
 dt = 0.002
 
-regions = ['VISp', 'VISl', 'VISal']
+regions = None
 conditions = None
-regions = ['VISp', 'VISl']
+# regions = ['VISp', 'VISl']
 # conditions = [246, 251]
 
 if args.eval_interval > args.log_interval:
@@ -76,30 +76,26 @@ if Y_train is None:
     data.plot_spike_counts(folder_name)
     Y_train, bin_time, factor_access_train, unique_regions = data.sample_data(conditions=conditions, num_factors=args.L)
     data.save_sample(Y_train, bin_time, factor_access_train, unique_regions, folder_name)
+Y_train, factor_access_train = load_tensors((Y_train, factor_access_train), is_numpy=True)
 print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')
-Y_train, factor_access_train = load_tensors((Y_train, factor_access_train), args.cuda)
 
 args.K, T, args.n_trials, args.n_configs = Y_train.shape
 num_factors = factor_access_train.shape[1]
 args.A = int(num_factors/args.L)
 if not os.path.exists(os.path.join(data.output_dir, folder_name, f'cluster_initialization.pkl')):
-    initialize_clusters(Y_train.cpu(), factor_access_train.cpu(), args.L, args.A, os.path.join(data.output_dir, folder_name), n_jobs=15, bandwidth=4)
+    initialize_clusters(Y_train, factor_access_train, args.L, args.A, os.path.join(data.output_dir, folder_name), n_jobs=15, bandwidth=4)
     plot_initial_clusters(data.output_dir, folder_name, args.L)
     sys.exit()
 model = LikelihoodELBOModel(bin_time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
                             peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks)
 # Initialize the model
 model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, cluster_dir=os.path.join(data.output_dir, folder_name), init=the_rest)
-
-if args.cuda: model.cuda()
-output_str = (f"Using CUDA: {args.cuda}\n"
-              f"Num available GPUs: {torch.cuda.device_count()}\n"
-              f"peak1_left_landmarks:\n{model.time[model.peak1_left_landmarks.reshape(model.n_areas, -1)].cpu().numpy()}\n"
-              f"peak1_right_landmarks:\n{model.time[model.peak1_right_landmarks.reshape(model.n_areas, -1)].cpu().numpy()}\n"
-              f"peak2_left_landmarks:\n{model.time[model.peak2_left_landmarks.reshape(model.n_areas, -1)].cpu().numpy()}\n"
-              f"peak2_right_landmarks:\n{model.time[model.peak2_right_landmarks.reshape(model.n_areas, -1)].cpu().numpy()}\n")
+optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 patience = args.scheduler_patience//args.eval_interval
-start_epoch = 0
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
+                                                       factor=args.scheduler_factor,
+                                                       patience=patience, threshold_mode='abs',
+                                                       threshold=args.scheduler_threshold)
 args.folder_name = (
     f'dataSeed{args.data_seed}_{args.param_seed}_K{args.K}_A{args.A}_C{args.n_configs}'
     f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauSD{args.tau_sd}'
@@ -107,15 +103,18 @@ args.folder_name = (
     f'_factor{args.scheduler_factor}_threshold{args.scheduler_threshold}_notes-{args.notes}')
 output_dir = os.path.join(output_dir, args.folder_name, 'Run_0')
 os.makedirs(output_dir, exist_ok=True)
-optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
-                                                       factor=args.scheduler_factor,
-                                                       patience=patience, threshold_mode='abs',
-                                                       threshold=args.scheduler_threshold)
+output_str = (f"Using CUDA: {args.cuda}\n"
+              f"Num available GPUs: {torch.cuda.device_count()}\n"
+              f"peak1_left_landmarks:\n{model.time[model.peak1_left_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
+              f"peak1_right_landmarks:\n{model.time[model.peak1_right_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
+              f"peak2_left_landmarks:\n{model.time[model.peak2_left_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
+              f"peak2_right_landmarks:\n{model.time[model.peak2_right_landmarks.reshape(model.n_areas, -1)].numpy()}\n")
 create_relevant_files(output_dir, output_str)
-plot_outputs(model.cpu(), factor_access_train.permute(2, 0, 1).cpu(), unique_regions, output_dir, 'Train', -1)
+plot_outputs(model, factor_access_train.permute(2, 0, 1), unique_regions, output_dir, 'Train', -1)
 
 # Instantiate the dataset and dataloader
+if args.cuda:
+    Y_train, factor_access_train = load_tensors((Y_train, factor_access_train), to_cuda=args.cuda)
 dataset = CustomDataset(Y_train, factor_access_train)
 if args.batch_size == 'All':
     args.batch_size = Y_train.shape[0]
@@ -150,8 +149,11 @@ if __name__ == "__main__":
     total_time = 0
     start_time = time.time()
     batch_ct = 0
+    start_epoch = 0
     for epoch in range(start_epoch, start_epoch + args.num_epochs):
-        if args.cuda: model.cuda()
+        if args.cuda:
+            model.cuda()
+            Y_train, factor_access_train = load_tensors((Y_train, factor_access_train), to_cuda=args.cuda)
         model.train()
         batch_ct = train_gradient(batch_ct)
         if epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
@@ -172,10 +174,12 @@ if __name__ == "__main__":
             total_time += elapsed_time  # Calculate the total time for training
             cur_log_likelihood_train = log_likelihoods_train[-1]
             cur_loss_train = losses_train[-1]
+            model.cpu()
+            Y_train, factor_access_train = load_tensors((Y_train, factor_access_train))
             with torch.no_grad():
-                pi = model.pi_value(factor_access_train.permute(2, 0, 1)).cpu().numpy().round(3)
-                alpha = F.softplus(model.alpha).cpu().numpy().round(3)
-                theta = model.theta_value().cpu().numpy().round(3)
+                pi = model.pi_value(factor_access_train.permute(2, 0, 1)).numpy().round(3)
+                alpha = F.softplus(model.alpha).numpy().round(3)
+                theta = model.theta_value().numpy().round(3)
             output_str = (
                 f"Epoch: {epoch:2d}, Elapsed Time: {elapsed_time / 60:.2f} mins, Total Time: {total_time / (60 * 60):.2f} hrs,\n"
                 f"Loss train: {cur_loss_train:.5f},\n"
@@ -186,8 +190,8 @@ if __name__ == "__main__":
                 f"lr: {args.lr:.5f}, scheduler_lr: {scheduler._last_lr[0]:.5f},\n"
                 f"dataSeed: {args.data_seed},\n"
                 f"{args.notes}\n\n")
-            write_log_and_model(output_str, output_dir, epoch, model.cpu(), optimizer, scheduler)
-            plot_outputs(model.cpu(), factor_access_train.permute(2, 0, 1).cpu(), unique_regions, output_dir, 'Train', epoch)
+            write_log_and_model(output_str, output_dir, epoch, model, optimizer, scheduler)
+            plot_outputs(model, factor_access_train.permute(2, 0, 1), unique_regions, output_dir, 'Train', epoch)
             is_empty = epoch == 0
             write_losses(log_likelihoods_train, 'Train', 'Likelihood', output_dir, is_empty)
             write_losses(losses_train, 'Train', 'Loss', output_dir, is_empty)

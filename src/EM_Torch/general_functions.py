@@ -293,7 +293,7 @@ def plot_outputs(model, neuron_factor_access, unique_regions, output_dir, folder
         plt.close()
 
         pi = model.pi_value(neuron_factor_access).numpy()
-        W_L = np.round((torch.sum(model.W_CKL, dim=(0, 1))/model.W_CKL.shape[0]).numpy())
+        W_L = np.round((torch.sum(model.W_CKL, dim=(0, 1))/model.W_CKL.shape[0]).numpy(), 1)
         latent_factors = torch.softmax(model.unnormalized_log_factors(), dim=-1).numpy()
         global_max = np.max(latent_factors)
         upper_limit = global_max + 0.005
@@ -312,7 +312,7 @@ def plot_outputs(model, neuron_factor_access, unique_regions, output_dir, folder
             plt.title(f'Factor {(l%factors_per_area)+1}, '
                       f'Area {unique_regions[l//factors_per_area]}, '
                       f'Membership: {pi[l]:.2f}, '
-                      f'Count: {W_L[l]:.2f}', fontsize=20)
+                      f'Count: {W_L[l]:.1f}', fontsize=20)
             plt.ylim(bottom=0, top=upper_limit)
             c += 1
         plt.tight_layout()
@@ -515,12 +515,15 @@ def plot_losses(true_likelihood, output_dir, name, metric, cutoff=0):
         plt.savefig(os.path.join(plt_path, f'{metric}_{name}_Trajectories.png'))
 
 
-def load_tensors(numpys, is_cuda):
-    tensors = [torch.tensor(numpy, dtype=torch.float64) for numpy in numpys]
-    if is_cuda:
+def load_tensors(arrays, is_numpy=False, to_cuda=False):
+    if is_numpy:
+        tensors = [torch.tensor(array, dtype=torch.float64) for array in arrays]
+    else:
+        tensors = arrays
+    if to_cuda:
         return tuple([tensor.cuda() for tensor in tensors])
     else:
-        return tensors
+        return tuple([tensor.cpu() for tensor in tensors])
 
 
 def softplus(x):

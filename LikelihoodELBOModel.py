@@ -115,26 +115,32 @@ class LikelihoodELBOModel(nn.Module):
             self.trial_peak_offset_covar_ltri_offdiag = nn.Parameter(trial_peak_offset_covar_ltri[indices[0], indices[1]])
 
 
-    def init_from_data(self, Y, factor_access, sd_init, cluster_dir, init='zeros'):
-        Y, factor_access = Y.cpu(), factor_access.cpu()
+    def init_from_data(self, Y, factor_access, sd_init, cluster_dir=None, init='zeros'):
         # Y # K x T x R x C
         # factor_access  # K x L x C
-        _, _, R, _ = Y.shape
-        cluster_dir = os.path.join(cluster_dir, 'cluster_initialization.pkl')
-        if not os.path.exists(cluster_dir):
-            raise FileNotFoundError(f"Cluster directory not found: {cluster_dir}")
-        print('Loading clusters from: ', cluster_dir)
-        with open(cluster_dir, 'rb') as f:
-            data = pickle.load(f)
-        neuron_factor_assignment, beta = data['neuron_factor_assignment'], data['beta']
+        _, T, R, _ = Y.shape
+        if cluster_dir is None:
+            neuron_factor_assignment = None
+            summed_neurons = torch.einsum('ktrc,klc->lt', Y, factor_access)
+            latent_factors = summed_neurons + torch.sqrt(torch.sum(summed_neurons, dim=-1)).unsqueeze(1) * torch.rand(self.n_factors, T)
+            beta = torch.log(latent_factors[:, 1:])
+        else:
+            cluster_dir = os.path.join(cluster_dir, 'cluster_initialization.pkl')
+            if not os.path.exists(cluster_dir):
+                raise FileNotFoundError(f"Cluster directory not found: {cluster_dir}")
+            print('Loading clusters from: ', cluster_dir)
+            with open(cluster_dir, 'rb') as f:
+                data = pickle.load(f)
+            neuron_factor_assignment, beta = data['neuron_factor_assignment'], data['beta']
+
         spike_counts = torch.einsum('ktrc,klc->krlc', Y, factor_access)
         avg_spike_counts = torch.sum(spike_counts, dim=(0,1,3)) / (R * torch.sum(factor_access, dim=(0, 2)))
         print('Average spike counts:')
-        print(avg_spike_counts.reshape(self.n_areas, -1).cpu().numpy())
+        print(avg_spike_counts.reshape(self.n_areas, -1).numpy())
         centered_spike_counts = torch.einsum('krlc,klc->krlc', spike_counts - avg_spike_counts.unsqueeze(0).unsqueeze(1).unsqueeze(3), factor_access)
         spike_ct_var = torch.sum(centered_spike_counts**2, dim=(0,1,3)) / ((R * torch.sum(factor_access, dim=(0, 2)))-1)
         print('Spike count variance - Average spike counts:')
-        print((spike_ct_var-avg_spike_counts).reshape(self.n_areas, -1).cpu().numpy())
+        print((spike_ct_var-avg_spike_counts).reshape(self.n_areas, -1).numpy())
         alpha = (avg_spike_counts)**2/(spike_ct_var-avg_spike_counts)
         alpha = alpha.expm1().clamp_min(1e-6).log()
         theta = avg_spike_counts/(spike_ct_var-avg_spike_counts)

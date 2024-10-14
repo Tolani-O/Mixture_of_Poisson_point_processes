@@ -68,7 +68,6 @@ class DataAnalyzer:
         latent_factors = self.generate_latent_factors(intensity_type, intensity_mltply, intensity_bias)
         latent_factors = np.vstack([latent_factors] * A)
         self.beta = np.log(latent_factors)
-        # latent_factors = latent_factors / np.sum(latent_factors, axis=1, keepdims=True)
         return self
 
     def generate_latent_factors(self, intensity_type, intensity_mltply, intensity_bias):

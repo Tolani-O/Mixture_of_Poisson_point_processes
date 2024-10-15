@@ -151,14 +151,13 @@ if __name__ == "__main__":
     batch_ct = 0
     start_epoch = 0
     for epoch in range(start_epoch, start_epoch + args.num_epochs):
-        if args.cuda:
-            model.cuda()
-            Y_train, factor_access_train = load_tensors((Y_train, factor_access_train), to_cuda=args.cuda)
+        if args.cuda: model.cuda()
         model.train()
         batch_ct = train_gradient(batch_ct)
         if epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             model.eval()
             with torch.no_grad():
+                if args.cuda: factor_access_train = load_tensors([factor_access_train], to_cuda=args.cuda)[0]
                 likelihood_term_train = model.forward(Y_train, factor_access_train)
                 penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
                 model_factor_assignment_train, model_neuron_gains_train = model.infer_latent_variables()
@@ -175,7 +174,7 @@ if __name__ == "__main__":
             cur_log_likelihood_train = log_likelihoods_train[-1]
             cur_loss_train = losses_train[-1]
             model.cpu()
-            Y_train, factor_access_train = load_tensors((Y_train, factor_access_train))
+            factor_access_train = load_tensors([factor_access_train])[0]
             with torch.no_grad():
                 pi = model.pi_value(factor_access_train.permute(2, 0, 1)).numpy().round(3)
                 alpha = F.softplus(model.alpha).numpy().round(3)

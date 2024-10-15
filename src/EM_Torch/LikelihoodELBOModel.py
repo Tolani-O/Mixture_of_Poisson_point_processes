@@ -152,6 +152,8 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def cuda(self, device=None):
+        if self.device == 'cuda':
+            return
         self.device = 'cuda'
         self.time = self.time.cuda(device)
         self.theta_init = self.theta_init.cuda(device)
@@ -169,6 +171,8 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def cpu(self):
+        if self.device == 'cpu':
+            return
         self.device = 'cpu'
         self.time = self.time.cpu()
         self.theta_init = self.theta_init.cpu()
@@ -186,6 +190,8 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def train(self, mode=True):
+        if self.is_eval != mode:
+            return
         self.is_eval = not mode
         super(LikelihoodELBOModel, self).train(mode)
 

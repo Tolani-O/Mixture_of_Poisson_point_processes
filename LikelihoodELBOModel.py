@@ -32,7 +32,7 @@ class LikelihoodELBOModel(nn.Module):
         self.n_trial_samples = n_trial_samples
         self.n_configs = n_configs
         self.n_trials = n_trials
-        Delta2 = create_second_diff_matrix(T)
+        Delta2 = create_second_diff_matrix(T, dt)
         self.Delta2TDelta2 = torch.tensor(Delta2.T @ Delta2)  # T x T # tikhonov regularization
 
         # Storage for use in the forward pass
@@ -445,6 +445,7 @@ class LikelihoodELBOModel(nn.Module):
         prod_term = torch.einsum('nrcl,lj,nrcj->crn', trial_peak_offsets, inv_Sigma, trial_peak_offsets)  # sum over l
         entropy_term = 0.5 * (n_dims * torch.log(torch.tensor(2 * torch.pi)) + torch.log(det_Sigma) + prod_term)
         return entropy_term # C x R x N
+
 
     def compute_penalty_terms(self, tau_beta, tau_config, tau_sigma, tau_sd):
         # Penalty Terms

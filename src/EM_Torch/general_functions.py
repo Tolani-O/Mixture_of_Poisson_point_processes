@@ -91,15 +91,18 @@ def create_first_diff_matrix(P):
     return D
 
 
-def create_second_diff_matrix(P):
+def create_second_diff_matrix(P, dt):
     D = np.zeros((P-2, P))
     # fill the main diagonal with 1s
     np.fill_diagonal(D, 1)
     # fill the subdiagonal and superdiagonal with -2s
     np.fill_diagonal(D[:, 2:], 1)
     np.fill_diagonal(D[:, 1:], -2)
-    # set the last element to 1
-    D[-1, -1] = 1
+    D = D/(dt**2)
+    # first row is a forward difference
+    s0 = [2, -5, 4, -1]
+    D0 = np.concatenate((s0, np.zeros(P-4)))/(dt**3)
+    D = np.vstack((D0, D, np.flip(D0)))
     return D
 
 

@@ -22,7 +22,6 @@ outputs_folder = 'outputs'
 args.n_trials = 15  # R
 args.n_configs = 40  # C
 args.K = 300  # K
-# args.intensity_bias = 10
 args.A = 7  # A
 
 # args.n_trials = 5
@@ -48,16 +47,16 @@ args.scheduler_threshold = 1e-10  # 0.1
 args.scheduler_factor = 0.9
 args.lr = 0.0001
 args.num_epochs = 200000
-args.tau_beta = 1000
+args.tau_beta = 1
 args.tau_config = 5
 args.tau_sigma = 0.01
 args.tau_sd = 10
 sd_init = 0.5
 args.n_trial_samples = 10  # Number of samples to generate for each trial
-peak1_left_landmarks = [0.20, 0.20, 0.20]
-peak1_right_landmarks = [0.70, 0.70, 0.70]
-peak2_left_landmarks = [1.20, 1.20, 1.20]
-peak2_right_landmarks = [1.70, 1.70, 1.70]
+peak1_left_landmarks = [0.20, 0.20, 0.20, 0.20, 0.20]
+peak1_right_landmarks = [0.70, 0.70, 0.70, 0.70, 0.70]
+peak2_left_landmarks = [1.20, 1.20, 1.20, 1.20, 1.20]
+peak2_right_landmarks = [1.70, 1.70, 1.70, 1.70, 1.70]
 
 if args.eval_interval > args.log_interval:
     args.log_interval = args.eval_interval

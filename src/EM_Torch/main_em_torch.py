@@ -4,8 +4,8 @@ import sys
 sys.path.append(os.path.abspath('.'))
 from src.EM_Torch.simulate_data_multitrial import DataAnalyzer
 from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
-from src.EM_Torch.general_functions import initialize_clusters, create_relevant_files, get_parser, plot_outputs, \
-    plot_initial_clusters, write_log_and_model, write_losses, plot_losses, CustomDataset, load_tensors, \
+from src.EM_Torch.general_functions import create_relevant_files, get_parser, plot_outputs, \
+    write_log_and_model, write_losses, plot_losses, CustomDataset, load_tensors, \
     inv_softplus_torch
 import numpy as np
 import time
@@ -20,14 +20,16 @@ args.data_seed = np.random.randint(0, 2 ** 32 - 1)
 outputs_folder = 'outputs'
 
 args.n_trials = 15  # R
-args.n_configs = 40  # C
-args.K = 300  # K
-args.A = 7  # A
+args.n_configs = 5  # C
+args.K = 100  # K
+args.A = 3  # A
+args.n_trial_samples = 10  # Number of samples to generate for each trial
 
 # args.n_trials = 5
 # args.n_configs = 3
 # args.K = 10
 # args.A = 2
+# args.n_trial_samples = 1
 
 init = 'Data'
 # init = 'Rand'
@@ -38,8 +40,8 @@ the_rest = 'zeros'
 # init = 'TrueAndRandBeta'
 # init = 'DataAndZeroBeta'
 args.batch_size = 'All'
-args.param_seed = f'Real_{init}Init'
-args.notes = f'simulated'
+args.param_seed = f'simulated_{init}Init'
+args.notes = f'no beta penalty'
 args.log_interval = 500
 args.eval_interval = 500
 args.scheduler_patience = 80000  # 2000
@@ -47,12 +49,11 @@ args.scheduler_threshold = 1e-10  # 0.1
 args.scheduler_factor = 0.9
 args.lr = 0.0001
 args.num_epochs = 200000
-args.tau_beta = 1
+args.tau_beta = 0
 args.tau_config = 5
 args.tau_sigma = 0.01
 args.tau_sd = 10
 sd_init = 0.5
-args.n_trial_samples = 10  # Number of samples to generate for each trial
 peak1_left_landmarks = [0.20, 0.20, 0.20, 0.20, 0.20]
 peak1_right_landmarks = [0.70, 0.70, 0.70, 0.70, 0.70]
 peak2_left_landmarks = [1.20, 1.20, 1.20, 1.20, 1.20]
@@ -99,34 +100,29 @@ if args.cuda:
     Y_test, factor_access_test, Y_train, factor_access_train = load_tensors((Y_test, factor_access_test, Y_train, factor_access_train), to_cuda=args.cuda)
 model.eval()
 with torch.no_grad():
-    model.init_ground_truth(beta=data.beta[:, 1:],
+    model.init_ground_truth(beta=data.beta,
                             alpha=inv_softplus_torch(data.alpha),
                             config_peak_offsets=data.config_peak_offsets,
                             trial_peak_offset_proposal_means=trial_offsets_test.squeeze(),
                             trial_peak_offset_covar_ltri=data.trial_peak_offset_covar_ltri,
                             theta=data.theta,
                             pi=F.softmax(data.pi.reshape(args.A, -1), dim=1).flatten(),
-                            trial_peak_offset_proposal_sds=sd_init * torch.ones(2 * data.beta.shape[0],
-                                                                                dtype=torch.float64,
-                                                                                device=model.device))
+                            sd_init=sd_init)
     true_ELBO_test = model.forward(Y_test, factor_access_test)
-    model.init_ground_truth(beta=data.beta[:, 1:],
+    model.init_ground_truth(beta=data.beta,
                             alpha=inv_softplus_torch(data.alpha),
                             config_peak_offsets=data.config_peak_offsets,
                             trial_peak_offset_proposal_means=trial_offsets_train.squeeze(),
                             trial_peak_offset_covar_ltri=data.trial_peak_offset_covar_ltri,
                             theta=data.theta,
                             pi=F.softmax(data.pi.reshape(args.A, -1), dim=1).flatten(),
-                            trial_peak_offset_proposal_sds=sd_init * torch.ones(2 * data.beta.shape[0],
-                                                                                dtype=torch.float64,
-                                                                                device=model.device))
+                            sd_init=sd_init)
     true_ELBO_train = model.forward(Y_train, factor_access_train)
-true_ELBO_train = (1 / (args.K * args.n_trials * args.n_configs)) * true_ELBO_train.item()
-true_ELBO_test = (1 / (args.K * args.n_trials * args.n_configs)) * true_ELBO_test.item()
-true_offset_penalty_train = (1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_train,
-                                                                                                model.ltri_matix()).sum().item()
-true_offset_penalty_test = (1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_test,
-                                                                                               model.ltri_matix()).sum().item()
+true_ELBO_train = (1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * true_ELBO_train.item()
+true_ELBO_test = (1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * true_ELBO_test.item()
+ltri_matrix = model.ltri_matix()
+true_offset_penalty_train = (1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_train, ltri_matrix).sum().item()
+true_offset_penalty_test = (1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_test, ltri_matrix).sum().item()
 model.cpu()
 Y_train, factor_access_train = load_tensors((Y_train, factor_access_train))
 args.folder_name = (
@@ -139,7 +135,7 @@ os.makedirs(output_dir, exist_ok=True)
 plot_outputs(model, factor_access_train.permute(2, 0, 1), unique_regions, output_dir, 'Train', -2)
 # Initialize the model
 if init == 'True':
-    model.init_ground_truth(beta=data.beta[:, 1:],
+    model.init_ground_truth(beta=data.beta,
                             alpha=inv_softplus_torch(data.alpha),
                             config_peak_offsets=data.config_peak_offsets,
                             trial_peak_offset_proposal_means=trial_offsets_train.squeeze(),
@@ -243,14 +239,10 @@ if __name__ == "__main__":
                 likelihood_term_test = model.forward(Y_test, factor_access_test)
                 model_factor_assignment_test, model_neuron_gains_test = model.infer_latent_variables()
 
-                losses_train.append(((1 / (args.K * args.n_trials * args.n_configs)) * likelihood_term_train +
-                                     (1 / (args.n_trials * args.n_configs)) * penalty_term).item())
-                log_likelihoods_train.append(
-                    (1 / (args.K * args.n_trials * args.n_configs)) * likelihood_term_train.item())
-                losses_test.append(((1 / (args.K * args.n_trials * args.n_configs)) * likelihood_term_test +
-                                    (1 / (args.n_trials * args.n_configs)) * penalty_term).item())
-                log_likelihoods_test.append(
-                    (1 / (args.K * args.n_trials * args.n_configs)) * likelihood_term_test.item())
+                losses_train.append((likelihood_term_train + penalty_term).item())
+                log_likelihoods_train.append((1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * likelihood_term_train.item())
+                losses_test.append((likelihood_term_test + penalty_term).item())
+                log_likelihoods_test.append((1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * likelihood_term_test.item())
                 epoch_train.append(epoch)
 
                 scheduler.step(log_likelihoods_test[-1])
@@ -304,12 +296,8 @@ if __name__ == "__main__":
                     trial_offsets_train.shape[1],
                     2, model.n_factors)[non_zero_data_train[:, 0], :, :, non_zero_data_train[:, 2]]
                 proposal_means_mses.append(F.mse_loss(trial_offsets_data_train, trial_offsets_proposal_means).item())
-                ltriLkhd_train.append(
-                    (1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_train,
-                                                                                        model.ltri_matix()).sum().item())
-                ltriLkhd_test.append(
-                    (1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_test,
-                                                                                        model.ltri_matix()).sum().item())
+                ltriLkhd_train.append((1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_train, ltri_matrix).sum().item())
+                ltriLkhd_test.append((1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_test, ltri_matrix).sum().item())
 
         if epoch % args.log_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             end_time = time.time()  # Record the end time of the epoch
@@ -375,7 +363,7 @@ if __name__ == "__main__":
             plot_losses(None, output_dir, 'Test', 'proposal_means_MSE')
             plot_losses(true_offset_penalty_train, output_dir, 'Train', 'ltriLkhd', 10)
             plot_losses(true_offset_penalty_test, output_dir, 'Test', 'ltriLkhd', 10)
-            plot_losses(true_ELBO_train, output_dir, 'Batch', 'Likelihood', 20)
+            plot_losses(None, output_dir, 'Batch', 'Likelihood', 20)
             plot_losses(None, output_dir, 'Batch', 'Loss', 20)
             plot_losses(None, output_dir, 'Train', 'gains_MSE')
             plot_losses(None, output_dir, 'Test', 'gains_MSE')

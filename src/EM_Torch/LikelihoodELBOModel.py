@@ -49,32 +49,32 @@ class LikelihoodELBOModel(nn.Module):
         self.trial_peak_offset_covar_ltri_diag = None
         self.trial_peak_offset_covar_ltri_offdiag = None
         self.trial_peak_offset_proposal_means = None  # R x C x 2AL
-        self.trial_peak_offset_proposal_sds = None  # 2AL
+        self.trial_peak_offset_proposal_sds = None  # R x C x 2AL
 
 
     def init_random(self):
-        self.beta = nn.Parameter(torch.log(torch.randn(self.n_factors, self.time.shape[0]-1, dtype=torch.float64)))
+        self.beta = nn.Parameter(torch.log(torch.randn(self.n_factors, self.time.shape[0], dtype=torch.float64)))
         self.alpha = nn.Parameter(torch.randn(self.n_factors, dtype=torch.float64))
-        self.config_peak_offsets = nn.Parameter(torch.randn(self.n_configs, 2 * self.n_factors, dtype=torch.float64))
         n_dims = 2 * self.n_factors
         num_elements = n_dims * (n_dims - 1) // 2
+        self.config_peak_offsets = nn.Parameter(torch.randn(self.n_configs, n_dims, dtype=torch.float64))
         self.trial_peak_offset_covar_ltri_diag = nn.Parameter(torch.rand(n_dims, dtype=torch.float64)+1)
         self.trial_peak_offset_covar_ltri_offdiag = nn.Parameter(torch.randn(num_elements, dtype=torch.float64))
-        self.trial_peak_offset_proposal_means = nn.Parameter(torch.randn(self.n_trials, self.n_configs, 2 * self.n_factors, dtype=torch.float64))
-        self.trial_peak_offset_proposal_sds = nn.Parameter(torch.rand(n_dims, dtype=torch.float64) + 1)
+        self.trial_peak_offset_proposal_means = nn.Parameter(torch.randn(self.n_trials, self.n_configs, n_dims, dtype=torch.float64))
+        self.trial_peak_offset_proposal_sds = nn.Parameter(torch.rand(self.n_trials, self.n_configs, n_dims, dtype=torch.float64) + 1)
         self.standard_init()
 
 
     def init_zero(self):
-        self.beta = nn.Parameter(torch.zeros(self.n_factors, self.time.shape[0]-1, dtype=torch.float64))
+        self.beta = nn.Parameter(torch.zeros(self.n_factors, self.time.shape[0], dtype=torch.float64))
         self.alpha = nn.Parameter(torch.ones(self.n_factors, dtype=torch.float64))
-        self.config_peak_offsets = nn.Parameter(torch.zeros(self.n_configs, 2 * self.n_factors, dtype=torch.float64))
         n_dims = 2 * self.n_factors
         num_elements = n_dims * (n_dims - 1) // 2
+        self.config_peak_offsets = nn.Parameter(torch.zeros(self.n_configs, n_dims, dtype=torch.float64))
         self.trial_peak_offset_covar_ltri_diag = nn.Parameter(torch.ones(n_dims, dtype=torch.float64))
         self.trial_peak_offset_covar_ltri_offdiag = nn.Parameter(torch.zeros(num_elements, dtype=torch.float64))
         self.trial_peak_offset_proposal_means = nn.Parameter(torch.zeros(self.n_trials, self.n_configs, n_dims, dtype=torch.float64))
-        self.trial_peak_offset_proposal_sds = nn.Parameter(torch.ones(n_dims, dtype=torch.float64))
+        self.trial_peak_offset_proposal_sds = nn.Parameter(torch.ones(self.n_trials, self.n_configs, n_dims, dtype=torch.float64))
         self.standard_init()
 
 
@@ -86,9 +86,10 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def init_ground_truth(self, beta=None, alpha=None, theta=None, pi=None,
-                          trial_peak_offset_proposal_means=None, trial_peak_offset_proposal_sds=None,
+                          trial_peak_offset_proposal_means=None, sd_init=None,
                           config_peak_offsets=None, trial_peak_offset_covar_ltri=None,
                           W_CKL=None, init='zeros'):
+        n_dims = 2 * self.n_factors
         if init == 'zeros':
             self.init_zero()
         elif init == 'random':
@@ -105,13 +106,13 @@ class LikelihoodELBOModel(nn.Module):
             self.pi_init = pi
         if trial_peak_offset_proposal_means is not None:
             self.trial_peak_offset_proposal_means = nn.Parameter(trial_peak_offset_proposal_means)
-        if trial_peak_offset_proposal_sds is not None:
-            self.trial_peak_offset_proposal_sds = nn.Parameter(trial_peak_offset_proposal_sds)
+        if sd_init is not None:
+            self.trial_peak_offset_proposal_sds = nn.Parameter(sd_init * torch.ones(self.n_trials, self.n_configs, n_dims,
+                                                                                    dtype=torch.float64, device=self.device))
         if config_peak_offsets is not None:
             self.config_peak_offsets = nn.Parameter(config_peak_offsets)
         if trial_peak_offset_covar_ltri is not None:
             self.trial_peak_offset_covar_ltri_diag = nn.Parameter(trial_peak_offset_covar_ltri.diag())
-            n_dims = 2 * self.n_factors
             indices = torch.tril_indices(row=n_dims, col=n_dims, offset=-1)
             self.trial_peak_offset_covar_ltri_offdiag = nn.Parameter(trial_peak_offset_covar_ltri[indices[0], indices[1]])
 
@@ -124,7 +125,7 @@ class LikelihoodELBOModel(nn.Module):
             neuron_factor_assignment = None
             summed_neurons = torch.einsum('ktrc,klc->lt', Y, factor_access)
             latent_factors = summed_neurons + torch.sqrt(torch.sum(summed_neurons, dim=-1)).unsqueeze(1) * torch.rand(self.n_factors, T)
-            beta = torch.log(latent_factors[:, 1:])
+            beta = torch.log(latent_factors)
         else:
             cluster_dir = os.path.join(cluster_dir, 'cluster_initialization.pkl')
             if not os.path.exists(cluster_dir):
@@ -145,9 +146,7 @@ class LikelihoodELBOModel(nn.Module):
         alpha = (avg_spike_counts)**2/(spike_ct_var-avg_spike_counts)
         alpha = alpha.expm1().clamp_min(1e-6).log()
         theta = avg_spike_counts/(spike_ct_var-avg_spike_counts)
-        trial_peak_offset_proposal_sds = sd_init * torch.ones(2*self.n_factors, dtype=torch.float64)
-        self.init_ground_truth(beta=beta, alpha=alpha, theta=theta,
-                               trial_peak_offset_proposal_sds=trial_peak_offset_proposal_sds,
+        self.init_ground_truth(beta=beta, alpha=alpha, theta=theta, sd_init=sd_init,
                                W_CKL=neuron_factor_assignment, init=init)
 
 
@@ -206,16 +205,10 @@ class LikelihoodELBOModel(nn.Module):
         ltri_matrix[indices[0], indices[1]] = self.trial_peak_offset_covar_ltri_offdiag
         return ltri_matrix
 
-    def sd_matrix(self, device=None):
-        if device is None:
-            device = self.device
-        n_dims = 2 * self.n_factors
-        sd_matrix = torch.zeros(n_dims, n_dims, dtype=torch.float64, device=device)
-        sd_matrix[torch.arange(n_dims), torch.arange(n_dims)] = self.trial_peak_offset_proposal_sds
-        return sd_matrix
 
     def unnormalized_log_factors(self):
-        return torch.cat([torch.zeros(self.n_factors, 1, device=self.device, dtype=torch.float64), self.beta], dim=1)
+        return self.beta - self.beta[:, 0].unsqueeze(1).expand_as(self.beta)
+
 
     def theta_value(self):
         if self.W_CKL is None or self.a_CKL is None:
@@ -226,6 +219,7 @@ class LikelihoodELBOModel(nn.Module):
         Wa_L = torch.sum(self.W_CKL * self.a_CKL, dim=(0, 1))
         theta = F.softplus(self.alpha) * (W_L / Wa_L)
         return theta.detach()
+
 
     def validated_W_CKL(self, W_CKL, neuron_factor_access):
         W_L = torch.sum(W_CKL, dim=(0, 1)).reshape(self.n_areas, -1)
@@ -242,6 +236,7 @@ class LikelihoodELBOModel(nn.Module):
         W_CKL = W_CKL_L.reshape(*W_CKL.shape[:2], -1) * neuron_factor_access
         return W_CKL
 
+
     def pi_value(self, neuron_factor_access):
         if self.W_CKL is None:
             return self.pi_init
@@ -249,6 +244,7 @@ class LikelihoodELBOModel(nn.Module):
         W_L = torch.sum(self.W_CKL, dim=(0, 1))
         pi = W_L / torch.sum(neuron_factor_access, dim=(0, 1))
         return pi.detach()
+
 
     def generate_trial_peak_offset_samples(self):
         if self.is_eval:
@@ -258,10 +254,9 @@ class LikelihoodELBOModel(nn.Module):
             gaussian_sample = torch.randn(self.n_trial_samples, self.n_trials, self.n_configs, 2 * self.n_factors,
                                           device=self.device, dtype=torch.float64)
         gaussian_sample = torch.concat([gaussian_sample, torch.zeros(1, *gaussian_sample.shape[1:], device=self.device, dtype=torch.float64)], dim=0)
-        sd_matrix = self.sd_matrix()
         # trial_peak_offset_proposal_samples N x R x C x 2AL
         self.trial_peak_offset_proposal_samples = (self.trial_peak_offset_proposal_means.unsqueeze(0) +
-                                                   torch.einsum('lj,nrcj->nrcl', sd_matrix, gaussian_sample))
+                                                   gaussian_sample * self.trial_peak_offset_proposal_sds.unsqueeze(0))
 
 
     def warp_all_latent_factors_for_all_trials(self):
@@ -431,17 +426,16 @@ class LikelihoodELBOModel(nn.Module):
         alpha_times_log_theta_plus_b_CKL = (alpha * (log_theta + b_CKL)).unsqueeze(2).unsqueeze(4)
         log_gamma_alpha = torch.lgamma(alpha).unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(4)  # 1 x 1 x 1 x L x 1
         # neg_log_P # C x 1 x R x 1 x N
-        ltri_matrix = self.ltri_matix()
-        neg_log_P = self.Sigma_log_likelihood(self.trial_peak_offset_proposal_samples, ltri_matrix).unsqueeze(1).unsqueeze(3)
+        neg_log_P = self.Sigma_log_likelihood(self.trial_peak_offset_proposal_samples, self.ltri_matix()).unsqueeze(1).unsqueeze(3)
         # neg_log_Q # C x 1 x R x 1 x N
-        sd_matrix = self.sd_matrix()
-        neg_log_Q = self.Sigma_log_likelihood(self.trial_peak_offset_proposal_samples - self.trial_peak_offset_proposal_means.unsqueeze(0), sd_matrix).unsqueeze(1).unsqueeze(3)
+        neg_log_Q = self.sd_log_likelihood(self.trial_peak_offset_proposal_samples).unsqueeze(1).unsqueeze(3)
 
         elbo = (Y_times_warped_beta - Y_sum_t_times_logsumexp_warped_beta + (1/R) * (alpha_times_log_theta_plus_b_CKL -
                 log_gamma_alpha) - (1/K) * (neg_log_P - neg_log_Q))
         elbo = W_tensor * elbo
 
         return torch.sum(elbo)
+
 
     def Sigma_log_likelihood(self, trial_peak_offsets, ltri_matrix):
         n_dims = ltri_matrix.shape[0]  # 2AL
@@ -453,15 +447,26 @@ class LikelihoodELBOModel(nn.Module):
         return entropy_term # C x R x N
 
 
+    def sd_log_likelihood(self, trial_peak_offsets):
+        trial_peak_offsets = (trial_peak_offsets - self.trial_peak_offset_proposal_means.unsqueeze(0))**2
+        n_dims = self.trial_peak_offset_proposal_sds.shape[-1]
+        det_Sigma = torch.prod(self.trial_peak_offset_proposal_sds**2, dim=-1)
+        inv_Sigma = self.trial_peak_offset_proposal_sds**(-2)
+        prod_term = torch.sum(trial_peak_offsets * inv_Sigma.unsqueeze(0), dim=-1).permute(2, 1, 0) # sum over l
+        entropy_term = 0.5 * (n_dims * torch.log(torch.tensor(2 * torch.pi)) + torch.log(det_Sigma.t().unsqueeze(-1)) + prod_term)
+        return entropy_term # C x R x N
+
+
     def compute_penalty_terms(self, tau_beta, tau_config, tau_sigma, tau_sd):
         # Penalty Terms
-        config_Penalty = - tau_config * torch.sum(self.config_peak_offsets * self.config_peak_offsets)
-        proposal_sd_penalty = - tau_sd * torch.sum(self.trial_peak_offset_proposal_sds * self.trial_peak_offset_proposal_sds)
+        config_Penalty = - tau_config * (1/torch.prod(torch.tensor(self.config_peak_offsets.shape))) * torch.sum(self.config_peak_offsets * self.config_peak_offsets)
+        proposal_sd_penalty = - tau_sd * (1/torch.prod(torch.tensor(self.trial_peak_offset_proposal_sds.shape))) * torch.sum(self.trial_peak_offset_proposal_sds * self.trial_peak_offset_proposal_sds)
         ltri_matrix = self.ltri_matix()
         Sigma = ltri_matrix @ ltri_matrix.t()
         inv_Sigma = torch.linalg.inv(Sigma)
-        sigma_Penalty = -tau_sigma * (torch.sum(torch.abs(inv_Sigma)) - torch.sum(torch.abs(torch.diag(inv_Sigma))))
-        beta_s2_penalty = -tau_beta * torch.sum((self.unnormalized_log_factors() @ self.Delta2TDelta2) * self.unnormalized_log_factors())
+        sigma_Penalty = -tau_sigma * (1/(torch.prod(torch.tensor(Sigma.shape))-Sigma.shape[0])) * (torch.sum(torch.abs(inv_Sigma)) - torch.sum(torch.abs(torch.diag(inv_Sigma))))
+        factors = torch.softmax(self.unnormalized_log_factors(), dim=-1)
+        beta_s2_penalty = -tau_beta * (1/torch.prod(torch.tensor(factors.shape))) * torch.sum((factors @ self.Delta2TDelta2) * factors)
         penalty_term = config_Penalty + sigma_Penalty + beta_s2_penalty + proposal_sd_penalty
         return penalty_term
 

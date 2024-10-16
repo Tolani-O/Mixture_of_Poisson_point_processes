@@ -20,7 +20,7 @@ init = 'Data'
 the_rest = 'zeros'
 args.batch_size = 'All'
 args.param_seed = f'Real_{init}Init'
-args.notes = f'var landmarks spread aligned lr 1e-4 tau_sigma 0.5'
+args.notes = f''
 args.log_interval = 500
 args.eval_interval = 500
 args.scheduler_patience = 80000  # 2000
@@ -157,10 +157,8 @@ if __name__ == "__main__":
                 likelihood_term_train = model.forward(Y_train, factor_access_train)
                 penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
                 model_factor_assignment_train, model_neuron_gains_train = model.infer_latent_variables()
-                losses_train.append(((1 / (args.K * args.n_trials * args.n_configs)) * likelihood_term_train +
-                                     (1 / (args.n_trials * args.n_configs)) * penalty_term).item())
-                log_likelihoods_train.append(
-                    (1 / (args.K * args.n_trials * args.n_configs)) * likelihood_term_train.item())
+                losses_train.append((likelihood_term_train + penalty_term).item())
+                log_likelihoods_train.append((1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * likelihood_term_train.item())
                 epoch_train.append(epoch)
                 scheduler.step(log_likelihoods_train[-1])
         if epoch % args.log_interval == 0 or epoch == start_epoch + args.num_epochs - 1:

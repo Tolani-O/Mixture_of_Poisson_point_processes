@@ -25,10 +25,10 @@ def get_parser():
     parser.add_argument('--load', type=int, default=0, help='')
     parser.add_argument('--load_epoch', type=int, default=0, help='Which epoch to load model and optimizer from')
     parser.add_argument('--load_run', type=int, default=0, help='Which run to load model and optimizer from')
-    parser.add_argument('--tau_config', type=int, default=0.5, help='Value for tau_config')
-    parser.add_argument('--tau_sigma', type=int, default=0.5, help='Value for tau_sigma')
-    parser.add_argument('--tau_sd', type=int, default=0.5, help='Value for tau_sd')
-    parser.add_argument('--tau_beta', type=int, default=0.5, help='Value for tau_beta')
+    parser.add_argument('--tau_config', type=float, default=0.5, help='Value for tau_config')
+    parser.add_argument('--tau_sigma', type=float, default=0.5, help='Value for tau_sigma')
+    parser.add_argument('--tau_sd', type=float, default=0.5, help='Value for tau_sd')
+    parser.add_argument('--tau_beta', type=float, default=0.5, help='Value for tau_beta')
     parser.add_argument('--num_epochs', type=int, default=5000, help='Number of training epochs')
     parser.add_argument('--scheduler_patience', type=int, default=1000, help='Number of epochs before scheduler step')
     parser.add_argument('--scheduler_factor', type=int, default=0.8, help='Scheduler reduction factor')
@@ -400,7 +400,7 @@ def initialize_clusters(Y, factor_access, n_clusters, n_areas, output_dir, n_job
     save_dir = os.path.join(output_dir, 'cluster_initialization.pkl')
     print('Saving clusters to: ', save_dir)
     with open(save_dir, 'wb') as f:
-        pickle.dump({'y_pred': y_pred, 'neuron_factor_assignment': neuron_factor_assignment, 'beta': beta[:,1:]}, f)
+        pickle.dump({'y_pred': y_pred, 'neuron_factor_assignment': neuron_factor_assignment, 'beta': beta}, f)
 
 
 def plot_initial_clusters(output_dir, data_folder, n_clusters):
@@ -417,7 +417,7 @@ def plot_initial_clusters(output_dir, data_folder, n_clusters):
     with open(cluster_dir, 'rb') as f:
         data = pickle.load(f)
     y_pred, neuron_factor_assignment, beta = data['y_pred'], data['neuron_factor_assignment'], data['beta']
-    factors = torch.exp(torch.concat([torch.zeros(beta.shape[0], 1), beta], dim=1))
+    factors = torch.exp(beta)
     Y_train = Y.sum(axis=(2, 3))
     y_upper = torch.max(factors).item()
     for yi in range(n_clusters):

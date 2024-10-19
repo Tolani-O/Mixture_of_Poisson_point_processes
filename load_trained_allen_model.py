@@ -4,7 +4,7 @@ import sys
 sys.path.append(os.path.abspath('.'))
 from src.EM_Torch.Allen_data_torch import EcephysAnalyzer
 from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
-from src.EM_Torch.general_functions import (load_model_checkpoint, create_relevant_files, get_parser, plot_outputs,
+from src.EM_Torch.general_functions import (parse_folder_name, load_model_checkpoint, create_relevant_files, get_parser, plot_outputs,
                                             write_log_and_model, write_losses, plot_losses, CustomDataset, load_tensors)
 import numpy as np
 import time
@@ -13,31 +13,28 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 args = get_parser().parse_args()
-args.data_seed = np.random.randint(0, 2 ** 32 - 1)
 outputs_folder = 'outputs'
+parser_key = ['dataSeed', 'tauBeta', 'tauConfig', 'tauSigma', 'tauSD', 'IS', 'iters', 'BatchSize', 'lr', 'patience', 'factor', 'threshold', 'notes']
+args.folder_name = 'dataSeed1365109930_simulated_DataInit_K100_A3_C5_R15_tauBeta8000_tauConfig5_tauSigma0.01_tauSD10_IS10_iters200000_BatchSizeAll_lr0.0001_patience80000_factor0.9_threshold1e-10_notes-medium beta penalty'
+parser_dict = parse_folder_name(args.folder_name, parser_key)
 
-init = 'Data'
-the_rest = 'zeros'
-args.batch_size = 'All'
-args.param_seed = f'Real_{init}Init'
-args.notes = f''
+args.data_seed = int(parser_dict['dataSeed'])
+args.batch_size = parser_dict['BatchSize']
+args.notes = parser_dict['notes']
 args.log_interval = 500
 args.eval_interval = 500
-args.scheduler_patience = 80000  # 2000
-args.scheduler_threshold = 1e-10  # 0.1
-args.scheduler_factor = 0.9
-args.lr = 0.0001
-args.num_epochs = 100000
-args.tau_beta = 1000
-args.tau_config = 5
-args.tau_sigma = 0.01
-args.tau_sd = 10
-
-args.load_epoch = 99999
+args.scheduler_patience = int(parser_dict['patience'])
+args.scheduler_threshold = float(parser_dict['threshold'])
+args.scheduler_factor = float(parser_dict['factor'])
+args.lr = float(parser_dict['lr'])
+args.num_epochs = int(parser_dict['iters'])
+args.tau_beta = int(parser_dict['tauBeta'])
+args.tau_config = int(parser_dict['tauConfig'])
+args.tau_sigma = float(parser_dict['tauSigma'])
+args.tau_sd = int(parser_dict['tauSD'])
+args.load_epoch = 199999
 args.load_run = 0
-sd_init = 0.5
-# args.cuda = False
-args.n_trial_samples = 10  # Number of samples to generate for each trial
+args.n_trial_samples = int(parser_dict['IS'])  # Number of samples to generate for each trial
 peak1_left_landmarks = [0.03, 0.03, 0.03]
 peak1_right_landmarks = [0.11, 0.14, 0.13]
 peak2_left_landmarks = [0.17, 0.18, 0.18]
@@ -83,7 +80,6 @@ args.A = int(num_factors / args.L)
 model = LikelihoodELBOModel(bin_time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
                             peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks)
 model.init_zero()
-args.folder_name = 'dataSeed396550004_Real_DataInit_K144_A2_C40_R15_tauBeta8000_tauConfig10_tauSigma0.5_tauSD50_IS10_iters100000_BatchSizeAll_lr0.0001_patience80000_factor0.9_threshold1e-10_notes-var landmarks spread aligned lr 1e-4 tau_sigma 0.5'
 load_dir = os.path.join(output_dir, args.folder_name, f'Run_{args.load_run}')
 model_state, optimizer_state, scheduler_state, W_CKL, a_CKL = load_model_checkpoint(load_dir, args.load_epoch)
 model.load_state_dict(model_state)
@@ -108,6 +104,10 @@ plot_outputs(model, factor_access_train.permute(2, 0, 1), unique_regions, output
 
 # Instantiate the dataset and dataloader
 if args.cuda:
+    for state in optimizer.state.values():
+        for k, v in state.items():
+            if isinstance(v, torch.Tensor):
+                state[k] = v.to('cuda')
     Y_train, factor_access_train = load_tensors((Y_train, factor_access_train), to_cuda=args.cuda)
 dataset = CustomDataset(Y_train, factor_access_train)
 if args.batch_size == 'All':
@@ -185,7 +185,7 @@ if __name__ == "__main__":
                 f"{args.notes}\n\n")
             write_log_and_model(output_str, output_dir, epoch, model, optimizer, scheduler)
             plot_outputs(model, factor_access_train.permute(2, 0, 1), unique_regions, output_dir, 'Train', epoch)
-            is_empty = epoch == 0
+            is_empty = epoch == start_epoch
             write_losses(log_likelihoods_train, 'Train', 'Likelihood', output_dir, is_empty)
             write_losses(losses_train, 'Train', 'Loss', output_dir, is_empty)
             write_losses(epoch_train, 'Train', 'Epoch', output_dir, is_empty)

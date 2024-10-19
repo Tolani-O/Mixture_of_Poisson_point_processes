@@ -28,7 +28,8 @@ args.scheduler_threshold = 1e-10 #0.1
 args.scheduler_factor = 0.9
 args.lr = 0.0001
 args.num_epochs = 200000
-args.tau_beta = 1
+# args.temperature = 1
+# args.tau_beta = 1
 args.tau_config = 5
 args.tau_sigma = 0.01
 args.tau_sd = 10
@@ -43,7 +44,7 @@ dt = 0.002
 
 regions = None
 conditions = None
-# regions = ['VISp', 'VISl']
+regions = ['VISp', 'VISl', 'VISal']
 # conditions = [246, 251]
 
 if args.eval_interval > args.log_interval:
@@ -87,7 +88,8 @@ if not os.path.exists(os.path.join(data.output_dir, folder_name, f'cluster_initi
     plot_initial_clusters(data.output_dir, folder_name, args.L)
     sys.exit()
 model = LikelihoodELBOModel(bin_time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
-                            peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks)
+                            peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
+                            temperature=args.temperature)
 # Initialize the model
 model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, cluster_dir=os.path.join(data.output_dir, folder_name), init=the_rest)
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -100,7 +102,7 @@ args.folder_name = (
     f'dataSeed{args.data_seed}_{args.param_seed}_K{args.K}_A{args.A}_C{args.n_configs}'
     f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauSD{args.tau_sd}'
     f'_IS{args.n_trial_samples}_iters{args.num_epochs}_BatchSize{args.batch_size}_lr{args.lr}_patience{args.scheduler_patience}'
-    f'_factor{args.scheduler_factor}_threshold{args.scheduler_threshold}_notes-{args.notes}')
+    f'_factor{args.scheduler_factor}_threshold{args.scheduler_threshold}_temp{args.temperature}_notes-{args.notes}')
 output_dir = os.path.join(output_dir, args.folder_name, 'Run_0')
 os.makedirs(output_dir, exist_ok=True)
 output_str = (f"Using CUDA: {args.cuda}\n"

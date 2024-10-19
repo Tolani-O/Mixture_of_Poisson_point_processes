@@ -16,6 +16,7 @@ plt.rcParams.update({'figure.max_open_warning': 0})
 
 def get_parser():
     parser = argparse.ArgumentParser(description='Sequence Modeling - Polyphonic Music')
+    parser.add_argument('--folder_name', type=str, default='', help='folder name')
     parser.add_argument('--cuda', action='store_true', default=True, help='use CUDA (default: True)')
     parser.add_argument('--n_trials', type=int, default=10, help='Number of trials per stimulus condition')
     parser.add_argument('--n_configs', type=int, default=2, help='Number of stimulus conditions')
@@ -153,6 +154,7 @@ def plot_latent_coupling(latent_coupling, output_dir):
 
 
 def load_model_checkpoint(output_dir, load_epoch):
+    print(f'Loading model from epoch {load_epoch}')
     load_model_dir = os.path.join(output_dir, 'models', f'model_{load_epoch}.pth')
     intermediate_vars_dir = os.path.join(output_dir, 'models', f'intermediate_vars_{load_epoch}.pkl')
     load_optimizer_dir = os.path.join(output_dir, 'models', f'optimizer_{load_epoch}.pth')
@@ -242,6 +244,19 @@ def write_log_and_model(output_str, output_dir, epoch, model, optimizer, schedul
         pickle.dump({'W_CKL': model.W_CKL, 'a_CKL': model.a_CKL}, f)
     torch.save(optimizer.state_dict(), os.path.join(models_path, f'optimizer_{epoch}.pth'))
     torch.save(scheduler.state_dict(), os.path.join(models_path, f'scheduler_{epoch}.pth'))
+
+
+def parse_folder_name(folder_name, parser_key):
+    parsed_values = {}
+    for key in parser_key:
+        start_idx = folder_name.find(key)
+        if start_idx != -1:
+            end_idx = folder_name.find('_', start_idx)
+            if end_idx == -1:
+                end_idx = len(folder_name)
+            value = folder_name[(start_idx + len(key)):end_idx]
+            parsed_values[key] = value
+    return parsed_values
 
 
 def plot_outputs(model, neuron_factor_access, unique_regions, output_dir, folder, epoch):

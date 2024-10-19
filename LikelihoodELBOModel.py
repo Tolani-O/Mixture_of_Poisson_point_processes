@@ -10,11 +10,13 @@ import pickle
 
 class LikelihoodELBOModel(nn.Module):
     def __init__(self, time, n_factors, n_areas, n_configs, n_trials, n_trial_samples,
-                 peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks):
+                 peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
+                 temperature=1.0):
         super(LikelihoodELBOModel, self).__init__()
 
         self.device = 'cpu'
         self.is_eval = True
+        self.temperature = temperature
         self.time = torch.tensor(time)
         dt = round(time[1] - time[0], 3)
         self.dt = torch.tensor(dt)
@@ -395,7 +397,7 @@ class LikelihoodELBOModel(nn.Module):
         # U_tensor # C x K x A x La
         U_tensor = U_tensor.reshape(*U_tensor.shape[:-1], self.n_areas, L_a)
         # W_CKL # C x K x L
-        W_CKL = (neuron_factor_access * F.softmax(U_tensor, dim=-1).reshape(*U_tensor.shape[:-2], self.n_factors)).detach()
+        W_CKL = (neuron_factor_access * F.softmax(U_tensor/self.temperature, dim=-1).reshape(*U_tensor.shape[:-2], self.n_factors)).detach()
         W_CKL = self.validated_W_CKL(W_CKL, neuron_factor_access)
         self.W_CKL = W_CKL  # for finding the posterior clustering probabilities
 

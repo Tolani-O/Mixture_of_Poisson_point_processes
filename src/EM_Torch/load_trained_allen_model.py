@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader
 args = get_parser().parse_args()
 outputs_folder = 'outputs'
 parser_key = ['dataSeed', 'tauBeta', 'tauConfig', 'tauSigma', 'tauSD', 'IS', 'iters', 'BatchSize', 'lr', 'patience', 'factor', 'threshold', 'notes']
-args.folder_name = 'dataSeed1365109930_simulated_DataInit_K100_A3_C5_R15_tauBeta8000_tauConfig5_tauSigma0.01_tauSD10_IS10_iters200000_BatchSizeAll_lr0.0001_patience80000_factor0.9_threshold1e-10_notes-medium beta penalty'
+# args.folder_name = 'dataSeed1365109930_simulated_DataInit_K100_A3_C5_R15_tauBeta8000_tauConfig5_tauSigma0.01_tauSD10_IS10_iters200000_BatchSizeAll_lr0.0001_patience80000_factor0.9_threshold1e-10_notes-medium beta penalty'
 parser_dict = parse_folder_name(args.folder_name, parser_key)
 
 args.data_seed = int(parser_dict['dataSeed'])
@@ -28,12 +28,12 @@ args.scheduler_threshold = float(parser_dict['threshold'])
 args.scheduler_factor = float(parser_dict['factor'])
 args.lr = float(parser_dict['lr'])
 args.num_epochs = int(parser_dict['iters'])
-args.tau_beta = int(parser_dict['tauBeta'])
-args.tau_config = int(parser_dict['tauConfig'])
+args.tau_beta = float(parser_dict['tauBeta'])
+args.tau_config = float(parser_dict['tauConfig'])
 args.tau_sigma = float(parser_dict['tauSigma'])
-args.tau_sd = int(parser_dict['tauSD'])
-args.load_epoch = 199999
-args.load_run = 0
+args.tau_sd = float(parser_dict['tauSD'])
+# args.load_epoch = 199999
+# args.load_run = 0
 args.n_trial_samples = int(parser_dict['IS'])  # Number of samples to generate for each trial
 peak1_left_landmarks = [0.03, 0.03, 0.03]
 peak1_right_landmarks = [0.11, 0.14, 0.13]
@@ -150,7 +150,7 @@ if __name__ == "__main__":
         if args.cuda: model.cuda()
         model.train()
         batch_ct = train_gradient(batch_ct)
-        if epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
+        if epoch == start_epoch or epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             model.eval()
             with torch.no_grad():
                 if args.cuda: factor_access_train = load_tensors([factor_access_train], to_cuda=args.cuda)[0]
@@ -161,7 +161,7 @@ if __name__ == "__main__":
                 log_likelihoods_train.append((1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * likelihood_term_train.item())
                 epoch_train.append(epoch)
                 scheduler.step(log_likelihoods_train[-1])
-        if epoch % args.log_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
+        if epoch == start_epoch or epoch % args.log_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             end_time = time.time()  # Record the end time of the epoch
             elapsed_time = end_time - start_time  # Calculate the elapsed time for the epoch
             total_time += elapsed_time  # Calculate the total time for training

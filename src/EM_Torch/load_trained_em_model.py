@@ -28,7 +28,7 @@ args.A = int(parser_dict['A'])  # A
 args.n_trial_samples = int(parser_dict['IS'])  # Number of samples to generate for each trial
 
 args.batch_size = parser_dict['BatchSize']
-args.notes = parser_dict['notes'][1:]
+args.notes = parser_dict['notes']
 args.log_interval = 500
 args.eval_interval = 500
 args.scheduler_patience = int(parser_dict['patience'])
@@ -36,12 +36,12 @@ args.scheduler_threshold = float(parser_dict['threshold'])
 args.scheduler_factor = float(parser_dict['factor'])
 args.lr = float(parser_dict['lr'])
 args.num_epochs = int(parser_dict['iters'])
-args.tau_beta = int(parser_dict['tauBeta'])
-args.tau_config = int(parser_dict['tauConfig'])
+args.tau_beta = float(parser_dict['tauBeta'])
+args.tau_config = float(parser_dict['tauConfig'])
 args.tau_sigma = float(parser_dict['tauSigma'])
-args.tau_sd = int(parser_dict['tauSD'])
-args.load_epoch = 199999
-args.load_run = 0
+args.tau_sd = float(parser_dict['tauSD'])
+args.load_epoch = 214000
+args.load_run = 1
 sd_init = 0.5
 peak1_left_landmarks = [0.20, 0.20, 0.20, 0.20, 0.20]
 peak1_right_landmarks = [0.70, 0.70, 0.70, 0.70, 0.70]
@@ -204,7 +204,7 @@ if __name__ == "__main__":
         if args.cuda: model.cuda()
         model.train()
         batch_ct = train_gradient(batch_ct)
-        if epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
+        if epoch == start_epoch or epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             model.eval()
             with torch.no_grad():
                 if args.cuda: factor_access_train = load_tensors([factor_access_train], to_cuda=args.cuda)[0]
@@ -274,7 +274,7 @@ if __name__ == "__main__":
                 ltriLkhd_train.append((1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_train, ltri_matrix).sum().item())
                 ltriLkhd_test.append((1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_test, ltri_matrix).sum().item())
 
-        if epoch % args.log_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
+        if epoch == start_epoch or epoch % args.log_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             end_time = time.time()  # Record the end time of the epoch
             elapsed_time = end_time - start_time  # Calculate the elapsed time for the epoch
             total_time += elapsed_time  # Calculate the total time for training

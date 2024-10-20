@@ -229,7 +229,7 @@ if __name__ == "__main__":
         if args.cuda: model.cuda()
         model.train()
         batch_ct = train_gradient(batch_ct)
-        if epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
+        if epoch == start_epoch or epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             model.eval()
             with torch.no_grad():
                 if args.cuda: factor_access_train = load_tensors([factor_access_train], to_cuda=args.cuda)[0]
@@ -299,7 +299,7 @@ if __name__ == "__main__":
                 ltriLkhd_train.append((1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_train, ltri_matrix).sum().item())
                 ltriLkhd_test.append((1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_test, ltri_matrix).sum().item())
 
-        if epoch % args.log_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
+        if epoch == start_epoch or epoch % args.log_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             end_time = time.time()  # Record the end time of the epoch
             elapsed_time = end_time - start_time  # Calculate the elapsed time for the epoch
             total_time += elapsed_time  # Calculate the total time for training
@@ -328,7 +328,7 @@ if __name__ == "__main__":
                 f"{args.notes}\n\n")
             write_log_and_model(output_str, output_dir, epoch, model, optimizer, scheduler)
             plot_outputs(model, factor_access_train.permute(2, 0, 1), unique_regions, output_dir, 'Train', epoch)
-            is_empty = epoch == 0
+            is_empty = epoch == start_epoch
             write_losses(log_likelihoods_train, 'Train', 'Likelihood', output_dir, is_empty)
             write_losses(losses_train, 'Train', 'Loss', output_dir, is_empty)
             write_losses(log_likelihoods_test, 'Test', 'Likelihood', output_dir, is_empty)

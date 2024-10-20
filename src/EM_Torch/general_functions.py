@@ -489,7 +489,7 @@ def write_losses(list, name, metric, output_dir, starts_out_empty):
         _ = file.write(b']')
 
 
-def plot_losses(true_likelihood, output_dir, name, metric, cutoff=0):
+def plot_losses(true_likelihood, output_dir, name, metric, cutoff=0, merge=True):
     if 'likelihood' in metric.lower():
         file_name = 'log_likelihoods'
     elif 'loss' in metric.lower():
@@ -510,12 +510,26 @@ def plot_losses(true_likelihood, output_dir, name, metric, cutoff=0):
     plt_path = os.path.join(output_dir, folder)
     if not os.path.exists(plt_path):
         os.makedirs(plt_path)
-    json_path = os.path.join(output_dir, file_name)
-    with open(json_path, 'r') as file:
-        metric_data = json.load(file)
-    epoch_json_path = os.path.join(output_dir, epoch_file_name)
-    with open(epoch_json_path, 'r') as file:
-        epoch_data = json.load(file)
+
+    path_info = output_dir.split('Run_')
+    parent_dir = path_info[0]
+    run_number = int(path_info[1])
+    if merge:
+        run_folders = sorted([folder for folder in os.listdir(parent_dir) if int(folder.split('Run_')[-1]) <= run_number])
+    else:
+        run_folders = [f'Run_{run_number}']
+
+    metric_data = []
+    epoch_data = []
+    for run_fldr in run_folders:
+        output_dir = os.path.join(parent_dir, run_fldr)
+        json_path = os.path.join(output_dir, file_name)
+        with open(json_path, 'r') as file:
+            metric_data.extend(json.load(file))
+        epoch_json_path = os.path.join(output_dir, epoch_file_name)
+        with open(epoch_json_path, 'r') as file:
+            epoch_data.extend(json.load(file))
+
     metric_data = metric_data[cutoff:]
     epoch_data = epoch_data[cutoff:]
     plt.figure(figsize=(10, 6))

@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader
 
 args = get_parser().parse_args()
 outputs_folder = 'outputs'
-parser_key = ['dataSeed', 'tauBeta', 'tauConfig', 'tauSigma', 'tauSD', 'IS', 'iters', 'BatchSize', 'lr', 'patience', 'factor', 'threshold', 'notes']
+parser_key = ['dataSeed', 'tauBeta', 'tauConfig', 'tauSigma', 'tauSD', 'IS', 'iters', 'BatchSize', 'lr', 'patience', 'factor', 'threshold', 'temp', 'notes']
 # args.folder_name = 'dataSeed1365109930_simulated_DataInit_K100_A3_C5_R15_tauBeta8000_tauConfig5_tauSigma0.01_tauSD10_IS10_iters200000_BatchSizeAll_lr0.0001_patience80000_factor0.9_threshold1e-10_notes-medium beta penalty'
 parser_dict = parse_folder_name(args.folder_name, parser_key)
 
@@ -27,6 +27,7 @@ args.scheduler_patience = int(parser_dict['patience'])
 args.scheduler_threshold = float(parser_dict['threshold'])
 args.scheduler_factor = float(parser_dict['factor'])
 args.lr = float(parser_dict['lr'])
+args.temperature = float(parser_dict['temp'])
 args.num_epochs = int(parser_dict['iters'])
 args.tau_beta = float(parser_dict['tauBeta'])
 args.tau_config = float(parser_dict['tauConfig'])
@@ -43,7 +44,7 @@ dt = 0.002
 
 regions = None
 conditions = None
-# regions = ['VISp', 'VISl']
+regions = ['VISp', 'VISl', 'VISal']
 # conditions = [246, 251]
 
 if args.eval_interval > args.log_interval:

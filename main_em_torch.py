@@ -49,10 +49,11 @@ args.scheduler_threshold = 1e-10  # 0.1
 args.scheduler_factor = 0.9
 args.lr = 0.0001
 args.num_epochs = 200000
+# args.temperature = 1
 # args.tau_beta = 0
-args.tau_config = 5
-args.tau_sigma = 0.01
-args.tau_sd = 10
+# args.tau_config = 5
+args.tau_sigma = 1
+args.tau_sd = 10000
 sd_init = 0.5
 peak1_left_landmarks = [0.20, 0.20, 0.20, 0.20, 0.20]
 peak1_right_landmarks = [0.70, 0.70, 0.70, 0.70, 0.70]
@@ -129,7 +130,7 @@ args.folder_name = (
     f'dataSeed{args.data_seed}_{args.param_seed}_K{args.K}_A{args.A}_C{args.n_configs}'
     f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauSD{args.tau_sd}'
     f'_IS{args.n_trial_samples}_iters{args.num_epochs}_BatchSize{args.batch_size}_lr{args.lr}_patience{args.scheduler_patience}'
-    f'_factor{args.scheduler_factor}_threshold{args.scheduler_threshold}_notes-{args.notes}')
+    f'_factor{args.scheduler_factor}_threshold{args.scheduler_threshold}_temp{args.temperature}_notes-{args.notes}')
 output_dir = os.path.join(output_dir, args.folder_name, 'Run_0')
 os.makedirs(output_dir, exist_ok=True)
 plot_outputs(model, factor_access_train.permute(2, 0, 1), unique_regions, output_dir, 'Train', -2)

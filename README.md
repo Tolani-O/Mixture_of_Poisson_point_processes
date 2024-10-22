@@ -2,20 +2,20 @@
 
 ## Description
 
-This repository implements a model-based clustering technique to cluster samples from temporal Poisson point processes, based on their latent intensity functions. The method involves learning the intensity function for each cluster by
-fitting a mixture of Poisson point processes (analogous to a mixture of Gaussians) to an observed sample, and assigning each observed process to a cluster accordingly. The mixture of Poisson process model is a latent variable model, and
-can be fit using the Expectation maximization algorithm to maximize the expected log-likelihood of the observed sample. The observed processes do not need to be aligned to their "centroid", as the method with perform a group alignment
-step at each iteration. Due to the model's analytical complexity, the maximizer for some variables does not exist in closed form, and thus these are learned using gradient descent, which is implemented in PyTorch. As such, this implementation
-takes full advantage of GPU acceleration and parallelization. We applied the method to clustering neuron spike trains from the visual cortex of mice, which are assumed to follow a Poisson point process, and obtained excellent results.
+This repository implements a model-based clustering technique to cluster samples from temporal Poisson point processes, based on their latent intensity functions. The method involves learning the intensity function for each cluster by fitting a mixture of Poisson point processes (analogous to a mixture of Gaussians) to an observed sample, and assigning each observed process to a cluster accordingly. The mixture of Poisson process model is a latent variable model, and can be fit using the Expectation maximization algorithm to maximize the expected log-likelihood of the observed sample. The observed processes do not need to be aligned to their "centroid", as the method with perform a group alignment step at each iteration. Due to the model's analytical complexity, the maximizer for some variables does not exist in closed form, and thus these are learned using gradient descent, which is implemented in PyTorch. As such, this implementation takes full advantage of GPU acceleration and parallelization. We applied the method to clustering neuron spike trains from the visual cortex of mice, which are assumed to follow a Poisson point process, and obtained excellent results.
 
 ## File Structure
 
 ## Getting Started
 
-* ```src/```: Contains the main source code for the Poisson Point Process Mixture Model.
-tests/: Includes unit tests for the model.
-data/: Directory for storing any datasets used in the project.
-notebooks/: Jupyter notebooks for exploratory data analysis and model visualization.
+* ```LikelihoodELBOModel.py```: Contains the main source code for the Poisson Point Process Mixture Model, defined in the class ```LikelihoodELBOModel```.
+* ```general_functions.py```: Includes utility and helper functions for the model, such as logging and plotting functions.
+* ```simulate_data_multitrial.py```: Contains code to generate simulated data point process data on which to apply clustering, defined in the class ```DataAnalyzer```.
+* ```Allen_data_torch.py```: Contains code to load point process data recorded from the visual cortex of mice from the Allen brain observatory, defined in the class ```EcephysAnalyzer```. The full Allen Brain Observatory Neuropixels Visual Coding dataset can be accessed via the [AllenSDK](https://allensdk.readthedocs.io/en/latest/visual_coding_neuropixels.html), the [DANDI Archive](https://dandiarchive.org/dandiset/000021), and through [AWS Registry of Open Data](https://registry.opendata.aws/allen-brain-observatory/).
+* ```main_em_torch.py```: Script to run the clustering algorithm on sample simulated data.
+* ```load_trained_em_model.py```: Script to resume training of a previously run model on simulated data from a given checkpoint.
+* ```main_load_allen_data.py```: Script to run the clustering algorithm on the Allen observatory data.
+* ```load_trained_allen_model.py```: Script to resume training of a previously run model on Allen observatory data from a given checkpoint.
 
 ### Prerequisites
 
@@ -56,12 +56,13 @@ source venv/bin/activate  # On Windows use `venv\Scripts\activate`
 pip install -r requirements.txt
 ```
 
+4. Install Allen SDK:
+
+Instructions for installing the AllenSDK can be found [here](https://allensdk.readthedocs.io/en/latest/install.html).
+
 ### Usage
-* To run the Python scripts, you will need to have python and the AllenSDK installed. You can find instructions for installing the AllenSDK [here](https://allensdk.readthedocs.io/en/latest/install.html).
-* To run the R scripts, you will need to have R installed. You can find instructions for installing R [here](https://www.r-project.org/).
-* To run the R scripts, you will need to have RStan installed. You can find instructions for installing RStan [here](www.mc-stan.org/users/interfaces/rstan).
-* First run the Python script `download_and_format_allen_data.py` to download the data from the Allen Brain Observatory Neuropixels Visual Coding dataset. This will create a folder called `RStudioProjects/rNeuroPixel/rDataset` in the home directory. For each mouse id specified in the script, it will create a folder called `units_data_[mouse_id]`, where for each stimulus configuration and visual region, it will save the mouses spike train data for all trials of each as a datatable, which is a format readable to the R script. All mouse ids are specified in the script.
-* Next, run the R script `generate_single_mouse_data.R`. This can be run from commandline with a single command line argument being a mouse id. The script will read the mouse data from the corresponding `units_data_[mouse_id]` folder, perform subset preselection for each visual area, perform naive estimation of peak times, with standard errors, compute posterior estimates of peak times and their trial to trial correlations, and finally it will write posterior summaries of the peaktimes, correlations and partial correlaitons to their corresponding folders, together with the naive correlation estimates.     
+
+Simply run ```main_em_torch.py``` or ```main_load_allen_data.py```.
 
 ## Contributing
 

@@ -18,6 +18,7 @@ def get_parser():
     parser = argparse.ArgumentParser(description='Sequence Modeling - Polyphonic Music')
     parser.add_argument('--folder_name', type=str, default='', help='folder name')
     parser.add_argument('--cuda', action='store_true', default=True, help='use CUDA (default: True)')
+    parser.add_argument('--time_warp', type=bool, default=True, help='whether or not to use time warping')
     parser.add_argument('--n_trials', type=int, default=10, help='Number of trials per stimulus condition')
     parser.add_argument('--n_configs', type=int, default=2, help='Number of stimulus conditions')
     parser.add_argument('--A', type=int, default=2, help='Number of areas')
@@ -35,7 +36,7 @@ def get_parser():
     parser.add_argument('--scheduler_patience', type=int, default=1000, help='Number of epochs before scheduler step')
     parser.add_argument('--scheduler_factor', type=int, default=0.8, help='Scheduler reduction factor')
     parser.add_argument('--scheduler_threshold', type=int, default=10, help='Threshold to accept step improvement')
-    parser.add_argument('--notes', type=str, default='empty', help='Run notes')
+    parser.add_argument('--notes', type=str, default='', help='Run notes')
     parser.add_argument('--K', type=int, default=30, help='Number of neurons')
     parser.add_argument('--L', type=int, default=3, help='Number of latent factors')
     parser.add_argument('--intensity_mltply', type=float, default=25, help='Latent factor intensity multiplier')
@@ -61,7 +62,7 @@ def get_parser():
 class CustomDataset(Dataset):
     def __init__(self, Y, neuron_factor_access):
         # Y # K x T x R x C
-        # neuron_factor_access  #  K x L x C
+        # neuron_factor_access  #  C x K x L
         self.Y = Y
         self.neuron_factor_access = neuron_factor_access
 
@@ -69,7 +70,7 @@ class CustomDataset(Dataset):
         return self.Y.shape[0]
 
     def __getitem__(self, idx):
-        return self.Y[idx], self.neuron_factor_access[idx]
+        return self.Y[idx], self.neuron_factor_access[:, idx, :] # K x C x L
 
 
 def create_precision_matrix(P):
@@ -165,7 +166,7 @@ def load_model_checkpoint(output_dir, load_epoch):
     if os.path.isfile(intermediate_vars_dir):
         with open(intermediate_vars_dir, 'rb') as f:
             intermediate_vars = pickle.load(f)
-            W_CKL, a_CKL = intermediate_vars['W_CKL'], intermediate_vars['a_CKL']
+            W_CKL, a_CKL, theta, pi = intermediate_vars['W_CKL'], intermediate_vars['a_CKL'], intermediate_vars['theta'], intermediate_vars['pi']
     else:
         raise Exception(f'No intermediate_vars_{load_epoch}.pkl file found at {intermediate_vars_dir}')
     if os.path.isfile(load_optimizer_dir):
@@ -176,7 +177,7 @@ def load_model_checkpoint(output_dir, load_epoch):
         scheduler = torch.load(scheduler_dir, map_location=torch.device('cpu'))
     else:
         raise Exception(f'No scheduler_{load_epoch}.pth file found at {scheduler_dir}')
-    return model, optimizer, scheduler, W_CKL, a_CKL
+    return model, optimizer, scheduler, W_CKL, a_CKL, theta, pi
 
 
 def reset_metric_checkpoint(output_dir, folder_name, sub_folder_name, metric_files, start_epoch):
@@ -240,7 +241,7 @@ def write_log_and_model(output_str, output_dir, epoch, model, optimizer, schedul
         os.makedirs(models_path)
     torch.save(model.state_dict(), os.path.join(models_path, f'model_{epoch}.pth'))
     with open(os.path.join(models_path, f'intermediate_vars_{epoch}.pkl'), 'wb') as f:
-        pickle.dump({'W_CKL': model.W_CKL, 'a_CKL': model.a_CKL}, f)
+        pickle.dump({'W_CKL': model.W_CKL, 'a_CKL': model.a_CKL, 'theta': model.theta, 'pi': model.pi}, f)
     torch.save(optimizer.state_dict(), os.path.join(models_path, f'optimizer_{epoch}.pth'))
     torch.save(scheduler.state_dict(), os.path.join(models_path, f'scheduler_{epoch}.pth'))
 
@@ -258,7 +259,7 @@ def parse_folder_name(folder_name, parser_key):
     return parsed_values
 
 
-def plot_outputs(model, neuron_factor_access, unique_regions, output_dir, folder, epoch):
+def plot_outputs(model, unique_regions, output_dir, folder, epoch):
 
     output_dir = os.path.join(output_dir, folder)
     if not os.path.exists(output_dir):
@@ -310,12 +311,12 @@ def plot_outputs(model, neuron_factor_access, unique_regions, output_dir, folder
         plt.savefig(os.path.join(log_beta_dir, f'beta_{epoch}.png'))
         plt.close()
 
-        pi = model.pi_value(neuron_factor_access).numpy()
+        pi = model.pi.numpy()
         if model.W_CKL is None:
             W_L = np.zeros(model.n_factors)
         else:
             plot_factor_assignments(model.W_CKL.numpy(), output_dir, 'cluster', epoch, False)
-            W_L = np.round((torch.sum(model.W_CKL, dim=(0, 1))/model.W_CKL.shape[0]).numpy(), 1)
+            W_L = np.round((torch.sum(model.W_CKL, dim=(0, 1))/model.n_configs).numpy(), 1)
         latent_factors = torch.softmax(model.unnormalized_log_factors(), dim=-1).numpy()
         global_max = np.max(latent_factors)
         upper_limit = global_max + 0.005
@@ -348,14 +349,13 @@ def plot_outputs(model, neuron_factor_access, unique_regions, output_dir, folder
         plt.savefig(os.path.join(alpha_dir, f'alpha_{epoch}.png'))
         plt.close()
 
-        theta = model.theta_value().numpy()
+        theta = model.theta.numpy()
         plt.figure(figsize=(10, 10))
         plt.plot(theta, label='Theta')
         plt.title('Theta')
         plt.savefig(os.path.join(theta_dir, f'theta_{epoch}.png'))
         plt.close()
 
-        pi = model.pi_value(neuron_factor_access).numpy()
         plt.figure(figsize=(10, 10))
         plt.plot(pi, label='Pi')
         plt.title('Pi')
@@ -549,15 +549,18 @@ def plot_losses(true_likelihood, output_dir, name, metric, cutoff=0, merge=True)
         plt.savefig(os.path.join(plt_path, f'{metric}_{name}_Trajectories.png'))
 
 
-def load_tensors(arrays, is_numpy=False, to_cuda=False):
-    if is_numpy:
-        tensors = [torch.tensor(array, dtype=torch.float64) for array in arrays]
-    else:
-        tensors = arrays
-    if to_cuda:
-        return tuple([tensor.cuda() for tensor in tensors])
-    else:
-        return tuple([tensor.cpu() for tensor in tensors])
+def load_tensors(arrays):
+    return tuple([torch.tensor(array, dtype=torch.float64) for array in arrays])
+
+
+def to_cuda(tensors, move_to_cuda=True):
+    if not move_to_cuda:
+        return tensors
+    return tuple([tensor.cuda() for tensor in tensors])
+
+
+def to_cpu(tensors):
+    return tuple([tensor.cpu() for tensor in tensors])
 
 
 def softplus(x):

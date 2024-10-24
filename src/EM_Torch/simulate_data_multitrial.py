@@ -10,14 +10,13 @@ class DataAnalyzer:
         self.dt = None
         landmark_spread = 50
         self.left_landmark1 = 20
-        self.mid_landmark1 = self.left_landmark1 + landmark_spread / 2
         self.right_landmark1 = self.left_landmark1 + landmark_spread
         self.left_landmark2 = 120
-        self.mid_landmark2 = self.left_landmark2 + landmark_spread / 2
         self.right_landmark2 = self.left_landmark2 + landmark_spread
         self.Y = None
         self.neuron_factor_access = None
         self.trial_peak_offsets = None  # CR x 2AL
+        self.time_warp = True
 
         # parameters
         self.beta = None  # AL x P
@@ -34,10 +33,11 @@ class DataAnalyzer:
         self.neuron_intensities = None  # unobserved
 
     def initialize(self, configs=3, A=2, L=3, T=200, intensity_type=('constant', '1peak', '2peaks'),
-                   intensity_mltply=15, intensity_bias=1):
+                   intensity_mltply=15, intensity_bias=1, time_warp=True):
         time = np.arange(0, T, 1) / 100
         self.time = time
         self.dt = round(self.time[1] - self.time[0], 3)
+        self.time_warp = time_warp
 
         n_factors = L * A
         # define parameters on terms of mean and sqrt variance
@@ -47,8 +47,11 @@ class DataAnalyzer:
         self.alpha = (mu/sigma)**2
         self.theta = mu/(sigma**2)
         self.pi = np.zeros(n_factors)
-        self.config_peak_offsets = 0.1 * np.random.normal(size=(configs, 2 * n_factors))
-        # self.config_peak_offsets = np.zeros((configs, 2 * n_factors))
+        if self.time_warp:
+            self.config_peak_offsets = np.random.normal(size=(configs, 2 * n_factors))
+        else:
+            self.config_peak_offsets = np.zeros((configs, 2 * n_factors))
+        self.config_peak_offsets = 0.1 * self.config_peak_offsets
         matrix = np.tril(np.random.normal(size=(2 * n_factors, 2 * n_factors)))
         cov = matrix @ matrix.T
         stdevs = np.sqrt(np.diag(cov))
@@ -168,8 +171,11 @@ class DataAnalyzer:
     def warp_all_latent_factors_for_all_trials(self, n_trials):
         n_factors = self.beta.shape[0]
         n_configs = self.config_peak_offsets.shape[0]
-        trial_peak_offset_samples = (np.random.normal(0, 1, (1, n_trials * n_configs, 2 * n_factors))
-                                     .reshape(1, n_trials, n_configs, 2 * n_factors))
+        if self.time_warp:
+            trial_peak_offset_samples = (np.random.normal(0, 1, (1, n_trials * n_configs, 2 * n_factors))
+                                         .reshape(1, n_trials, n_configs, 2 * n_factors))
+        else:
+            trial_peak_offset_samples = np.zeros((1, n_trials, n_configs, 2 * n_factors))
         self.trial_peak_offsets = np.einsum('lj,nrcj->nrcl', self.trial_peak_offset_covar_ltri, trial_peak_offset_samples)
         avg_peak_times, left_landmarks, right_landmarks, s_new = self.compute_offsets_and_landmarks()
         warped_times = self.compute_warped_times(avg_peak_times, left_landmarks, right_landmarks, s_new)
@@ -250,10 +256,9 @@ class DataAnalyzer:
         self.generate_neuron_gains_factor_assignments_condition_assignment_and_factor_access(K, A)
         self.generate_spike_trains(trial_warped_factors)
         indcs = np.indices(self.neuron_factor_assignments.shape)
-        neuron_factor_assignments = np.zeros((n_configs, K, n_factors))
+        neuron_factor_assignments = np.zeros((n_configs, K, n_factors))  # C x K x L*A
         neuron_factor_assignments[indcs[0].flatten(), indcs[1].flatten(), self.neuron_factor_assignments.flatten()] = 1
         self.neuron_factor_assignments_onehot = neuron_factor_assignments
-        self.neuron_factor_access = np.transpose(self.neuron_factor_access, (1, 2, 0))
         return self.Y, self.neuron_factor_access
 
 
@@ -262,7 +267,7 @@ class DataAnalyzer:
                 self.neuron_gains, self.trial_peak_offsets)
 
 
-    def load_tensors(self, is_cuda):
+    def load_tensors(self):
         # load tensors
         self.beta = torch.tensor(self.beta)
         self.alpha = torch.tensor(self.alpha)
@@ -270,10 +275,14 @@ class DataAnalyzer:
         self.pi = torch.tensor(self.pi)
         self.config_peak_offsets = torch.tensor(self.config_peak_offsets)
         self.trial_peak_offset_covar_ltri = torch.tensor(self.trial_peak_offset_covar_ltri)
-        if is_cuda:
-            self.beta = self.beta.cuda()
-            self.alpha = self.alpha.cuda()
-            self.theta = self.theta.cuda()
-            self.pi = self.pi.cuda()
-            self.config_peak_offsets = self.config_peak_offsets.cuda()
-            self.trial_peak_offset_covar_ltri = self.trial_peak_offset_covar_ltri.cuda()
+
+
+    def cuda(self, move_to_cuda=True):
+        if not move_to_cuda:
+            return
+        self.beta = self.beta.cuda()
+        self.alpha = self.alpha.cuda()
+        self.theta = self.theta.cuda()
+        self.pi = self.pi.cuda()
+        self.config_peak_offsets = self.config_peak_offsets.cuda()
+        self.trial_peak_offset_covar_ltri = self.trial_peak_offset_covar_ltri.cuda()

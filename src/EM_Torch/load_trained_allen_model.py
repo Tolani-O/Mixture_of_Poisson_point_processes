@@ -11,9 +11,9 @@ import time
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+outputs_folder = 'outputs'
 
 args = get_parser().parse_args()
-outputs_folder = 'outputs'
 parser_key = ['dataSeed', 'tauBeta', 'tauConfig', 'tauSigma', 'tauSD', 'IS', 'iters', 'BatchSize', 'lr', 'patience', 'factor', 'threshold', 'temp', 'notes']
 # args.folder_name = 'dataSeed1365109930_simulated_DataInit_K100_A3_C5_R15_tauBeta8000_tauConfig5_tauSigma0.01_tauSD10_IS10_iters200000_BatchSizeAll_lr0.0001_patience80000_factor0.9_threshold1e-10_notes-medium beta penalty'
 parser_dict = parse_folder_name(args.folder_name, parser_key)

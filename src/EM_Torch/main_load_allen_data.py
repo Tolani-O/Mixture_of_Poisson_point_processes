@@ -23,14 +23,14 @@ beginning_notes = f'Real_{init}Init'
 args.notes = f''
 args.log_interval = 500
 args.eval_interval = 500
-args.scheduler_patience = 80000 #2000
-args.scheduler_threshold = 1e-10 #0.1
+args.scheduler_patience = 80000  # 2000
+args.scheduler_threshold = 1e-10  # 0.1
 args.scheduler_factor = 0.9
 args.lr = 0.0001
 args.num_epochs = 200000
-# args.temperature = 0.5
-# args.tau_beta = 1500
-# args.tau_config = 8000
+# args.temperature = 1
+# args.tau_beta = 1000
+# args.tau_config = 500
 args.tau_sigma = 1
 args.tau_sd = 10000
 sd_init = 0.5
@@ -81,7 +81,7 @@ Y_train, factor_access_train = load_tensors((Y_train, factor_access_train))
 print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')
 
 args.K, T, args.n_trials, args.n_configs = Y_train.shape
-num_factors = factor_access_train.shape[1]
+num_factors = factor_access_train.shape[-1]
 args.A = int(num_factors/args.L)
 if not os.path.exists(os.path.join(data.output_dir, folder_name, f'cluster_initialization.pkl')):
     initialize_clusters(Y_train, factor_access_train, args.L, args.A, os.path.join(data.output_dir, folder_name), n_jobs=15, bandwidth=4)
@@ -123,9 +123,6 @@ dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
 print(f'folder_name: {args.folder_name}\n\n')
 print(output_str)
 
-
-# torch.autograd.set_detect_anomaly(True)
-
 def train_gradient(batch_ct):
     for Y, access in dataloader:
         # K x C x L --> C x K x L
@@ -162,7 +159,7 @@ if __name__ == "__main__":
             with torch.no_grad():
                 factor_access_train = to_cuda([factor_access_train], move_to_cuda=args.cuda)[0]
                 penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
-                likelihood_term_train = model.ground_truth_forward(Y_train, factor_access_train)
+                likelihood_term_train = model.forward(Y_train, factor_access_train, train=False)
                 model_factor_assignment_train, model_neuron_gains_train = model.infer_latent_variables()
                 losses_train.append((likelihood_term_train + penalty_term).item())
                 log_likelihoods_train.append((1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * likelihood_term_train.item())

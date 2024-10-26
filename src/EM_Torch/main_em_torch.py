@@ -93,7 +93,8 @@ unique_regions = [f'region{i}' for i in range(args.A)]
 data.load_tensors()
 num_factors = data.beta.shape[0]
 model = LikelihoodELBOModel(data.time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
-                            peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks)
+                            peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
+                            temperature=args.temperature)
 model.init_ground_truth(beta=data.beta,
                         alpha=inv_softplus_torch(data.alpha),
                         config_peak_offsets=data.config_peak_offsets,
@@ -110,11 +111,11 @@ with torch.no_grad():
     model.init_ground_truth(trial_peak_offset_proposal_means=trial_offsets_test.squeeze(),
                             W_CKL=factor_assignment_onehot_test,
                             init='')
-    true_ELBO_test = model.ground_truth_forward(Y_test)
+    true_ELBO_test = model.forward(Y_test, train=False)
     model.init_ground_truth(trial_peak_offset_proposal_means=trial_offsets_train.squeeze(),
                             W_CKL=factor_assignment_onehot_train,
                             init='')
-    true_ELBO_train = model.ground_truth_forward(Y_train)
+    true_ELBO_train = model.forward(Y_train, train=False)
 true_ELBO_train = (1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * true_ELBO_train.item()
 true_ELBO_test = (1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * true_ELBO_test.item()
 ltri_matrix = model.ltri_matix()
@@ -228,9 +229,9 @@ if __name__ == "__main__":
             with torch.no_grad():
                 factor_access_train = to_cuda([factor_access_train], move_to_cuda=args.cuda)[0]
                 penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
-                likelihood_term_train = model.ground_truth_forward(Y_train, factor_access_train)
+                likelihood_term_train = model.forward(Y_train, factor_access_train, train=False)
                 model_factor_assignment_train, model_neuron_gains_train = model.infer_latent_variables()
-                likelihood_term_test = model.ground_truth_forward(Y_test, factor_access_test)
+                likelihood_term_test = model.forward(Y_test, factor_access_test, train=False)
                 model_factor_assignment_test, model_neuron_gains_test = model.infer_latent_variables()
 
                 losses_train.append((likelihood_term_train + penalty_term).item())

@@ -130,7 +130,7 @@ class DataAnalyzer:
                                        self.theta[neuron_factor_assignments]**(-1))
         self.neuron_gains = neuron_gains
         self.neuron_factor_assignments = neuron_factor_assignments
-        self.neuron_factor_access = neuron_factor_access
+        self.neuron_factor_access = neuron_factor_access  # C x K x L*A
 
     def generate_spike_trains(self, trial_warped_factors):
         # trial_warped_factors # L x T x R X C

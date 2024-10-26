@@ -400,15 +400,15 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch):
 
 def initialize_clusters(Y, factor_access, n_clusters, n_areas, output_dir, n_jobs=15, bandwidth=4):
     # Y # K x T x R x C
-    # factor_access  # K x L x C
+    # factor_access  # C x K x L
     K, T, R, C = Y.shape
     Y_train = gaussian_filter1d(Y.sum(axis=(2, 3)), sigma=bandwidth, axis=0)
     dba_km = TimeSeriesKMeans(n_clusters=n_clusters, n_init=10, metric='dtw', max_iter_barycenter=20, n_jobs=n_jobs)
     print('Fitting DBA-KMeans')
     y_pred = dba_km.fit_predict(Y_train)
-    neuron_factor_assignment = torch.zeros((K, C, n_clusters), dtype=torch.float64)
+    neuron_factor_assignment = torch.zeros((K, C, n_clusters), dtype=torch.float64)  # K x C x L
     neuron_factor_assignment[torch.arange(K), :, y_pred] = 1
-    neuron_factor_assignment = torch.concat([neuron_factor_assignment] * n_areas, dim=-1).permute(1, 0, 2) * factor_access.permute(2, 0, 1)
+    neuron_factor_assignment = torch.concat([neuron_factor_assignment] * n_areas, dim=-1).permute(1, 0, 2) * factor_access
     beta = torch.log(torch.concat([torch.tensor(dba_km.cluster_centers_).squeeze()] * n_areas, dim=0))
     # save to disk
     os.makedirs(output_dir, exist_ok=True)

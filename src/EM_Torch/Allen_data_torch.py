@@ -319,7 +319,8 @@ class EcephysAnalyzer:
                           sort_values(by=list(np.arange(neuron_factor_access.shape[1])), ascending=False).index)
         neuron_factor_access = np.concatenate(neuron_factor_access, axis=-1).T[sorted_indices].reshape(Y.shape[0], C, num_factors*A).transpose(0, 2, 1)
         Y = np.concatenate(Y, axis=-1).T[sorted_indices].reshape(Y.shape[0], C, Y.shape[2], Y.shape[1]).transpose(0, 3, 2, 1)
-        return Y, time, neuron_factor_access, unique_regions
+        # neuron_factor_access K x L x C --> C x K x L
+        return Y, time, neuron_factor_access.transpose(2, 0, 1), unique_regions
 
 
     def save_sample(self, Y, time, neuron_factor_access, unique_regions, folder_name):

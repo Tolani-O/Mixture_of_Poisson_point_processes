@@ -105,7 +105,7 @@ class LikelihoodELBOModel(nn.Module):
         if theta is not None:
             self.theta = theta
         if W_CKL is not None:
-            self.W_CKL = W_CKL
+            self.validated_W_CKL(W_CKL)
         elif pi is not None:
             self.pi = pi
         if trial_peak_offset_proposal_means is not None:
@@ -489,19 +489,11 @@ class LikelihoodELBOModel(nn.Module):
         return neuron_factor_assignment, neuron_firing_rates
 
 
-    def forward(self, Y, neuron_factor_access):
-        self.train()
+    def forward(self, Y, neuron_factor_access=None, train=True):
+        self.train(train)
         Y_sum_t, Y_sum_rt, Y_sum_rt_plus_alpha, alpha, warped_factors, posterior_warped_factors = self.prepare_inputs(Y)
-        self.E_step_posterior_updates(Y, Y_sum_t, Y_sum_rt, Y_sum_rt_plus_alpha, alpha, warped_factors, posterior_warped_factors, neuron_factor_access)
-        return self.ELBO_term(Y, Y_sum_t, Y_sum_rt_plus_alpha, alpha, warped_factors)
-
-
-    def ground_truth_forward(self, Y, neuron_factor_access=None):
-        self.eval()
-        Y_sum_t, _, Y_sum_rt_plus_alpha, alpha, warped_factors, _ = self.prepare_inputs(Y)
         if neuron_factor_access is not None:
-            R = Y.shape[2]
-            self.update_params(Y_sum_rt_plus_alpha, neuron_factor_access, R)
+            self.E_step_posterior_updates(Y, Y_sum_t, Y_sum_rt, Y_sum_rt_plus_alpha, alpha, warped_factors, posterior_warped_factors, neuron_factor_access)
         return self.ELBO_term(Y, Y_sum_t, Y_sum_rt_plus_alpha, alpha, warped_factors)
 
 

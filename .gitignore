@@ -1,6 +1,8 @@
+.vscode/
 brain_observatory_examples/
 data/
 outputs/
 discard/
 .idea/*
 __pycache__/
+archived/

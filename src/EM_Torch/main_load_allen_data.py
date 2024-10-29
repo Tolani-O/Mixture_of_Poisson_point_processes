@@ -35,6 +35,7 @@ args.tau_sigma = 1
 args.tau_sd = 10000
 sd_init = 0.5
 # args.cuda = False
+# args.init_with_DTW = True
 args.n_trial_samples = 10  # Number of samples to generate for each trial
 peak1_left_landmarks = [0.03, 0.03, 0.03]
 peak1_right_landmarks = [0.11, 0.14, 0.13]
@@ -83,15 +84,19 @@ print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_acces
 args.K, T, args.n_trials, args.n_configs = Y_train.shape
 num_factors = factor_access_train.shape[-1]
 args.A = int(num_factors/args.L)
-if not os.path.exists(os.path.join(data.output_dir, folder_name, f'cluster_initialization.pkl')):
-    initialize_clusters(Y_train, factor_access_train, args.L, args.A, os.path.join(data.output_dir, folder_name), n_jobs=15, bandwidth=4)
-    plot_initial_clusters(data.output_dir, folder_name, args.L)
-    sys.exit()
+if args.init_with_DTW:
+    cluster_dir = os.path.join(data.output_dir, folder_name)
+    if not os.path.exists(os.path.join(data.output_dir, folder_name, f'cluster_initialization.pkl')):
+        initialize_clusters(Y_train, factor_access_train, args.L, args.A, cluster_dir, n_jobs=15, bandwidth=4)
+        plot_initial_clusters(data.output_dir, folder_name, args.L)
+        # sys.exit()
+else:
+    cluster_dir = None
 model = LikelihoodELBOModel(bin_time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
                             peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
                             temperature=args.temperature)
 # Initialize the model
-model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, cluster_dir=os.path.join(data.output_dir, folder_name), init=the_rest)
+model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, cluster_dir=cluster_dir, init=the_rest)
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 patience = args.scheduler_patience//args.eval_interval
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',

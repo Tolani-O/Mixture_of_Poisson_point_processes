@@ -47,6 +47,7 @@ def get_parser():
     parser.add_argument('--log_interval', type=int, default=100, metavar='N', help='report interval (default: 100')
     parser.add_argument('--eval_interval', type=int, default=100, metavar='N', help='report interval (default: 10')
     parser.add_argument('--batch_size', type=int_or_str, default=5, help='the batch size for training')
+    parser.add_argument('--init_with_DTW', type=bool, default=False, help='How should the latent factors be initialized')
     return parser
 
 
@@ -551,7 +552,7 @@ def compute_uncertainty(model, Y, neuron_factor_access, output_dir, epoch):
         with open(file_path, 'rb') as f:
             hessian_diagonal_dict = pickle.load(f)
         return hessian_diagonal_dict
-    likelihood_term = model.forward(Y, neuron_factor_access)
+    likelihood_term = model.log_likelihood(Y, neuron_factor_access)
     param_names = ['beta', 'alpha', 'config_peak_offsets', 'trial_peak_offset_covar_ltri_diag',
                    'trial_peak_offset_covar_ltri_offdiag']
     param_values = [p for n, p in model.named_parameters() if n in param_names]

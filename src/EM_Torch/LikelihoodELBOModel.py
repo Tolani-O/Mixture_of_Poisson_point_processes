@@ -44,9 +44,10 @@ class LikelihoodELBOModel(nn.Module):
         self.pi = None  # 1 x AL
         self.W_CKL = None  # C x K x L
         self.a_CKL = None  # C x K x L
+        self.U_tensor = None  # C x K x L
 
         # Parameters
-        self.beta = None  # AL x P
+        self.beta = None  # AL x T
         self.alpha = None  # 1 x AL
         self.config_peak_offsets = None  # C x 2AL
         self.trial_peak_offset_covar_ltri_diag = None
@@ -368,10 +369,9 @@ class LikelihoodELBOModel(nn.Module):
         return Y_sum_t, Y_sum_rt, Y_sum_rt_plus_alpha, alpha, warped_factors, posterior_warped_factors
 
 
-    def E_step_posterior_updates(self, Y, Y_sum_t, Y_sum_rt, Y_sum_rt_plus_alpha, alpha, warped_factors, posterior_warped_factors, neuron_factor_access):
+    def E_step_posterior_updates(self, Y, Y_sum_rt, Y_sum_rt_plus_alpha, alpha, posterior_warped_factors, neuron_factor_access):
         # output before summing: C x K x R x L x N
         # factors # L x T
-        # warped_factors # C x R x L x N x T
         # posterior_warped_factors # C x R x L x 1 x T
         # neuron_factor_access  # C x K x L
         # Y # K x T x R x C
@@ -401,6 +401,8 @@ class LikelihoodELBOModel(nn.Module):
         # U_tensor # C x K x A x La
         L_a = self.n_factors // self.n_areas
         U_tensor = U_tensor.reshape(*U_tensor.shape[:-1], self.n_areas, L_a)
+        neuron_area_access = neuron_factor_access.reshape(*neuron_factor_access.shape[:-1], self.n_areas, L_a).sum(dim=-1)/L_a
+        self.U_tensor = neuron_area_access * torch.logsumexp(U_tensor, dim=-1)
         # W_CKL # C x K x L
         W_CKL = (neuron_factor_access * F.softmax(U_tensor/self.temperature, dim=-1).reshape(*U_tensor.shape[:-2], self.n_factors)).detach()
         self.validated_W_CKL(W_CKL)  # for finding the posterior clustering probabilities
@@ -410,6 +412,7 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def ELBO_term(self, Y, Y_sum_t, Y_sum_rt_plus_alpha, alpha, warped_factors):
+        # warped_factors # C x R x L x N x T
         K, T, R, C = Y.shape
         W_CKL = self.W_CKL
         theta = self.theta
@@ -440,6 +443,7 @@ class LikelihoodELBOModel(nn.Module):
                     log_gamma_alpha) - (1 / K) * (neg_log_P - neg_log_Q))
         elbo = torch.sum(W_tensor * elbo)
         return elbo
+
 
     def Sigma_log_likelihood(self, trial_peak_offsets, ltri_matrix):
         n_dims = ltri_matrix.shape[0]  # 2AL
@@ -493,5 +497,16 @@ class LikelihoodELBOModel(nn.Module):
         self.train(train)
         Y_sum_t, Y_sum_rt, Y_sum_rt_plus_alpha, alpha, warped_factors, posterior_warped_factors = self.prepare_inputs(Y)
         if neuron_factor_access is not None:
-            self.E_step_posterior_updates(Y, Y_sum_t, Y_sum_rt, Y_sum_rt_plus_alpha, alpha, warped_factors, posterior_warped_factors, neuron_factor_access)
+            self.E_step_posterior_updates(Y, Y_sum_rt, Y_sum_rt_plus_alpha, alpha, posterior_warped_factors, neuron_factor_access)
         return self.ELBO_term(Y, Y_sum_t, Y_sum_rt_plus_alpha, alpha, warped_factors)
+
+
+    def log_likelihood(self, Y, neuron_factor_access):
+        self.train(False)
+        # trial_peak_offset_proposal_samples 1 x R x C x 2AL
+        Y_sum_t, Y_sum_rt, Y_sum_rt_plus_alpha, alpha, warped_factors, posterior_warped_factors = self.prepare_inputs(Y)
+        self.E_step_posterior_updates(Y, Y_sum_rt, Y_sum_rt_plus_alpha, alpha, posterior_warped_factors, neuron_factor_access)
+        # log_P  C x R
+        log_P = -self.Sigma_log_likelihood(self.trial_peak_offset_proposal_means.unsqueeze(0), self.ltri_matix()).squeeze()
+        log_likelihood = torch.sum(self.U_tensor) + torch.sum(log_P)
+        return log_likelihood

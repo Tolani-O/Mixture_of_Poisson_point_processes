@@ -25,14 +25,16 @@ def get_parser():
     parser.add_argument('--n_trial_samples', type=int, default=10, help='Number of trial samples for monte carlo integration')
     parser.add_argument('--lr', type=float, default=1e-3, help='initial learning rate (default: 1e-3)')
     parser.add_argument('--load', type=int, default=0, help='')
-    parser.add_argument('--load_epoch', type=int, default=0, help='Which epoch to load model and optimizer from')
+    parser.add_argument('--load_epoch', type=int, default=-1, help='Which epoch to load model and optimizer from. '
+                                                                   'Default is -1 meaning it will load the latest model')
     parser.add_argument('--load_run', type=int, default=0, help='Which run to load model and optimizer from')
     parser.add_argument('--temperature', type=float, default=1, help='Softmax temperature')
     parser.add_argument('--tau_config', type=float, default=0.5, help='Value for tau_config')
     parser.add_argument('--tau_sigma', type=float, default=0.5, help='Value for tau_sigma')
     parser.add_argument('--tau_sd', type=float, default=0.5, help='Value for tau_sd')
     parser.add_argument('--tau_beta', type=float, default=0.5, help='Value for tau_beta')
-    parser.add_argument('--num_epochs', type=int, default=5000, help='Number of training epochs')
+    parser.add_argument('--num_epochs', type=int, default=-1, help='Number of training epochs. '
+                                                                   'Default is -1 meaning it will run the hessian computation')
     parser.add_argument('--scheduler_patience', type=int, default=1000, help='Number of epochs before scheduler step')
     parser.add_argument('--scheduler_factor', type=int, default=0.8, help='Scheduler reduction factor')
     parser.add_argument('--scheduler_threshold', type=int, default=10, help='Threshold to accept step improvement')
@@ -45,17 +47,6 @@ def get_parser():
     parser.add_argument('--log_interval', type=int, default=100, metavar='N', help='report interval (default: 100')
     parser.add_argument('--eval_interval', type=int, default=100, metavar='N', help='report interval (default: 10')
     parser.add_argument('--batch_size', type=int_or_str, default=5, help='the batch size for training')
-
-    parser.add_argument('--nhid', type=int, default=150, help='number of hidden units per layer (default: 150)')
-    parser.add_argument('--plot_lkhd', type=int, default=0, help='')
-    parser.add_argument('--init_map_load_epoch', type=int, default=1500, help='Which epoch to load for init map')
-    parser.add_argument('--init_load_folder', type=str, default='', help='Which folder to load inits from')
-    parser.add_argument('--init_load_subfolder_outputs', type=str, default='', help='Which subfolder to load outputs from')
-    parser.add_argument('--init_load_subfolder_map', type=str, default='', help='Which subfolder to load map from')
-    parser.add_argument('--init_load_subfolder_finetune', type=str, default='', help='Which subfolder to load finetune from')
-    parser.add_argument('--train', type=int, default=0, help='')
-    parser.add_argument('--reset_checkpoint', type=int, default=0, help='')
-    parser.add_argument('--stage', type=str, default='finetune', help='options are: initialize_output, initialize_map, finetune, endtoend')
     return parser
 
 
@@ -154,6 +145,9 @@ def plot_latent_coupling(latent_coupling, output_dir):
 
 
 def load_model_checkpoint(output_dir, load_epoch):
+    if load_epoch < 0:
+        with open(os.path.join(output_dir, 'epoch_train.json'), 'r') as f:
+            load_epoch = json.load(f)[-1]
     print(f'Loading model from epoch {load_epoch}')
     load_model_dir = os.path.join(output_dir, 'models', f'model_{load_epoch}.pth')
     intermediate_vars_dir = os.path.join(output_dir, 'models', f'intermediate_vars_{load_epoch}.pkl')
@@ -177,7 +171,7 @@ def load_model_checkpoint(output_dir, load_epoch):
         scheduler = torch.load(scheduler_dir, map_location=torch.device('cpu'))
     else:
         raise Exception(f'No scheduler_{load_epoch}.pth file found at {scheduler_dir}')
-    return model, optimizer, scheduler, W_CKL, a_CKL, theta, pi
+    return model, optimizer, scheduler, W_CKL, a_CKL, theta, pi, load_epoch
 
 
 def reset_metric_checkpoint(output_dir, folder_name, sub_folder_name, metric_files, start_epoch):
@@ -259,7 +253,7 @@ def parse_folder_name(folder_name, parser_key):
     return parsed_values
 
 
-def plot_outputs(model, unique_regions, output_dir, folder, epoch):
+def plot_outputs(model, unique_regions, output_dir, folder, epoch, stderr=False):
 
     output_dir = os.path.join(output_dir, folder)
     if not os.path.exists(output_dir):
@@ -547,6 +541,42 @@ def plot_losses(true_likelihood, output_dir, name, metric, cutoff=0, merge=True)
         plt.savefig(os.path.join(plt_path, f'{metric}_{name}_Trajectories_Cutoff{cutoff}.png'))
     else:
         plt.savefig(os.path.join(plt_path, f'{metric}_{name}_Trajectories.png'))
+
+
+def compute_uncertainty(model, Y, neuron_factor_access, output_dir, epoch):
+    # check if file exists
+    models_path = os.path.join(output_dir, 'models')
+    file_path = os.path.join(models_path, f'hessian_diagonal_{epoch}.pkl')
+    if os.path.exists(file_path):
+        with open(file_path, 'rb') as f:
+            hessian_diagonal_dict = pickle.load(f)
+        return hessian_diagonal_dict
+    likelihood_term = model.forward(Y, neuron_factor_access)
+    param_names = ['beta', 'alpha', 'config_peak_offsets', 'trial_peak_offset_covar_ltri_diag',
+                   'trial_peak_offset_covar_ltri_offdiag']
+    param_values = [p for n, p in model.named_parameters() if n in param_names]
+    first_grads = torch.autograd.grad(likelihood_term, param_values, create_graph=True)
+    hessian_diagonal_dict = {}
+    for i in range(len(first_grads)):
+        print(f'Computing Hessian diagonal for {param_names[i]}')
+        grad = first_grads[i].flatten()  # Flatten gradient tensor to vector
+        second_grad_diag = []
+        num_iter = len(grad)
+        unit_matrix = torch.eye(num_iter, device=model.device)
+        for j in range(num_iter):  # Iterate over each element in the gradient vector
+            # Compute second derivative (diagonal element)
+            second_grad = torch.autograd.grad(grad, param_values[i], unit_matrix[j], retain_graph=True)[0].flatten()[j]
+            # Append second derivative for the corresponding parameter
+            second_grad_diag.append(second_grad)
+            # print an indicator every 1000 iterations
+            if j % 100 == 0:
+                print(f'Iteration {j}/{num_iter}')
+        hessian_diagonal_dict[param_names[i]] = torch.tensor(second_grad_diag).reshape(first_grads[i].shape)
+    # save to disk
+    os.makedirs(models_path, exist_ok=True)
+    with open(file_path, 'wb') as f:
+        pickle.dump(hessian_diagonal_dict, f)
+    return hessian_diagonal_dict
 
 
 def load_tensors(arrays):

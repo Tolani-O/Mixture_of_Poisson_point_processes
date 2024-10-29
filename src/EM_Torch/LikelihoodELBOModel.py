@@ -495,28 +495,3 @@ class LikelihoodELBOModel(nn.Module):
         if neuron_factor_access is not None:
             self.E_step_posterior_updates(Y, Y_sum_t, Y_sum_rt, Y_sum_rt_plus_alpha, alpha, warped_factors, posterior_warped_factors, neuron_factor_access)
         return self.ELBO_term(Y, Y_sum_t, Y_sum_rt_plus_alpha, alpha, warped_factors)
-
-
-    def compute_uncertainty(self, Y, neuron_factor_access):
-        likelihood_term = self.forward(Y, neuron_factor_access)
-        param_names = ['beta', 'alpha', 'config_peak_offsets', 'trial_peak_offset_covar_ltri_diag',
-                       'trial_peak_offset_covar_ltri_offdiag']
-        param_values = [p for n, p in self.named_parameters() if n in param_names]
-        first_grads = torch.autograd.grad(likelihood_term, param_values, create_graph=True)
-        hessian_diagonal = []
-        for i in range(len(first_grads)):
-            print(f'Computing Hessian diagonal for {param_names[i]}')
-            grad = first_grads[i].flatten()  # Flatten gradient tensor to vector
-            second_grad_diag = []
-            num_iter = len(grad)
-            unit_matrix = torch.eye(num_iter)
-            for j in range(num_iter):  # Iterate over each element in the gradient vector
-                # Compute second derivative (diagonal element)
-                second_grad = torch.autograd.grad(grad, param_values[i], unit_matrix[j], retain_graph=True)[0].flatten()[j]
-                # Append second derivative for the corresponding parameter
-                second_grad_diag.append(second_grad)
-                # print an indicator every 1000 iterations
-                if j % 100 == 0:
-                    print(f'Iteration {j}/{num_iter}')
-            hessian_diagonal.append(torch.tensor(second_grad_diag).reshape(first_grads[i].shape))
-        return hessian_diagonal

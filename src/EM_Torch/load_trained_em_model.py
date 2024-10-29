@@ -6,7 +6,7 @@ from src.EM_Torch.simulate_data_multitrial import DataAnalyzer
 from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
 from src.EM_Torch.general_functions import parse_folder_name, load_model_checkpoint, create_relevant_files, get_parser, plot_outputs, \
     write_log_and_model, write_losses, plot_losses, CustomDataset, load_tensors, to_cuda, to_cpu, \
-    inv_softplus_torch
+    inv_softplus_torch, compute_uncertainty
 import numpy as np
 import time
 import torch
@@ -17,7 +17,7 @@ outputs_folder = 'outputs'
 args = get_parser().parse_args()
 parser_key = ['dataSeed', 'tauBeta', 'tauConfig', 'tauSigma', 'tauSD', 'IS', 'iters', 'BatchSize', 'lr', 'patience',
               'factor', 'threshold', 'notes', 'K', 'A', 'C', 'R']
-args.folder_name = 'dataSeed367676102_simulated_DataInit_K100_A3_C5_R15_tauBeta0_tauConfig500_tauSigma1_tauSD10000_IS10_iters200000_BatchSizeAll_lr0.0001_patience80000_factor0.9_threshold1e-10_temp1_notes-'
+args.folder_name = 'dataSeed808662142_simulated_DataInit_K100_A3_C5_R15_tauBeta0.0_tauConfig0.0_tauSigma1_tauSD10000_IS10_iters200000_BatchSizeAll_lr0.0001_patience80000_factor0.9_threshold1e-10_temp1.0_notes-no_timewarp_learning'
 parser_dict = parse_folder_name(args.folder_name, parser_key)
 
 args.data_seed = int(parser_dict['dataSeed'])
@@ -35,12 +35,13 @@ args.scheduler_patience = int(parser_dict['patience'])
 args.scheduler_threshold = float(parser_dict['threshold'])
 args.scheduler_factor = float(parser_dict['factor'])
 args.lr = float(parser_dict['lr'])
-args.num_epochs = int(parser_dict['iters'])
+if args.num_epochs >= 0:
+    args.num_epochs = int(parser_dict['iters'])
 args.tau_beta = float(parser_dict['tauBeta'])
 args.tau_config = float(parser_dict['tauConfig'])
 args.tau_sigma = float(parser_dict['tauSigma'])
 args.tau_sd = float(parser_dict['tauSD'])
-args.load_epoch = 2000
+args.load_epoch = -1
 args.load_run = 0
 sd_init = 0.5
 peak1_left_landmarks = [0.20, 0.20, 0.20, 0.20, 0.20]
@@ -115,10 +116,16 @@ os.makedirs(save_dir, exist_ok=True)
 plot_outputs(model, unique_regions, save_dir, 'Train', -2)
 # Load the model
 load_dir = os.path.join(output_dir, args.folder_name, f'Run_{args.load_run}')
-model_state, optimizer_state, scheduler_state, W_CKL, a_CKL, theta, pi = load_model_checkpoint(load_dir, args.load_epoch)
+model_state, optimizer_state, scheduler_state, W_CKL, a_CKL, theta, pi, args.load_epoch = load_model_checkpoint(load_dir, args.load_epoch)
 model.init_zero()
 model.load_state_dict(model_state)
 model.W_CKL, model.a_CKL, model.theta, model.pi = W_CKL, a_CKL, theta, pi
+if args.num_epochs < 0:
+    model.cuda(move_to_cuda=args.cuda)
+    hessian = compute_uncertainty(model, Y_train, factor_access_train, save_dir, args.load_epoch)
+    model.cpu()
+    plot_outputs(model, unique_regions, save_dir, 'Train', args.load_epoch, stderr=True)
+    sys.exit()
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 optimizer.load_state_dict(optimizer_state)
 patience = args.scheduler_patience // args.eval_interval

@@ -44,7 +44,7 @@ dt = 0.002
 
 regions = None
 conditions = None
-# regions = ['VISp', 'VISl', 'VISal']
+regions = ['VISp', 'VISl', 'VISal']
 # conditions = [246, 251]
 
 if args.eval_interval > args.log_interval:
@@ -123,6 +123,7 @@ dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
 print(f'folder_name: {args.folder_name}\n\n')
 print(output_str)
 
+# torch.autograd.set_detect_anomaly(True)
 def train_gradient(batch_ct):
     for Y, access in dataloader:
         # K x C x L --> C x K x L

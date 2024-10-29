@@ -176,9 +176,7 @@ data.cuda(args.cuda)
 print(f'folder_name: {args.folder_name}\n\n')
 print(output_str)
 
-
 # torch.autograd.set_detect_anomaly(True)
-
 def train_gradient(batch_ct):
     for Y, access in dataloader:
         # K x C x L --> C x K x L

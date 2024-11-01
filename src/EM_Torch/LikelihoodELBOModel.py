@@ -2,7 +2,7 @@ import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from src.EM_Torch.general_functions import create_second_diff_matrix
+from src.EM_Torch.general_functions import create_first_diff_matrix, create_second_diff_matrix
 import numpy as np
 import pandas as pd
 import pickle
@@ -34,6 +34,8 @@ class LikelihoodELBOModel(nn.Module):
         self.n_trial_samples = n_trial_samples
         self.n_configs = n_configs
         self.n_trials = n_trials
+        Delta1 = create_first_diff_matrix(T)
+        self.Delta1TDelta1 = torch.tensor(Delta1.T @ Delta1)  # T x T # tikhonov regularization
         Delta2 = create_second_diff_matrix(T)
         self.Delta2TDelta2 = torch.tensor(Delta2.T @ Delta2)  # T x T # tikhonov regularization
 
@@ -162,6 +164,7 @@ class LikelihoodELBOModel(nn.Module):
             return
         self.device = 'cuda'
         self.time = self.time.cuda(device)
+        self.Delta1TDelta1 = self.Delta1TDelta1.cuda(device)
         self.Delta2TDelta2 = self.Delta2TDelta2.cuda(device)
         self.peak1_left_landmarks = self.peak1_left_landmarks.cuda(device)
         self.peak2_left_landmarks = self.peak2_left_landmarks.cuda(device)
@@ -183,6 +186,7 @@ class LikelihoodELBOModel(nn.Module):
             return
         self.device = 'cpu'
         self.time = self.time.cpu()
+        self.Delta1TDelta1 = self.Delta1TDelta1.cpu()
         self.Delta2TDelta2 = self.Delta2TDelta2.cpu()
         self.peak1_left_landmarks = self.peak1_left_landmarks.cpu()
         self.peak2_left_landmarks = self.peak2_left_landmarks.cpu()
@@ -474,8 +478,12 @@ class LikelihoodELBOModel(nn.Module):
         inv_Sigma = torch.linalg.inv(Sigma)
         sigma_Penalty = -tau_sigma * (1/(torch.prod(torch.tensor(Sigma.shape))-Sigma.shape[0])) * (torch.sum(torch.abs(inv_Sigma)) - torch.sum(torch.abs(torch.diag(inv_Sigma))))
         factors = torch.softmax(self.unnormalized_log_factors(), dim=-1)
+        factor_first_deriv_access = torch.zeros_like(factors)
+        L_a = self.n_factors // self.n_areas
+        factor_first_deriv_access[[i*L_a for i in range(self.n_areas)], :] = 1
+        beta_s1_penalty = -tau_beta * (L_a / torch.prod(torch.tensor(factors.shape))) * torch.sum(((factors * factor_first_deriv_access) @ self.Delta1TDelta1) * (factors * factor_first_deriv_access))
         beta_s2_penalty = -tau_beta * (1/torch.prod(torch.tensor(factors.shape))) * torch.sum((factors @ self.Delta2TDelta2) * factors)
-        penalty_term = config_Penalty + sigma_Penalty + beta_s2_penalty + proposal_sd_penalty
+        penalty_term = config_Penalty + sigma_Penalty + beta_s1_penalty + beta_s2_penalty + proposal_sd_penalty
         return penalty_term
 
 

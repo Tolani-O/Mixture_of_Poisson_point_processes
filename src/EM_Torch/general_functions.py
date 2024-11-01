@@ -78,11 +78,15 @@ def create_precision_matrix(P):
 
 
 def create_first_diff_matrix(P):
-    D = np.zeros((P-1, P))
+    D = np.zeros((P-2, P))
     # fill the main diagonal with -1s
     np.fill_diagonal(D, -1)
     # fill the superdiagonal with 1s
-    np.fill_diagonal(D[:, 1:], 1)
+    np.fill_diagonal(D[:, 2:], 1)
+    # first row is a forward difference
+    s0 = [-1, 1]
+    D0 = np.concatenate((s0, np.zeros(P - len(s0))))
+    D = P * np.vstack((D0, D/2, -np.flip(D0)))
     return D
 
 

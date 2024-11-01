@@ -123,8 +123,8 @@ class DataAnalyzer:
                 neurons_per_area = n_neurons - neurons_assigned
             neuron_factor_assignments.append(np.random.choice(factors_per_area, neurons_per_area*n_configs, p=ratio[a]).
                                               reshape(n_configs, -1) + area_start_indx)
+            neuron_factor_access[:, neurons_assigned:(neurons_assigned + neurons_per_area), area_start_indx:(area_start_indx + factors_per_area)] = 1
             neurons_assigned += neurons_per_area
-            neuron_factor_access[:, (a * neurons_per_area):((a + 1) * neurons_per_area), area_start_indx:(area_start_indx + factors_per_area)] = 1
         neuron_factor_assignments = np.concatenate(neuron_factor_assignments, axis=1)
         neuron_gains = np.random.gamma(self.alpha[neuron_factor_assignments],
                                        self.theta[neuron_factor_assignments]**(-1))

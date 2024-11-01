@@ -104,6 +104,21 @@ def create_second_diff_matrix(P):
     return D
 
 
+def preprocess_input_data(Y, neuron_factor_access, mask_threshold=0):
+    processed_inputs = {}
+    # Y # K x T x R x C
+    # neuron_factor_access # C x K x L
+    Y_sum_t = torch.sum(Y, dim=1).permute(2, 0, 1)  # C x K x R
+    Y_sum_rt = torch.sum(Y_sum_t, dim=-1)  # C x K
+    empty_trials = torch.where(Y_sum_rt <= mask_threshold)
+    neuron_factor_access[empty_trials[0], empty_trials[1]] = 0
+    processed_inputs['Y'] = Y
+    processed_inputs['Y_sum_t'] = Y_sum_t
+    processed_inputs['Y_sum_rt'] = Y_sum_rt
+    processed_inputs['neuron_factor_access'] = neuron_factor_access
+    return processed_inputs
+
+
 def plot_spikes(binned, output_dir, dt, filename, x_offset=0):
     # Group entries by unique values of s[0]
     Y = np.vstack(np.transpose(binned, (2,1,0,3)))

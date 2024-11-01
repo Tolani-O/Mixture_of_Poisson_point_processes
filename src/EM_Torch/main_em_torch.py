@@ -6,7 +6,7 @@ from src.EM_Torch.simulate_data_multitrial import DataAnalyzer
 from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
 from src.EM_Torch.general_functions import create_relevant_files, get_parser, plot_outputs, \
     write_log_and_model, write_losses, plot_losses, CustomDataset, load_tensors, to_cuda, to_cpu, \
-    inv_softplus_torch
+    inv_softplus_torch, preprocess_input_data
 import numpy as np
 import time
 import torch
@@ -34,8 +34,8 @@ init = 'Data'
 # init = 'Zero'
 # init = 'True'
 the_rest = 'zeros'
-args.notes = f'no_TW dt1x10000 assgn lt 15 units'
-args.time_warp = False
+args.notes = f''
+# args.time_warp = False
 args.log_interval = 500
 args.eval_interval = 500
 args.lr = 0.0001
@@ -96,18 +96,17 @@ model.init_ground_truth(beta=data.beta,
                         sd_init=1e-5)
 
 model.cuda(move_to_cuda=args.cuda)
-Y_test, factor_access_test, Y_train, factor_access_train = to_cuda((Y_test, factor_access_test,
-                                                                    Y_train, factor_access_train),
-                                                                   move_to_cuda=args.cuda)
+processed_inputs_test = preprocess_input_data(*to_cuda((Y_test, factor_access_test), move_to_cuda=args.cuda))
+processed_inputs_train = preprocess_input_data(*to_cuda((Y_train, factor_access_train), move_to_cuda=args.cuda))
 with torch.no_grad():
     model.init_ground_truth(trial_peak_offset_proposal_means=trial_offsets_test.squeeze(),
                             W_CKL=factor_assignment_onehot_test,
                             init='')
-    true_ELBO_test = model.forward(Y_test, train=False)
+    true_ELBO_test = model.forward(processed_inputs_test, update_membership=False, train=False)
     model.init_ground_truth(trial_peak_offset_proposal_means=trial_offsets_train.squeeze(),
                             W_CKL=factor_assignment_onehot_train,
                             init='')
-    true_ELBO_train = model.forward(Y_train, train=False)
+    true_ELBO_train = model.forward(processed_inputs_train, update_membership=False, train=False)
 true_ELBO_train = (1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * true_ELBO_train.item()
 true_ELBO_test = (1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * true_ELBO_test.item()
 ltri_matrix = model.ltri_matix()
@@ -118,7 +117,6 @@ args.folder_name = (
     f'seed{args.data_seed}_simulated_{init}Init_K{args.K}_A{args.A}_C{args.n_configs}_L{args.L}'
     f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauSD{args.tau_sd}'
     f'_posterior{args.n_trial_samples}_iters{args.num_epochs}_lr{args.lr}_temp{args.temperature}_notes-{args.notes}')
-    f'_factor{args.scheduler_factor}_threshold{args.scheduler_threshold}_temp{args.temperature}_notes-{args.notes}')
 output_dir = os.path.join(output_dir, args.folder_name, 'Run_0')
 os.makedirs(output_dir, exist_ok=True)
 plot_outputs(model, unique_regions, output_dir, 'Train', -2)
@@ -138,7 +136,8 @@ elif init == 'Rand':
 elif init == 'Zero':
     model.init_zero()
 elif 'Data' in init:
-    model.init_from_data(Y=Y_train.cpu(), factor_access=factor_access_train.cpu(), sd_init=sd_init, init=the_rest)
+    model.init_from_data(Y=Y_train, factor_access=processed_inputs_train['neuron_factor_access'].cpu(),
+                         sd_init=sd_init, init=the_rest)
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 patience = args.scheduler_patience // args.eval_interval
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
@@ -160,33 +159,11 @@ create_relevant_files(output_dir, output_str, ground_truth=True)
 plot_outputs(model, unique_regions, output_dir, 'Train', -1)
 
 # Instantiate the dataset and dataloader
-dataset = CustomDataset(Y_train, factor_access_train)
-if args.batch_size == 'All':
-    args.batch_size = Y_train.shape[0]
-dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
 data.cuda(args.cuda)
 print(f'folder_name: {args.folder_name}\n\n')
 print(output_str)
 
 # torch.autograd.set_detect_anomaly(True)
-def train_gradient(batch_ct):
-    for Y, access in dataloader:
-        # K x C x L --> C x K x L
-        access = access.permute(1, 0, 2)
-        optimizer.zero_grad()
-        likelihood_term = model.forward(Y, access)
-        penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
-        loss = -(likelihood_term + penalty_term)
-        loss.backward()
-        optimizer.step()
-        losses_batch.append((likelihood_term + penalty_term).item())
-        log_likelihoods_batch.append(likelihood_term.item())
-        epoch_batch.append(batch_ct)
-        batch_ct += 1
-        torch.cuda.empty_cache()
-        return batch_ct
-
-
 if __name__ == "__main__":
     log_likelihoods_batch = []
     losses_batch = []
@@ -214,14 +191,23 @@ if __name__ == "__main__":
     start_epoch = 0
     for epoch in range(start_epoch, start_epoch + args.num_epochs):
         model.cuda(move_to_cuda=args.cuda)
-        batch_ct = train_gradient(batch_ct)
+        optimizer.zero_grad()
+        likelihood_term = model.forward(processed_inputs_train)
+        penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
+        loss = -(likelihood_term + penalty_term)
+        loss.backward()
+        optimizer.step()
+        losses_batch.append((likelihood_term + penalty_term).item())
+        log_likelihoods_batch.append(likelihood_term.item())
+        epoch_batch.append(batch_ct)
+        batch_ct += 1
+        torch.cuda.empty_cache()
         if epoch == start_epoch or epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             with torch.no_grad():
-                factor_access_train = to_cuda([factor_access_train], move_to_cuda=args.cuda)[0]
                 penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
-                likelihood_term_train = model.forward(Y_train, factor_access_train, train=False)
+                likelihood_term_train = model.forward(processed_inputs_train, train=False)
                 model_factor_assignment_train, model_neuron_gains_train = model.infer_latent_variables()
-                likelihood_term_test = model.forward(Y_test, factor_access_test, train=False)
+                likelihood_term_test = model.forward(processed_inputs_test, train=False)
                 model_factor_assignment_test, model_neuron_gains_test = model.infer_latent_variables()
 
                 losses_train.append((likelihood_term_train + penalty_term).item())
@@ -295,7 +281,6 @@ if __name__ == "__main__":
             cur_ltriLkhd_train = ltriLkhd_train[-1]
             cur_ltriLkhd_test = ltriLkhd_test[-1]
             model.cpu()
-            factor_access_train = to_cpu([factor_access_train])[0]
             with torch.no_grad():
                 pi = model.pi.numpy().round(3)
                 alpha = F.softplus(model.alpha).numpy().round(3)

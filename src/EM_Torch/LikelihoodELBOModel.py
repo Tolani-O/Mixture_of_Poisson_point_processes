@@ -357,7 +357,7 @@ class LikelihoodELBOModel(nn.Module):
         return full_warped_factors
 
 
-    def prepare_inputs(self, Y):
+    def prepare_inputs(self, processed_inputs):
         self.generate_trial_peak_offset_samples()
         # warped_factors # L x T x N x R x C --> C x R x L x N x T
         all_warped_factors = self.warp_all_latent_factors_for_all_trials().permute(4, 3, 0, 2, 1)
@@ -365,15 +365,31 @@ class LikelihoodELBOModel(nn.Module):
         warped_factors = all_warped_factors[:, :, :, :end, :]
         posterior_warped_factors = all_warped_factors[:, :, :, -1:, :]
         self.trial_peak_offset_proposal_samples = self.trial_peak_offset_proposal_samples[:end]
-        # Y # K x T x R x C
-        Y_sum_t = torch.sum(Y, dim=1).permute(2, 0, 1)  # C x K x R
-        Y_sum_rt = torch.sum(Y_sum_t, dim=-1)  # C x K
         alpha = F.softplus(self.alpha)
+        Y_sum_rt = processed_inputs['Y_sum_rt']
         Y_sum_rt_plus_alpha = Y_sum_rt.unsqueeze(2) + alpha.unsqueeze(0).unsqueeze(1)  # C x K x L
-        return Y_sum_t, Y_sum_rt, Y_sum_rt_plus_alpha, alpha, warped_factors, posterior_warped_factors
+        processed_inputs['alpha'] = alpha
+        processed_inputs['Y_sum_rt_plus_alpha'] = Y_sum_rt_plus_alpha
+        processed_inputs['warped_factors'] = warped_factors
+        processed_inputs['posterior_warped_factors'] = posterior_warped_factors
+        return processed_inputs
 
 
-    def E_step_posterior_updates(self, Y, Y_sum_rt, Y_sum_rt_plus_alpha, alpha, posterior_warped_factors, neuron_factor_access):
+    def E_step_posterior_updates(self, processed_inputs):
+        # processed_inputs['Y'] = Y
+        # processed_inputs['Y_sum_t'] = Y_sum_t
+        # processed_inputs['Y_sum_rt'] = Y_sum_rt
+        # processed_inputs['neuron_factor_access'] = neuron_factor_access
+        # processed_inputs['alpha'] = alpha
+        # processed_inputs['Y_sum_rt_plus_alpha'] = Y_sum_rt_plus_alpha
+        # processed_inputs['warped_factors'] = warped_factors
+        # processed_inputs['posterior_warped_factors'] = posterior_warped_factors
+        Y = processed_inputs['Y']
+        Y_sum_rt = processed_inputs['Y_sum_rt']
+        Y_sum_rt_plus_alpha = processed_inputs['Y_sum_rt_plus_alpha']
+        alpha = processed_inputs['alpha']
+        posterior_warped_factors = processed_inputs['posterior_warped_factors']
+        neuron_factor_access = processed_inputs['neuron_factor_access']
         # output before summing: C x K x R x L x N
         # factors # L x T
         # posterior_warped_factors # C x R x L x 1 x T
@@ -408,14 +424,19 @@ class LikelihoodELBOModel(nn.Module):
         neuron_area_access = neuron_factor_access.reshape(*neuron_factor_access.shape[:-1], self.n_areas, L_a).sum(dim=-1)/L_a
         self.U_tensor = neuron_area_access * torch.logsumexp(U_tensor, dim=-1)
         # W_CKL # C x K x L
-        W_CKL = (neuron_factor_access * F.softmax(U_tensor/self.temperature, dim=-1).reshape(*U_tensor.shape[:-2], self.n_factors)).detach()
+        W_CKL = neuron_factor_access * F.softmax(U_tensor/self.temperature, dim=-1).reshape(*U_tensor.shape[:-2], self.n_factors).detach()
         self.validated_W_CKL(W_CKL)  # for finding the posterior clustering probabilities
 
         ## current E step parameter updates (for use in next M step)
         self.update_params(Y_sum_rt_plus_alpha, neuron_factor_access, R)
 
 
-    def ELBO_term(self, Y, Y_sum_t, Y_sum_rt_plus_alpha, alpha, warped_factors):
+    def ELBO_term(self, processed_inputs):
+        Y = processed_inputs['Y']
+        Y_sum_t = processed_inputs['Y_sum_t']
+        Y_sum_rt_plus_alpha = processed_inputs['Y_sum_rt_plus_alpha']
+        alpha = processed_inputs['alpha']
+        warped_factors = processed_inputs['warped_factors']
         # warped_factors # C x R x L x N x T
         K, T, R, C = Y.shape
         W_CKL = self.W_CKL
@@ -501,19 +522,19 @@ class LikelihoodELBOModel(nn.Module):
         return neuron_factor_assignment, neuron_firing_rates
 
 
-    def forward(self, Y, neuron_factor_access=None, train=True):
+    def forward(self, processed_inputs, update_membership=True, train=True):
         self.train(train)
-        Y_sum_t, Y_sum_rt, Y_sum_rt_plus_alpha, alpha, warped_factors, posterior_warped_factors = self.prepare_inputs(Y)
-        if neuron_factor_access is not None:
-            self.E_step_posterior_updates(Y, Y_sum_rt, Y_sum_rt_plus_alpha, alpha, posterior_warped_factors, neuron_factor_access)
-        return self.ELBO_term(Y, Y_sum_t, Y_sum_rt_plus_alpha, alpha, warped_factors)
+        processed_inputs = self.prepare_inputs(processed_inputs)
+        if update_membership:
+            self.E_step_posterior_updates(processed_inputs)
+        return self.ELBO_term(processed_inputs)
 
 
-    def log_likelihood(self, Y, neuron_factor_access):
+    def log_likelihood(self, processed_inputs):
         self.train(False)
         # trial_peak_offset_proposal_samples 1 x R x C x 2AL
-        Y_sum_t, Y_sum_rt, Y_sum_rt_plus_alpha, alpha, warped_factors, posterior_warped_factors = self.prepare_inputs(Y)
-        self.E_step_posterior_updates(Y, Y_sum_rt, Y_sum_rt_plus_alpha, alpha, posterior_warped_factors, neuron_factor_access)
+        processed_inputs = self.prepare_inputs(processed_inputs)
+        self.E_step_posterior_updates(processed_inputs)
         # log_P  C x R
         log_P = -self.Sigma_log_likelihood(self.trial_peak_offset_proposal_means.unsqueeze(0), self.ltri_matix()).squeeze()
         log_likelihood = torch.sum(self.U_tensor) + torch.sum(log_P)

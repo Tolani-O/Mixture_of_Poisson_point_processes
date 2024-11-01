@@ -31,7 +31,7 @@ args.tau_sigma = 1
 args.tau_sd = 10000
 sd_init = 0.5
 # args.cuda = False
-# args.init_with_DTW = True
+args.init_with_DTW = False
 args.n_trial_samples = 10  # Number of samples to generate for each trial
 peak1_left_landmarks = [0.03, 0.03, 0.03]
 peak1_right_landmarks = [0.11, 0.14, 0.13]
@@ -113,7 +113,7 @@ output_str = (f"Using CUDA: {args.cuda}\n"
               f"peak1_left_landmarks:\n{model.time[model.peak1_left_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
               f"peak1_right_landmarks:\n{model.time[model.peak1_right_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
               f"peak2_left_landmarks:\n{model.time[model.peak2_left_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
-              f"peak2_right_landmarks:\n{model.time[model.peak2_right_landmarks.reshape(model.n_areas, -1)].numpy()}\n")
+              f"peak2_right_landmarks:\n{model.time[model.peak2_right_landmarks.reshape(model.n_areas, -1)].numpy()}\n\n")
 create_relevant_files(output_dir, output_str)
 plot_outputs(model, unique_regions, output_dir, 'Train', -1)
 
@@ -149,10 +149,10 @@ if __name__ == "__main__":
         if epoch == start_epoch or epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             with torch.no_grad():
                 penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
-                likelihood_term_train = model.forward(processed_inputs_train, train=False)
+                likelihood_term = model.forward(processed_inputs_train, train=False)
                 model_factor_assignment_train, model_neuron_gains_train = model.infer_latent_variables()
-                losses_train.append((likelihood_term_train + penalty_term).item())
-                log_likelihoods_train.append((1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * likelihood_term_train.item())
+                losses_train.append((likelihood_term + penalty_term).item())
+                log_likelihoods_train.append((1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * likelihood_term.item())
                 epoch_train.append(epoch)
                 scheduler.step(log_likelihoods_train[-1])
         if epoch == start_epoch or epoch % args.log_interval == 0 or epoch == start_epoch + args.num_epochs - 1:

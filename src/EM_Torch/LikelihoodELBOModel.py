@@ -256,8 +256,8 @@ class LikelihoodELBOModel(nn.Module):
         self.W_CKL = W_CKL_L.reshape(*W_CKL.shape[:2], -1)
 
 
-    def generate_trial_peak_offset_samples(self, eval=False):
-        if eval:
+    def generate_trial_peak_offset_samples(self):
+        if self.is_eval:
             # trial_peak_offset_proposal_samples 1 x R x C x 2AL
             self.trial_peak_offset_proposal_samples = self.trial_peak_offset_proposal_means.unsqueeze(0)
         else:

@@ -35,9 +35,9 @@ def get_parser():
     parser.add_argument('--tau_beta', type=float, default=0.5, help='Value for tau_beta')
     parser.add_argument('--num_epochs', type=int, default=-1, help='Number of training epochs. '
                                                                    'Default is -1 meaning it will run the hessian computation')
-    parser.add_argument('--scheduler_patience', type=int, default=1000, help='Number of epochs before scheduler step')
-    parser.add_argument('--scheduler_factor', type=int, default=0.8, help='Scheduler reduction factor')
-    parser.add_argument('--scheduler_threshold', type=int, default=10, help='Threshold to accept step improvement')
+    parser.add_argument('--scheduler_patience', type=int, default=1e5, help='Number of epochs before scheduler step')
+    parser.add_argument('--scheduler_factor', type=int, default=0.9, help='Scheduler reduction factor')
+    parser.add_argument('--scheduler_threshold', type=int, default=1e-10, help='Threshold to accept step improvement')
     parser.add_argument('--notes', type=str, default='', help='Run notes')
     parser.add_argument('--K', type=int, default=30, help='Number of neurons')
     parser.add_argument('--L', type=int, default=3, help='Number of latent factors')
@@ -46,7 +46,7 @@ def get_parser():
     parser.add_argument('--param_seed', type=int_or_str, default='', help='options are: seed (int), Truth (str)')
     parser.add_argument('--log_interval', type=int, default=100, metavar='N', help='report interval (default: 100')
     parser.add_argument('--eval_interval', type=int, default=100, metavar='N', help='report interval (default: 10')
-    parser.add_argument('--batch_size', type=int_or_str, default=5, help='the batch size for training')
+    parser.add_argument('--batch_size', type=int_or_str, default='All', help='the batch size for training')
     parser.add_argument('--init_with_DTW', type=bool, default=False, help='How should the latent factors be initialized')
     return parser
 

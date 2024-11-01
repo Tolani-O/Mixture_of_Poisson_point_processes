@@ -34,18 +34,10 @@ init = 'Data'
 # init = 'Zero'
 # init = 'True'
 the_rest = 'zeros'
-# init = 'TrueBeta'
-# init = 'TrueAndRandBeta'
-# init = 'DataAndZeroBeta'
-args.batch_size = 'All'
-args.param_seed = f'simulated_{init}Init'
-# args.notes = f'no_timewarp'
-# args.time_warp = False
+args.notes = f'no_TW dt1x10000 assgn lt 15 units'
+args.time_warp = False
 args.log_interval = 500
 args.eval_interval = 500
-args.scheduler_patience = 80000  # 2000
-args.scheduler_threshold = 1e-10  # 0.1
-args.scheduler_factor = 0.9
 args.lr = 0.0001
 args.num_epochs = 200000
 # args.temperature = 1
@@ -123,9 +115,9 @@ true_offset_penalty_train = (1 / (args.n_trials * args.n_configs)) * model.Sigma
 true_offset_penalty_test = (1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_test, ltri_matrix).sum().item()
 model.cpu()
 args.folder_name = (
-    f'dataSeed{args.data_seed}_{beginning_notes}_K{args.K}_A{args.A}_C{args.n_configs}'
+    f'seed{args.data_seed}_simulated_{init}Init_K{args.K}_A{args.A}_C{args.n_configs}_L{args.L}'
     f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauSD{args.tau_sd}'
-    f'_IS{args.n_trial_samples}_iters{args.num_epochs}_BatchSize{args.batch_size}_lr{args.lr}_patience{args.scheduler_patience}'
+    f'_posterior{args.n_trial_samples}_iters{args.num_epochs}_lr{args.lr}_temp{args.temperature}_notes-{args.notes}')
     f'_factor{args.scheduler_factor}_threshold{args.scheduler_threshold}_temp{args.temperature}_notes-{args.notes}')
 output_dir = os.path.join(output_dir, args.folder_name, 'Run_0')
 os.makedirs(output_dir, exist_ok=True)

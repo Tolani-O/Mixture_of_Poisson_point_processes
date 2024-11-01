@@ -18,14 +18,9 @@ args.data_seed = np.random.randint(0, 2 ** 32 - 1)
 
 init = 'Data'
 the_rest = 'zeros'
-args.batch_size = 'All'
-beginning_notes = f'Real_{init}Init'
-args.notes = f''
+args.notes = f'dt1x10000 assgn lt 15 units'
 args.log_interval = 500
 args.eval_interval = 500
-args.scheduler_patience = 80000  # 2000
-args.scheduler_threshold = 1e-10  # 0.1
-args.scheduler_factor = 0.9
 args.lr = 0.0001
 args.num_epochs = 200000
 # args.temperature = 1
@@ -104,10 +99,9 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
                                                        patience=patience, threshold_mode='abs',
                                                        threshold=args.scheduler_threshold)
 args.folder_name = (
-    f'dataSeed{args.data_seed}_{beginning_notes}_K{args.K}_A{args.A}_C{args.n_configs}'
+    f'seed{args.data_seed}_Real_{init}Init_K{args.K}_A{args.A}_C{args.n_configs}_L{args.L}'
     f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauSD{args.tau_sd}'
-    f'_IS{args.n_trial_samples}_iters{args.num_epochs}_BatchSize{args.batch_size}_lr{args.lr}_patience{args.scheduler_patience}'
-    f'_factor{args.scheduler_factor}_threshold{args.scheduler_threshold}_temp{args.temperature}_notes-{args.notes}')
+    f'_posterior{args.n_trial_samples}_iters{args.num_epochs}_lr{args.lr}_temp{args.temperature}_notes-{args.notes}')
 output_dir = os.path.join(output_dir, args.folder_name, 'Run_0')
 os.makedirs(output_dir, exist_ok=True)
 output_str = (f"Using CUDA: {args.cuda}\n"

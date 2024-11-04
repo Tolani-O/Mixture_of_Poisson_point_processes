@@ -34,8 +34,6 @@ class LikelihoodELBOModel(nn.Module):
         self.n_trial_samples = n_trial_samples
         self.n_configs = n_configs
         self.n_trials = n_trials
-        # Delta1 = create_first_diff_matrix(T)
-        # self.Delta1TDelta1 = torch.tensor(Delta1.T @ Delta1)  # T x T # tikhonov regularization
         Delta2 = create_second_diff_matrix(T)
         self.Delta2TDelta2 = torch.tensor(Delta2.T @ Delta2)  # T x T # tikhonov regularization
 
@@ -164,8 +162,6 @@ class LikelihoodELBOModel(nn.Module):
             return
         self.device = 'cuda'
         self.time = self.time.cuda(device)
-        self.Delta1TDelta1 = self.Delta1TDelta1.cuda(device)
-        # self.Delta1TDelta1 = self.Delta1TDelta1.cuda(device)
         self.Delta2TDelta2 = self.Delta2TDelta2.cuda(device)
         self.peak1_left_landmarks = self.peak1_left_landmarks.cuda(device)
         self.peak2_left_landmarks = self.peak2_left_landmarks.cuda(device)
@@ -187,8 +183,6 @@ class LikelihoodELBOModel(nn.Module):
             return
         self.device = 'cpu'
         self.time = self.time.cpu()
-        self.Delta1TDelta1 = self.Delta1TDelta1.cpu()
-        # self.Delta1TDelta1 = self.Delta1TDelta1.cpu()
         self.Delta2TDelta2 = self.Delta2TDelta2.cpu()
         self.peak1_left_landmarks = self.peak1_left_landmarks.cpu()
         self.peak2_left_landmarks = self.peak2_left_landmarks.cpu()
@@ -410,15 +404,26 @@ class LikelihoodELBOModel(nn.Module):
         Y_times_posterior_warped = torch.einsum('ktrc,crlt->ckl', Y, log_posterior_warped_factors_minus_logsum_t_posterior_warped_factors.squeeze())
         # log_y_factorial_sum_rt # C x K x 1
         log_y_factorial_sum_rt = torch.sum(torch.lgamma(Y + 1), dim=(1,2)).t().unsqueeze(2)
-        # Y_sum_rt_times_log_alpha_minus_logsumesp_beta  # C x K x L
-        Y_sum_rt_times_log_alpha = torch.einsum('ck,l->ckl', Y_sum_rt, torch.log(alpha))
+        grid_y, grid_x = torch.meshgrid(torch.arange(C), torch.arange(K), indexing='ij')
+        indx_tracker = Y_sum_rt.flatten().int()
+        min_indx = torch.min(indx_tracker)
+        max_indx = torch.max(indx_tracker)
+        range_indices = torch.arange(max_indx - min_indx, device=self.device)
+        last_dim_indices = (indx_tracker.unsqueeze(1) + range_indices.unsqueeze(0)).clamp(max=max_indx-1).t().flatten()
+        i_vals = torch.arange(max_indx, device=self.device).unsqueeze(0).unsqueeze(1).expand(C, K, -1)  # C x K x I
+        alpha_plus_i_minus_1 = alpha.unsqueeze(0).unsqueeze(1).unsqueeze(3) + i_vals.unsqueeze(2)
+        alpha_plus_i_minus_1[grid_y.flatten().repeat(max_indx - min_indx),
+                                        grid_x.flatten().repeat(max_indx - min_indx), :,
+                                        last_dim_indices] = 1
+        # sum_over_y_log_alpha_plus_i_minus_1  # C x K x L
+        sum_over_y_log_alpha_plus_i_minus_1 = torch.log(alpha_plus_i_minus_1).sum(dim=-1)
         # alpha_log_theta  # 1 x 1 x L
         alpha_log_theta = (alpha * torch.log(self.theta)).unsqueeze(0).unsqueeze(1)
         # Y_sum_rt_plus_alpha_times_log_R_plus_theta  # C x K x L
         Y_sum_rt_plus_alpha_times_log_R_plus_theta = torch.einsum('ckl,l->ckl', Y_sum_rt_plus_alpha, torch.log(R + self.theta))
 
         # U_tensor # C x K x L
-        U_tensor = (Y_times_posterior_warped - log_y_factorial_sum_rt + Y_sum_rt_times_log_alpha + alpha_log_theta -
+        U_tensor = (Y_times_posterior_warped - log_y_factorial_sum_rt + sum_over_y_log_alpha_plus_i_minus_1 + alpha_log_theta -
                     Y_sum_rt_plus_alpha_times_log_R_plus_theta + torch.log(self.pi).unsqueeze(0).unsqueeze(1))
         # U_tensor # C x K x A x La
         L_a = self.n_factors // self.n_areas
@@ -504,7 +509,6 @@ class LikelihoodELBOModel(nn.Module):
         factor_first_deriv_access = torch.zeros_like(factors)
         L_a = self.n_factors // self.n_areas
         factor_first_deriv_access[[i*L_a for i in range(self.n_areas)], :] = 1
-        # beta_s1_penalty = -tau_beta * (L_a / torch.prod(torch.tensor(factors.shape))) * torch.sum(((factors * factor_first_deriv_access) @ self.Delta1TDelta1) * (factors * factor_first_deriv_access))
         beta_s2_penalty = -tau_beta * (1/torch.prod(torch.tensor(factors.shape))) * torch.sum((factors @ self.Delta2TDelta2) * factors)
         penalty_term = config_Penalty + sigma_Penalty + beta_s2_penalty + proposal_sd_penalty
         return penalty_term

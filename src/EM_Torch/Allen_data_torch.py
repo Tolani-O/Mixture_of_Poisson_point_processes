@@ -50,7 +50,7 @@ class EcephysAnalyzer:
         self.unit_ids_and_areas = (filtered_units['ecephys_structure_acronym']
                                    .reset_index().rename(columns={'ecephys_unit_id': 'unit_id'}))
         self.pivoted_df = pd.pivot_table(summary, index='ecephys_session_id', columns='ecephys_structure_acronym',
-                                         values='count')
+                                         values='count', fill_value=0)
         self.canrun = True
 
 

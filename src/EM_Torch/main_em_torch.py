@@ -5,13 +5,12 @@ sys.path.append(os.path.abspath('.'))
 from src.EM_Torch.simulate_data_multitrial import DataAnalyzer
 from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
 from src.EM_Torch.general_functions import create_relevant_files, get_parser, plot_outputs, \
-    write_log_and_model, write_losses, plot_losses, CustomDataset, load_tensors, to_cuda, to_cpu, \
+    write_log_and_model, write_losses, plot_losses, load_tensors, to_cuda, \
     inv_softplus_torch, preprocess_input_data
 import numpy as np
 import time
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
 outputs_folder = 'outputs'
 
 args = get_parser().parse_args()
@@ -41,12 +40,12 @@ args.eval_interval = 500
 args.lr = 0.0001
 args.num_epochs = 200000
 args.temperature = (1, 1000)
-args.weights = (10, 1)
+args.weights = (99, 1)
 # args.tau_beta = 800
 # args.tau_config = 500
 args.tau_sigma = 1
 args.tau_sd = 10000
-args.L = 5
+# args.L = 5
 sd_init = 0.5
 
 if args.eval_interval > args.log_interval:

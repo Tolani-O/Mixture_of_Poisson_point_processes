@@ -5,13 +5,12 @@ sys.path.append(os.path.abspath('.'))
 from src.EM_Torch.Allen_data_torch import EcephysAnalyzer
 from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
 from src.EM_Torch.general_functions import initialize_clusters, create_relevant_files, get_parser, plot_outputs, \
-    plot_initial_clusters, write_log_and_model, write_losses, plot_losses, CustomDataset, load_tensors, to_cuda, to_cpu, \
+    plot_initial_clusters, write_log_and_model, write_losses, plot_losses, load_tensors, to_cuda, \
     preprocess_input_data
 import numpy as np
 import time
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
 outputs_folder = 'outputs'
 
 args = get_parser().parse_args()
@@ -25,19 +24,24 @@ args.eval_interval = 500
 args.lr = 0.0001
 args.num_epochs = 200000
 args.temperature = (1, 1000)
-args.weights = (10, 1)
+args.weights = (99, 1)
 # args.tau_beta = 800
 # args.tau_config = 500
 args.tau_sigma = 1
 args.tau_sd = 10000
+# args.L = 3
 sd_init = 0.5
 # args.cuda = False
 args.init_with_DTW = False
 args.n_trial_samples = 10  # Number of samples to generate for each trial
-peak1_left_landmarks = [0.03, 0.03, 0.03]
-peak1_right_landmarks = [0.11, 0.14, 0.13]
-peak2_left_landmarks = [0.17, 0.18, 0.18]
-peak2_right_landmarks = [0.31, 0.32, 0.30]
+# peak1_left_landmarks = [0.03, 0.03, 0.03]
+# peak1_right_landmarks = [0.11, 0.14, 0.13]
+# peak2_left_landmarks = [0.17, 0.18, 0.18]
+# peak2_right_landmarks = [0.31, 0.32, 0.30]
+peak1_left_landmarks = [0.01] * args.L
+peak1_right_landmarks = [0.15] * args.L
+peak2_left_landmarks = [0.16] * args.L
+peak2_right_landmarks = [0.32] * args.L
 dt = 0.002
 
 regions = None

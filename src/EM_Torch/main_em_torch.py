@@ -40,8 +40,9 @@ args.log_interval = 500
 args.eval_interval = 500
 args.lr = 0.0001
 args.num_epochs = 200000
-# args.temperature = 1
-# args.tau_beta = 1000
+args.temperature = (1, 1000)
+args.weights = (10, 1)
+# args.tau_beta = 800
 # args.tau_config = 500
 args.tau_sigma = 1
 args.tau_sd = 10000
@@ -86,7 +87,7 @@ data.load_tensors()
 num_factors = data.beta.shape[0]
 model = LikelihoodELBOModel(data.time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
                             peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
-                            temperature=args.temperature)
+                            temperature=args.temperature, weights=args.weights)
 model.init_ground_truth(beta=data.beta,
                         alpha=inv_softplus_torch(data.alpha),
                         config_peak_offsets=data.config_peak_offsets,
@@ -116,7 +117,8 @@ model.cpu()
 args.folder_name = (
     f'seed{args.data_seed}_simulated_{init}Init_K{args.K}_A{args.A}_C{args.n_configs}_L{args.L}'
     f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauSD{args.tau_sd}'
-    f'_posterior{args.n_trial_samples}_iters{args.num_epochs}_lr{args.lr}_temp{args.temperature}_notes-{args.notes}')
+    f'_posterior{args.n_trial_samples}_iters{args.num_epochs}_lr{args.lr}_temp{args.temperature}_weight{args.weights}'
+    f'_notes-{args.notes}')
 output_dir = os.path.join(output_dir, args.folder_name, 'Run_0')
 os.makedirs(output_dir, exist_ok=True)
 plot_outputs(model, unique_regions, output_dir, 'Train', -2)

@@ -24,8 +24,9 @@ args.log_interval = 500
 args.eval_interval = 500
 args.lr = 0.0001
 args.num_epochs = 200000
-# args.temperature = 1
-# args.tau_beta = 1000
+args.temperature = (1, 1000)
+args.weights = (10, 1)
+# args.tau_beta = 800
 # args.tau_config = 500
 args.tau_sigma = 1
 args.tau_sd = 10000
@@ -90,7 +91,7 @@ else:
     cluster_dir = None
 model = LikelihoodELBOModel(bin_time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
                             peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
-                            temperature=args.temperature)
+                            temperature=args.temperature, weights=args.weights)
 # Initialize the model
 processed_inputs_train = preprocess_input_data(*to_cuda((Y_train, factor_access_train), move_to_cuda=args.cuda),
                                                mask_threshold=5)
@@ -105,7 +106,8 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
 args.folder_name = (
     f'seed{args.data_seed}_Real_{init}Init_K{args.K}_A{args.A}_C{args.n_configs}_L{args.L}'
     f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauSD{args.tau_sd}'
-    f'_posterior{args.n_trial_samples}_iters{args.num_epochs}_lr{args.lr}_temp{args.temperature}_notes-{args.notes}')
+    f'_posterior{args.n_trial_samples}_iters{args.num_epochs}_lr{args.lr}_temp{args.temperature}_weight{args.weights}'
+    f'_notes-{args.notes}')
 output_dir = os.path.join(output_dir, args.folder_name, 'Run_0')
 os.makedirs(output_dir, exist_ok=True)
 output_str = (f"Using CUDA: {args.cuda}\n"

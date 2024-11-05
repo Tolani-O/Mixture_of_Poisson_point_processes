@@ -11,12 +11,22 @@ import pickle
 class LikelihoodELBOModel(nn.Module):
     def __init__(self, time, n_factors, n_areas, n_configs, n_trials, n_trial_samples,
                  peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
-                 temperature=1.0):
+                 temperature=None, weights=None):
         super(LikelihoodELBOModel, self).__init__()
 
         self.device = 'cpu'
         self.is_eval = True
-        self.temperature = temperature
+        if temperature is None:
+            temperature = (1,)
+        if isinstance(temperature, (int, float)):
+            temperature = (temperature,)
+        if weights is None:
+            weights = [1] * len(temperature)
+        if isinstance(weights, (int, float)):
+            weights = [weights] * len(temperature)
+        assert len(temperature) == len(weights), "Temperature and weights must be the same length"
+        self.temperature = torch.tensor(temperature)
+        self.weights = torch.tensor(weights, dtype=torch.float)
         self.time = torch.tensor(time)
         dt = round(time[1] - time[0], 3)
         self.dt = torch.tensor(dt)
@@ -162,6 +172,8 @@ class LikelihoodELBOModel(nn.Module):
             return
         self.device = 'cuda'
         self.time = self.time.cuda(device)
+        self.temperature = self.temperature.cuda(device)
+        self.weights = self.weights.cuda(device)
         self.Delta2TDelta2 = self.Delta2TDelta2.cuda(device)
         self.peak1_left_landmarks = self.peak1_left_landmarks.cuda(device)
         self.peak2_left_landmarks = self.peak2_left_landmarks.cuda(device)
@@ -183,6 +195,8 @@ class LikelihoodELBOModel(nn.Module):
             return
         self.device = 'cpu'
         self.time = self.time.cpu()
+        self.temperature = self.temperature.cpu()
+        self.weights = self.weights.cpu()
         self.Delta2TDelta2 = self.Delta2TDelta2.cpu()
         self.peak1_left_landmarks = self.peak1_left_landmarks.cpu()
         self.peak2_left_landmarks = self.peak2_left_landmarks.cpu()
@@ -423,15 +437,20 @@ class LikelihoodELBOModel(nn.Module):
         Y_sum_rt_plus_alpha_times_log_R_plus_theta = torch.einsum('ckl,l->ckl', Y_sum_rt_plus_alpha, torch.log(R + self.theta))
 
         # U_tensor # C x K x L
-        U_tensor = (Y_times_posterior_warped - log_y_factorial_sum_rt + sum_over_y_log_alpha_plus_i_minus_1 + alpha_log_theta -
-                    Y_sum_rt_plus_alpha_times_log_R_plus_theta + torch.log(self.pi).unsqueeze(0).unsqueeze(1))
-        # U_tensor # C x K x A x La
         L_a = self.n_factors // self.n_areas
+        if self.is_eval:
+            pi = self.pi
+        else:
+            temp = self.temperature[torch.multinomial(self.weights, 1)].item()
+            pi = F.softmax(torch.log(self.pi).reshape(self.n_areas, L_a) / temp, dim=-1).flatten()
+        U_tensor = (Y_times_posterior_warped - log_y_factorial_sum_rt + sum_over_y_log_alpha_plus_i_minus_1 + alpha_log_theta -
+                    Y_sum_rt_plus_alpha_times_log_R_plus_theta + torch.log(pi).unsqueeze(0).unsqueeze(1))
+        # U_tensor # C x K x A x La
         U_tensor = U_tensor.reshape(*U_tensor.shape[:-1], self.n_areas, L_a)
         neuron_area_access = neuron_factor_access.reshape(*neuron_factor_access.shape[:-1], self.n_areas, L_a).sum(dim=-1)/L_a
         self.U_tensor = neuron_area_access * torch.logsumexp(U_tensor, dim=-1)
         # W_CKL # C x K x L
-        W_CKL = neuron_factor_access * F.softmax(U_tensor/self.temperature, dim=-1).reshape(*U_tensor.shape[:-2], self.n_factors).detach()
+        W_CKL = neuron_factor_access * F.softmax(U_tensor, dim=-1).reshape(*U_tensor.shape[:-2], self.n_factors).detach()
         self.validated_W_CKL(W_CKL)  # for finding the posterior clustering probabilities
 
         ## current E step parameter updates (for use in next M step)

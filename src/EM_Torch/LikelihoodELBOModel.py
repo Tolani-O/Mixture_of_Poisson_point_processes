@@ -465,14 +465,12 @@ class LikelihoodELBOModel(nn.Module):
         warped_factors = processed_inputs['warped_factors']
         # warped_factors # C x R x L x N x T
         K, T, R, C = Y.shape
-        W_CKL = self.W_CKL
         theta = self.theta
-        log_theta = torch.log(theta)
         # b_CKL  # C x K x L
         b_CKL = (torch.digamma(Y_sum_rt_plus_alpha) - torch.log(R + theta)).detach()
 
         # W_tensor # C x K x 1 x L x 1
-        W_tensor = warped_factors.shape[3]**(-1) * W_CKL.unsqueeze(2).unsqueeze(4)
+        W_tensor = warped_factors.shape[3]**(-1) * self.W_CKL.unsqueeze(2).unsqueeze(4)
 
         # Liklelihood Terms (unsqueezed)
         # log_warped_factors # C x R x L x N x T
@@ -484,7 +482,7 @@ class LikelihoodELBOModel(nn.Module):
         # Y_sum_t_times_logsumexp_warped_beta  # C x K x R x L x N
         Y_sum_t_times_logsumexp_warped_beta = torch.einsum('ckr,crln->ckrln', Y_sum_t, logsumexp_warped_beta)
         # alpha_times_log_theta_plus_b_CKL  # C x K x 1 x L x 1
-        alpha_times_log_theta_plus_b_CKL = (alpha * (log_theta + b_CKL)).unsqueeze(2).unsqueeze(4)
+        alpha_times_log_theta_plus_b_CKL = (alpha * (torch.log(theta) + b_CKL)).unsqueeze(2).unsqueeze(4)
         log_gamma_alpha = torch.lgamma(alpha).unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(4)  # 1 x 1 x 1 x L x 1
         # neg_log_P # C x 1 x R x 1 x N
         neg_log_P = self.Sigma_log_likelihood(self.trial_peak_offset_proposal_samples, self.ltri_matix()).unsqueeze(1).unsqueeze(3)

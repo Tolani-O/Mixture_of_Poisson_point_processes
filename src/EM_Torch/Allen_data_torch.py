@@ -323,21 +323,21 @@ class EcephysAnalyzer:
         return Y, time, neuron_factor_access.transpose(2, 0, 1), unique_regions
 
 
-    def save_sample(self, Y, time, neuron_factor_access, unique_regions, folder_name):
-        save_dir = os.path.join(self.output_dir, folder_name)
-        os.makedirs(save_dir, exist_ok=True)
-        save_dir = os.path.join(save_dir, f'{folder_name}.pkl')
-        print('Saving sample to: ', save_dir)
-        with open(save_dir, 'wb') as f:
-            pickle.dump({'Y': Y, 'time': time, 'neuron_factor_access': neuron_factor_access, 'unique_regions': unique_regions}, f)
+def save_sample(Y, time, neuron_factor_access, unique_regions, output_dir, folder_name):
+    save_dir = os.path.join(output_dir, folder_name)
+    os.makedirs(save_dir, exist_ok=True)
+    save_dir = os.path.join(save_dir, f'{folder_name}.pkl')
+    print('Saving sample to: ', save_dir)
+    with open(save_dir, 'wb') as f:
+        pickle.dump({'Y': Y, 'time': time, 'neuron_factor_access': neuron_factor_access, 'unique_regions': unique_regions}, f)
 
 
-    def load_sample(self, folder_name):
-        save_dir = os.path.join(self.output_dir, folder_name, f'{folder_name}.pkl')
-        if not os.path.exists(save_dir):
-            print('File not found: ', save_dir)
-            return None, None, None, None
-        print('Loading sample from: ', save_dir)
-        with open(save_dir, 'rb') as f:
-            data = pickle.load(f)
-        return data['Y'], data['time'], data['neuron_factor_access'], data['unique_regions']
+def load_sample(output_dir, folder_name):
+    save_dir = os.path.join(output_dir, folder_name, f'{folder_name}.pkl')
+    if not os.path.exists(save_dir):
+        print('File not found: ', save_dir)
+        return None, None, None, None
+    print('Loading sample from: ', save_dir)
+    with open(save_dir, 'rb') as f:
+        data = pickle.load(f)
+    return data['Y'], data['time'], data['neuron_factor_access'], data['unique_regions']

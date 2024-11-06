@@ -79,6 +79,8 @@ _, _, factor_assignment_onehot_train, neuron_gains_train, trial_offsets_train = 
 Y_test, factor_access_test = load_tensors(data.sample_data(K=args.K, A=args.A, n_trials=args.n_trials))
 _, _, factor_assignment_onehot_test, neuron_gains_test, trial_offsets_test = to_cuda(load_tensors(data.get_sample_ground_truth()),
                                                                                      move_to_cuda=args.cuda)
+processed_inputs_train = preprocess_input_data(*to_cuda((Y_train, factor_access_train), move_to_cuda=args.cuda))
+processed_inputs_test = preprocess_input_data(*to_cuda((Y_test, factor_access_test), move_to_cuda=args.cuda))
 unique_regions = [f'region{i}' for i in range(args.A)]
 
 # initialize the model with ground truth params
@@ -94,10 +96,7 @@ model.init_ground_truth(beta=data.beta,
                         theta=data.theta,
                         pi=F.softmax(data.pi.reshape(args.A, -1), dim=1).flatten(),
                         sd_init=1e-5)
-
 model.cuda(move_to_cuda=args.cuda)
-processed_inputs_test = preprocess_input_data(*to_cuda((Y_test, factor_access_test), move_to_cuda=args.cuda))
-processed_inputs_train = preprocess_input_data(*to_cuda((Y_train, factor_access_train), move_to_cuda=args.cuda))
 with torch.no_grad():
     model.init_ground_truth(trial_peak_offset_proposal_means=trial_offsets_test.squeeze(),
                             W_CKL=factor_assignment_onehot_test,
@@ -158,8 +157,6 @@ output_str = (
     f"True Offset Likelihood Test: {true_offset_penalty_test}\n\n")
 create_relevant_files(output_dir, output_str, ground_truth=True)
 plot_outputs(model, unique_regions, output_dir, 'Train', -1)
-
-# Instantiate the dataset and dataloader
 data.cuda(args.cuda)
 print(f'folder_name: {args.folder_name}\n\n')
 print(output_str)

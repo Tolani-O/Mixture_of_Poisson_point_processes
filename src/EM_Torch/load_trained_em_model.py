@@ -116,7 +116,7 @@ model.load_state_dict(model_state)
 model.W_CKL, model.a_CKL, model.theta, model.pi = W_CKL, a_CKL, theta, pi
 if args.num_epochs < 0:
     model.cuda(move_to_cuda=args.cuda)
-    hessian = compute_uncertainty(model, Y_train, factor_access_train, save_dir, args.load_epoch)
+    hessian = compute_uncertainty(model, processed_inputs_train, save_dir, args.load_epoch)
     model.cpu()
     plot_outputs(model, unique_regions, save_dir, 'Train', args.load_epoch, stderr=True)
     sys.exit()

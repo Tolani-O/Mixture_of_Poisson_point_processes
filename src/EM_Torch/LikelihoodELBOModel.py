@@ -54,7 +54,7 @@ class LikelihoodELBOModel(nn.Module):
         self.pi = None  # 1 x AL
         self.W_CKL = None  # C x K x L
         self.a_CKL = None  # C x K x L
-        self.U_tensor = None  # C x K x L
+        self.log_sum_exp_U_tensor = None  # C x K x L
 
         # Parameters
         self.beta = None  # AL x T
@@ -448,7 +448,7 @@ class LikelihoodELBOModel(nn.Module):
         # U_tensor # C x K x A x La
         U_tensor = U_tensor.reshape(*U_tensor.shape[:-1], self.n_areas, L_a)
         neuron_area_access = neuron_factor_access.reshape(*neuron_factor_access.shape[:-1], self.n_areas, L_a).sum(dim=-1)/L_a
-        self.U_tensor = neuron_area_access * torch.logsumexp(U_tensor, dim=-1)
+        self.log_sum_exp_U_tensor = neuron_area_access * torch.logsumexp(U_tensor, dim=-1)
         # W_CKL # C x K x L
         W_CKL = neuron_factor_access * F.softmax(U_tensor, dim=-1).reshape(*U_tensor.shape[:-2], self.n_factors).detach()
         self.validated_W_CKL(W_CKL)  # for finding the posterior clustering probabilities
@@ -560,5 +560,5 @@ class LikelihoodELBOModel(nn.Module):
         self.E_step_posterior_updates(processed_inputs)
         # log_P  C x R
         log_P = -self.Sigma_log_likelihood(self.trial_peak_offset_proposal_means.unsqueeze(0), self.ltri_matix()).squeeze()
-        log_likelihood = torch.sum(self.U_tensor) + torch.sum(log_P)
+        log_likelihood = torch.sum(self.log_sum_exp_U_tensor) + torch.sum(log_P)
         return log_likelihood

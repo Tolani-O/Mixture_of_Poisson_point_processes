@@ -564,7 +564,7 @@ def plot_losses(true_likelihood, output_dir, name, metric, cutoff=0, merge=True)
         plt.savefig(os.path.join(plt_path, f'{metric}_{name}_Trajectories.png'))
 
 
-def compute_uncertainty(model, Y, neuron_factor_access, output_dir, epoch):
+def compute_uncertainty(model, processed_inputs, output_dir, epoch):
     # check if file exists
     models_path = os.path.join(output_dir, 'models')
     file_path = os.path.join(models_path, f'hessian_diagonal_{epoch}.pkl')
@@ -572,7 +572,7 @@ def compute_uncertainty(model, Y, neuron_factor_access, output_dir, epoch):
         with open(file_path, 'rb') as f:
             hessian_diagonal_dict = pickle.load(f)
         return hessian_diagonal_dict
-    likelihood_term = model.log_likelihood(Y, neuron_factor_access)
+    likelihood_term = model.log_likelihood(processed_inputs)
     param_names = ['beta', 'alpha', 'config_peak_offsets', 'trial_peak_offset_covar_ltri_diag',
                    'trial_peak_offset_covar_ltri_offdiag']
     param_values = [p for n, p in model.named_parameters() if n in param_names]

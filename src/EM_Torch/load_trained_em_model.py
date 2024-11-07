@@ -17,7 +17,7 @@ outputs_folder = 'outputs'
 args = get_parser().parse_args()
 parser_key = ['seed', 'K', 'A', 'C', 'L', 'R', 'tauBeta', 'tauConfig', 'tauSigma', 'tauSD', 'posterior', 'iters', 'lr', 'temp', 'weight', 'notes']
 args.folder_name = 'seed808662142_simulated_DataInit_K100_A3_C5_L3_R15_tauBeta800.0_tauConfig500.0_tauSigma1_tauSD10000_posterior10_iters200000_lr0.0001_temp(1, 1000)_weight(10, 1)_notes-no TW, mask 0.'
-parser_dict = parse_folder_name(args.folder_name, parser_key)
+parser_dict = parse_folder_name(args.folder_name, parser_key, outputs_folder, args.load_run)
 
 args.data_seed = int(parser_dict['seed'])
 args.n_trials = int(parser_dict['R'])  # R
@@ -45,7 +45,6 @@ if args.eval_interval > args.log_interval:
     args.log_interval = args.eval_interval
 # outputs_folder = '../../outputs'
 print('Start\n\n')
-output_dir = os.path.join(os.getcwd(), outputs_folder)
 # Set the random seed manually for reproducibility.
 np.random.seed(args.data_seed)
 # Ground truth data
@@ -59,10 +58,6 @@ else:
     args.cuda = False
 data = DataAnalyzer().initialize(configs=args.n_configs, A=args.A, L=args.L, intensity_mltply=args.intensity_mltply,
                                  intensity_bias=args.intensity_bias, time_warp=args.time_warp)
-peak1_left_landmarks = data.time[[data.left_landmark1] * args.L]
-peak1_right_landmarks = data.time[[data.right_landmark1] * args.L]
-peak2_left_landmarks = data.time[[data.left_landmark2] * args.L]
-peak2_right_landmarks = data.time[[data.right_landmark2] * args.L]
 # Training data
 Y_train, factor_access_train = load_tensors(data.sample_data(K=args.K, A=args.A, n_trials=args.n_trials))
 print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')
@@ -74,6 +69,10 @@ _, _, factor_assignment_onehot_test, neuron_gains_test, trial_offsets_test = to_
                                                                                      move_to_cuda=args.cuda)
 processed_inputs_train = preprocess_input_data(*to_cuda((Y_train, factor_access_train), move_to_cuda=args.cuda))
 processed_inputs_test = preprocess_input_data(*to_cuda((Y_test, factor_access_test), move_to_cuda=args.cuda))
+peak1_left_landmarks = parser_dict['peak1_left_landmarks']
+peak1_right_landmarks = parser_dict['peak1_right_landmarks']
+peak2_left_landmarks = parser_dict['peak2_left_landmarks']
+peak2_right_landmarks = parser_dict['peak2_right_landmarks']
 unique_regions = [f'region{i}' for i in range(args.A)]
 
 # initialize the model with ground truth params
@@ -105,20 +104,20 @@ ltri_matrix = model.ltri_matix()
 true_offset_penalty_train = (1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_train, ltri_matrix).sum().item()
 true_offset_penalty_test = (1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_test, ltri_matrix).sum().item()
 model.cpu()
-save_dir = os.path.join(output_dir, args.folder_name, f'Run_{args.load_run + 1}')
-os.makedirs(save_dir, exist_ok=True)
-plot_outputs(model, unique_regions, save_dir, 'Train', -2)
+output_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, f'Run_{args.load_run + 1}')
+os.makedirs(output_dir, exist_ok=True)
+plot_outputs(model, unique_regions, output_dir, 'Train', -2)
 # Load the model
-load_dir = os.path.join(output_dir, args.folder_name, f'Run_{args.load_run}')
+load_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, f'Run_{args.load_run}')
 model_state, optimizer_state, scheduler_state, W_CKL, a_CKL, theta, pi, args.load_epoch = load_model_checkpoint(load_dir, args.load_epoch)
 model.init_zero()
 model.load_state_dict(model_state)
 model.W_CKL, model.a_CKL, model.theta, model.pi = W_CKL, a_CKL, theta, pi
 if args.num_epochs < 0:
     model.cuda(move_to_cuda=args.cuda)
-    hessian = compute_uncertainty(model, processed_inputs_train, save_dir, args.load_epoch)
+    hessian = compute_uncertainty(model, processed_inputs_train, output_dir, args.load_epoch)
     model.cpu()
-    plot_outputs(model, unique_regions, save_dir, 'Train', args.load_epoch, stderr=True)
+    plot_outputs(model, unique_regions, output_dir, 'Train', args.load_epoch, stderr=True)
     sys.exit()
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 optimizer.load_state_dict(optimizer_state)
@@ -133,7 +132,6 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
                                                        patience=patience, threshold_mode='abs',
                                                        threshold=args.scheduler_threshold)
 scheduler.load_state_dict(scheduler_state)
-output_dir = save_dir
 output_str = (
     f"Using CUDA: {args.cuda}\n"
     f"Num available GPUs: {torch.cuda.device_count()}\n"
@@ -145,7 +143,13 @@ output_str = (
     f"True ELBO Test: {true_ELBO_test},\n"
     f"True Offset Likelihood Training: {true_offset_penalty_train},\n"
     f"True Offset Likelihood Test: {true_offset_penalty_test}\n\n")
-create_relevant_files(output_dir, output_str, ground_truth=True)
+params = {
+    'peak1_left_landmarks': peak1_left_landmarks,
+    'peak1_right_landmarks': peak1_right_landmarks,
+    'peak2_left_landmarks': peak2_left_landmarks,
+    'peak2_right_landmarks': peak2_right_landmarks,
+}
+create_relevant_files(output_dir, output_str, params=params, ground_truth=True)
 plot_outputs(model, unique_regions, output_dir, 'Train', -1)
 data.cuda(args.cuda)
 print(f'folder_name: {args.folder_name}\n\n')

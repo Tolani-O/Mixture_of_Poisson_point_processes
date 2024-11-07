@@ -14,12 +14,13 @@ from ast import literal_eval
 outputs_folder = 'outputs'
 
 args = get_parser().parse_args()
-parser_key = ['seed', 'L', 'tauBeta', 'tauConfig', 'tauSigma', 'tauSD', 'posterior', 'iters', 'lr', 'temp', 'weight', 'notes']
+parser_key = ['seed', 'A', 'L', 'tauBeta', 'tauConfig', 'tauSigma', 'tauSD', 'posterior', 'iters', 'lr', 'temp', 'weight', 'notes']
 args.folder_name = 'seed3051898919_Real_DataInit_K305_A7_C40_L4_R15_tauBeta800.0_tauConfig500.0_tauSigma1_tauSD10000_posterior10_iters200000_lr0.0001_temp(1, 1000)_weight(99, 1)_notes-masking 5'
-parser_dict = parse_folder_name(args.folder_name, parser_key)
+parser_dict = parse_folder_name(args.folder_name, parser_key, outputs_folder, args.load_run)
 
 args.data_seed = int(parser_dict['seed'])
-args.L = int(parser_dict['L'])
+args.A = int(parser_dict['A'])  # A
+args.L = int(parser_dict['L'])  # L
 args.notes = parser_dict['notes']
 args.log_interval = 500
 args.eval_interval = 500
@@ -35,26 +36,12 @@ args.tau_sd = float(parser_dict['tauSD'])
 args.n_trial_samples = int(parser_dict['posterior'])  # Number of samples to generate for each trial
 # args.load_epoch = -1
 # args.load_run = 0
-# peak1_left_landmarks = [0.03, 0.03, 0.03]
-# peak1_right_landmarks = [0.11, 0.14, 0.13]
-# peak2_left_landmarks = [0.17, 0.18, 0.18]
-# peak2_right_landmarks = [0.31, 0.32, 0.30]
-peak1_left_landmarks = [0.01] * args.L
-peak1_right_landmarks = [0.14] * args.L
-peak2_left_landmarks = [0.15] * args.L
-peak2_right_landmarks = [0.30] * args.L
 dt = 0.002
-
-regions = None
-conditions = None
-regions = ['VISp', 'VISl', 'VISal']
-# conditions = [246, 251]
 
 if args.eval_interval > args.log_interval:
     args.log_interval = args.eval_interval
 # outputs_folder = '../../outputs'
 print('Start\n\n')
-output_dir = os.path.join(os.getcwd(), outputs_folder)
 # Set the random seed manually for reproducibility.
 np.random.seed(args.data_seed)
 # Ground truth data
@@ -68,15 +55,18 @@ else:
     args.cuda = False
 
 # Training data
-region_ct = len(regions) if regions is not None else 7
-args.L = len(peak1_left_landmarks)
-folder_path = os.path.join(output_dir, 'metadata')
+region_ct = args.A
+folder_path = os.path.join(os.getcwd(), outputs_folder, 'metadata')
 folder_name = f'sample_data_{region_ct}-regions_{args.L}-factors_{dt}_dt'
 Y_train, bin_time, factor_access_train, unique_regions = load_sample(folder_path, folder_name)
 if Y_train is None:
     raise ValueError("No training data found")
 processed_inputs_train = preprocess_input_data(*to_cuda(load_tensors((Y_train, factor_access_train)),
                                                         move_to_cuda=args.cuda), mask_threshold=5)
+peak1_left_landmarks = parser_dict['peak1_left_landmarks']
+peak1_right_landmarks = parser_dict['peak1_right_landmarks']
+peak2_left_landmarks = parser_dict['peak2_left_landmarks']
+peak2_right_landmarks = parser_dict['peak2_right_landmarks']
 print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')
 
 args.K, T, args.n_trials, args.n_configs = Y_train.shape
@@ -85,19 +75,19 @@ args.A = int(num_factors / args.L)
 model = LikelihoodELBOModel(bin_time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
                             peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
                             temperature=args.temperature)
-save_dir = os.path.join(output_dir, args.folder_name, f'Run_{args.load_run + 1}')
-os.makedirs(save_dir, exist_ok=True)
+output_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, f'Run_{args.load_run + 1}')
+os.makedirs(output_dir, exist_ok=True)
 # Load the model
-load_dir = os.path.join(output_dir, args.folder_name, f'Run_{args.load_run}')
+load_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, f'Run_{args.load_run}')
 model_state, optimizer_state, scheduler_state, W_CKL, a_CKL, theta, pi, args.load_epoch = load_model_checkpoint(load_dir, args.load_epoch)
 model.init_zero()
 model.load_state_dict(model_state)
 model.W_CKL, model.a_CKL, model.theta, model.pi = W_CKL, a_CKL, theta, pi
 if args.num_epochs < 0:
     model.cuda(move_to_cuda=args.cuda)
-    hessian = compute_uncertainty(model, Y_train, factor_access_train, save_dir, args.load_epoch)
+    hessian = compute_uncertainty(model, Y_train, factor_access_train, output_dir, args.load_epoch)
     model.cpu()
-    plot_outputs(model, unique_regions, save_dir, 'Train', args.load_epoch, stderr=True)
+    plot_outputs(model, unique_regions, output_dir, 'Train', args.load_epoch, stderr=True)
     sys.exit()
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 optimizer.load_state_dict(optimizer_state)
@@ -112,14 +102,19 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
                                                        patience=patience, threshold_mode='abs',
                                                        threshold=args.scheduler_threshold)
 scheduler.load_state_dict(scheduler_state)
-output_dir = save_dir
 output_str = (f"Using CUDA: {args.cuda}\n"
               f"Num available GPUs: {torch.cuda.device_count()}\n"
               f"peak1_left_landmarks:\n{model.time[model.peak1_left_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
               f"peak1_right_landmarks:\n{model.time[model.peak1_right_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
               f"peak2_left_landmarks:\n{model.time[model.peak2_left_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
               f"peak2_right_landmarks:\n{model.time[model.peak2_right_landmarks.reshape(model.n_areas, -1)].numpy()}\n\n")
-create_relevant_files(output_dir, output_str)
+params = {
+    'peak1_left_landmarks': peak1_left_landmarks,
+    'peak1_right_landmarks': peak1_right_landmarks,
+    'peak2_left_landmarks': peak2_left_landmarks,
+    'peak2_right_landmarks': peak2_right_landmarks,
+}
+create_relevant_files(output_dir, output_str, params=params)
 plot_outputs(model, unique_regions, output_dir, 'Train', -1)
 print(f'folder_name: {args.folder_name}\n\n')
 print(output_str)

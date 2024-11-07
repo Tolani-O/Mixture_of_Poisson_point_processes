@@ -52,7 +52,6 @@ if args.eval_interval > args.log_interval:
     args.log_interval = args.eval_interval
 # outputs_folder = '../../outputs'
 print('Start\n\n')
-output_dir = os.path.join(os.getcwd(), outputs_folder)
 # Set the random seed manually for reproducibility.
 np.random.seed(args.data_seed)
 # Ground truth data
@@ -66,10 +65,6 @@ else:
     args.cuda = False
 data = DataAnalyzer().initialize(configs=args.n_configs, A=args.A, L=args.L, intensity_mltply=args.intensity_mltply,
                                  intensity_bias=args.intensity_bias, time_warp=args.time_warp)
-peak1_left_landmarks = data.time[[data.left_landmark1] * args.L]
-peak1_right_landmarks = data.time[[data.right_landmark1] * args.L]
-peak2_left_landmarks = data.time[[data.left_landmark2] * args.L]
-peak2_right_landmarks = data.time[[data.right_landmark2] * args.L]
 # Training data
 Y_train, factor_access_train = load_tensors(data.sample_data(K=args.K, A=args.A, n_trials=args.n_trials))
 print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')
@@ -81,6 +76,10 @@ _, _, factor_assignment_onehot_test, neuron_gains_test, trial_offsets_test = to_
                                                                                      move_to_cuda=args.cuda)
 processed_inputs_train = preprocess_input_data(*to_cuda((Y_train, factor_access_train), move_to_cuda=args.cuda))
 processed_inputs_test = preprocess_input_data(*to_cuda((Y_test, factor_access_test), move_to_cuda=args.cuda))
+peak1_left_landmarks = data.time[[data.left_landmark1] * args.L]
+peak1_right_landmarks = data.time[[data.right_landmark1] * args.L]
+peak2_left_landmarks = data.time[[data.left_landmark2] * args.L]
+peak2_right_landmarks = data.time[[data.right_landmark2] * args.L]
 unique_regions = [f'region{i}' for i in range(args.A)]
 
 # initialize the model with ground truth params
@@ -117,7 +116,7 @@ args.folder_name = (
     f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauSD{args.tau_sd}'
     f'_posterior{args.n_trial_samples}_iters{args.num_epochs}_lr{args.lr}_temp{args.temperature}_weight{args.weights}'
     f'_notes-{args.notes}')
-output_dir = os.path.join(output_dir, args.folder_name, 'Run_0')
+output_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, 'Run_0')
 os.makedirs(output_dir, exist_ok=True)
 plot_outputs(model, unique_regions, output_dir, 'Train', -2)
 # Initialize the model
@@ -155,7 +154,13 @@ output_str = (
     f"True ELBO Test: {true_ELBO_test},\n"
     f"True Offset Likelihood Training: {true_offset_penalty_train},\n"
     f"True Offset Likelihood Test: {true_offset_penalty_test}\n\n")
-create_relevant_files(output_dir, output_str, ground_truth=True)
+params = {
+    'peak1_left_landmarks': peak1_left_landmarks.tolist(),
+    'peak1_right_landmarks': peak1_right_landmarks.tolist(),
+    'peak2_left_landmarks': peak2_left_landmarks.tolist(),
+    'peak2_right_landmarks': peak2_right_landmarks.tolist(),
+}
+create_relevant_files(output_dir, output_str, params=params, ground_truth=True)
 plot_outputs(model, unique_regions, output_dir, 'Train', -1)
 data.cuda(args.cuda)
 print(f'folder_name: {args.folder_name}\n\n')

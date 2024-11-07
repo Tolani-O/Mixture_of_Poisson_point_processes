@@ -53,7 +53,6 @@ if args.eval_interval > args.log_interval:
     args.log_interval = args.eval_interval
 # outputs_folder = '../../outputs'
 print('Start\n\n')
-output_dir = os.path.join(os.getcwd(), outputs_folder)
 # Set the random seed manually for reproducibility.
 np.random.seed(args.data_seed)
 # Ground truth data
@@ -69,7 +68,7 @@ else:
 # Training data
 region_ct = len(regions) if regions is not None else 7
 args.L = len(peak1_left_landmarks)
-folder_path = os.path.join(output_dir, 'metadata')
+folder_path = os.path.join(os.getcwd(), outputs_folder, 'metadata')
 folder_name = f'sample_data_{region_ct}-regions_{args.L}-factors_{dt}_dt'
 Y_train, bin_time, factor_access_train, unique_regions = load_sample(folder_path, folder_name)
 if Y_train is None:
@@ -115,7 +114,7 @@ args.folder_name = (
     f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauSD{args.tau_sd}'
     f'_posterior{args.n_trial_samples}_iters{args.num_epochs}_lr{args.lr}_temp{args.temperature}_weight{args.weights}'
     f'_notes-{args.notes}')
-output_dir = os.path.join(output_dir, args.folder_name, 'Run_0')
+output_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, 'Run_0')
 os.makedirs(output_dir, exist_ok=True)
 output_str = (f"Using CUDA: {args.cuda}\n"
               f"Num available GPUs: {torch.cuda.device_count()}\n"
@@ -123,7 +122,13 @@ output_str = (f"Using CUDA: {args.cuda}\n"
               f"peak1_right_landmarks:\n{model.time[model.peak1_right_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
               f"peak2_left_landmarks:\n{model.time[model.peak2_left_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
               f"peak2_right_landmarks:\n{model.time[model.peak2_right_landmarks.reshape(model.n_areas, -1)].numpy()}\n\n")
-create_relevant_files(output_dir, output_str)
+params = {
+    'peak1_left_landmarks': peak1_left_landmarks,
+    'peak1_right_landmarks': peak1_right_landmarks,
+    'peak2_left_landmarks': peak2_left_landmarks,
+    'peak2_right_landmarks': peak2_right_landmarks,
+}
+create_relevant_files(output_dir, output_str, params=params)
 plot_outputs(model, unique_regions, output_dir, 'Train', -1)
 print(f'folder_name: {args.folder_name}\n\n')
 print(output_str)

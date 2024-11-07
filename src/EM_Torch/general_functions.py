@@ -209,9 +209,13 @@ def reset_metric_checkpoint(output_dir, folder_name, sub_folder_name, metric_fil
             json.dump(file_contents, file, indent=4)
 
 
-def create_relevant_files(output_dir, output_str, ground_truth=False):
+def create_relevant_files(output_dir, output_str, params=None, ground_truth=False):
     with open(os.path.join(output_dir, 'log.txt'), 'w') as file:
         file.write(output_str)
+
+    if params is not None:
+        with open(os.path.join(output_dir, 'params.json'), 'w') as file:
+            json.dump(params, file, indent=4)
 
     # List of JSON files to be created
     file_names = [
@@ -261,7 +265,7 @@ def write_log_and_model(output_str, output_dir, epoch, model, optimizer, schedul
     torch.save(scheduler.state_dict(), os.path.join(models_path, f'scheduler_{epoch}.pth'))
 
 
-def parse_folder_name(folder_name, parser_key):
+def parse_folder_name(folder_name, parser_key, outputs_folder, load_run):
     parsed_values = {}
     for key in parser_key:
         start_idx = folder_name.find(key)
@@ -271,6 +275,13 @@ def parse_folder_name(folder_name, parser_key):
                 end_idx = len(folder_name)
             value = folder_name[(start_idx + len(key)):end_idx]
             parsed_values[key] = value
+    load_dir = os.path.join(os.getcwd(), outputs_folder, folder_name, f'Run_{load_run}', 'params.json')
+    if os.path.exists(load_dir):
+        with open(load_dir, 'r') as f:
+            loaded_params = json.load(f)
+        for key in loaded_params:
+            if key not in parsed_values:
+                parsed_values[key] = loaded_params[key]
     return parsed_values
 
 

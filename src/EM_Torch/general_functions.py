@@ -30,6 +30,7 @@ def get_parser():
     parser.add_argument('--load_run', type=int, default=0, help='Which run to load model and optimizer from')
     parser.add_argument('--temperature', type=float, default=1, help='Softmax temperature')
     parser.add_argument('--weights', type=float, default=1, help='temperature weights (for multiple temperatures)')
+    parser.add_argument('--mask_neuron_threshold', type=int, default=0, help='If neuron spike count is below this, mask neuron')
     parser.add_argument('--tau_config', type=float, default=0.5, help='Value for tau_config')
     parser.add_argument('--tau_sigma', type=float, default=0.5, help='Value for tau_sigma')
     parser.add_argument('--tau_sd', type=float, default=0.5, help='Value for tau_sd')

@@ -5,8 +5,8 @@ sys.path.append(os.path.abspath('.'))
 from src.EM_Torch.Allen_data_torch import EcephysAnalyzer, save_sample, load_sample
 from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
 from src.EM_Torch.general_functions import initialize_clusters, create_relevant_files, get_parser, plot_outputs, \
-    plot_initial_clusters, write_log_and_model, write_losses, plot_losses, load_tensors, to_cuda, \
-    preprocess_input_data
+    plot_initial_clusters, write_log_and_model, write_losses, plot_losses, write_grad_norms, plot_grad_norms, \
+    load_tensors, to_cuda, preprocess_input_data
 import numpy as np
 import time
 import torch
@@ -25,7 +25,7 @@ args.lr = 0.0001
 args.num_epochs = 200000
 args.temperature = (1, 1000)
 args.weights = (99, 1)
-# args.tau_beta = 800
+args.mask_neuron_threshold = 5
 # args.tau_config = 500
 args.tau_sigma = 1
 args.tau_sd = 10000
@@ -80,7 +80,7 @@ if Y_train is None:
     Y_train, bin_time, factor_access_train, unique_regions = data.sample_data(conditions=conditions, num_factors=args.L)
     save_sample(Y_train, bin_time, factor_access_train, unique_regions, folder_path, folder_name)
 processed_inputs_train = preprocess_input_data(*to_cuda(load_tensors((Y_train, factor_access_train)),
-                                                        move_to_cuda=args.cuda), mask_threshold=5)
+                                                        move_to_cuda=args.cuda), mask_threshold=args.mask_neuron_threshold)
 print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')
 
 args.K, T, args.n_trials, args.n_configs = Y_train.shape
@@ -141,6 +141,8 @@ if __name__ == "__main__":
     log_likelihoods_train = []
     losses_train = []
     epoch_train = []
+    batch_grad_norms = {name: [] for name, _ in model.named_parameters()}
+    grad_norms = {name: [] for name, _ in model.named_parameters()}
     total_time = 0
     start_time = time.time()
     batch_ct = 0
@@ -156,10 +158,13 @@ if __name__ == "__main__":
         losses_batch.append((likelihood_term + penalty_term).item())
         log_likelihoods_batch.append(likelihood_term.item())
         epoch_batch.append(batch_ct)
+        model_named_parameters = dict(model.named_parameters())
+        [batch_grad_norms[name].append(param.grad.norm().item()) for name, param in model_named_parameters.items()]
         batch_ct += 1
         torch.cuda.empty_cache()
         if epoch == start_epoch or epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             with torch.no_grad():
+                [grad_norms[name].append(param.grad.norm().item()) for name, param in model_named_parameters.items()]
                 penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
                 likelihood_term = model.forward(processed_inputs_train, train=False)
                 model_factor_assignment_train, model_neuron_gains_train = model.infer_latent_variables()
@@ -191,12 +196,16 @@ if __name__ == "__main__":
             write_log_and_model(output_str, output_dir, epoch, model, optimizer, scheduler)
             plot_outputs(model, unique_regions, output_dir, 'Train', epoch)
             is_empty = epoch == start_epoch
+            write_grad_norms(batch_grad_norms, 'Batch', output_dir, is_empty)
+            write_grad_norms(grad_norms, 'Train', output_dir, is_empty)
             write_losses(log_likelihoods_train, 'Train', 'Likelihood', output_dir, is_empty)
             write_losses(losses_train, 'Train', 'Loss', output_dir, is_empty)
             write_losses(epoch_train, 'Train', 'Epoch', output_dir, is_empty)
             write_losses(log_likelihoods_batch, 'Batch', 'Likelihood', output_dir, is_empty)
             write_losses(losses_batch, 'Batch', 'Loss', output_dir, is_empty)
             write_losses(epoch_batch, 'Batch', 'Epoch', output_dir, is_empty)
+            plot_grad_norms(list(batch_grad_norms.keys()), output_dir, 'Batch', 20)
+            plot_grad_norms(list(grad_norms.keys()), output_dir, 'Train', 10)
             plot_losses(None, output_dir, 'Train', 'Likelihood', 10)
             plot_losses(None, output_dir, 'Train', 'Loss', 10)
             plot_losses(None, output_dir, 'Batch', 'Likelihood', 20)
@@ -207,6 +216,8 @@ if __name__ == "__main__":
             log_likelihoods_train = []
             losses_train = []
             epoch_train = []
+            batch_grad_norms = {name: [] for name, _ in model.named_parameters()}
+            grad_norms = {name: [] for name, _ in model.named_parameters()}
             print(output_str)
             start_time = time.time()
             if scheduler._last_lr[0] < 1e-5:

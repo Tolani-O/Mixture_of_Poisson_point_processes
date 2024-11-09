@@ -5,7 +5,7 @@ sys.path.append(os.path.abspath('.'))
 from src.EM_Torch.simulate_data_multitrial import DataAnalyzer
 from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
 from src.EM_Torch.general_functions import create_relevant_files, get_parser, plot_outputs, \
-    write_log_and_model, write_losses, plot_losses, load_tensors, to_cuda, \
+    write_log_and_model, write_losses, plot_losses, write_grad_norms, plot_grad_norms, load_tensors, to_cuda, \
     inv_softplus_torch, preprocess_input_data
 import numpy as np
 import time
@@ -188,6 +188,8 @@ if __name__ == "__main__":
     ltriLkhd_test = []
     gains_train = []
     gains_test = []
+    batch_grad_norms = {name: [] for name, _ in model.named_parameters()}
+    grad_norms = {name: [] for name, _ in model.named_parameters()}
     total_time = 0
     start_time = time.time()
     batch_ct = 0
@@ -203,10 +205,13 @@ if __name__ == "__main__":
         losses_batch.append((likelihood_term + penalty_term).item())
         log_likelihoods_batch.append(likelihood_term.item())
         epoch_batch.append(batch_ct)
+        model_named_parameters = dict(model.named_parameters())
+        [batch_grad_norms[name].append(param.grad.norm().item()) for name, param in model_named_parameters.items()]
         batch_ct += 1
         torch.cuda.empty_cache()
         if epoch == start_epoch or epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             with torch.no_grad():
+                [grad_norms[name].append(param.grad.norm().item()) for name, param in model_named_parameters.items()]
                 penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
                 likelihood_term = model.forward(processed_inputs_train, train=False)
                 model_factor_assignment_train, model_neuron_gains_train = model.infer_latent_variables()
@@ -301,6 +306,8 @@ if __name__ == "__main__":
             write_log_and_model(output_str, output_dir, epoch, model, optimizer, scheduler)
             plot_outputs(model, unique_regions, output_dir, 'Train', epoch)
             is_empty = epoch == start_epoch
+            write_grad_norms(batch_grad_norms, 'Batch', output_dir, is_empty)
+            write_grad_norms(grad_norms, 'Train', output_dir, is_empty)
             write_losses(log_likelihoods_train, 'Train', 'Likelihood', output_dir, is_empty)
             write_losses(losses_train, 'Train', 'Loss', output_dir, is_empty)
             write_losses(epoch_train, 'Train', 'Epoch', output_dir, is_empty)
@@ -321,6 +328,8 @@ if __name__ == "__main__":
             write_losses(ltriLkhd_test, 'Test', 'ltriLkhd', output_dir, is_empty)
             write_losses(gains_train, 'Train', 'gains_MSE', output_dir, is_empty)
             write_losses(gains_test, 'Test', 'gains_MSE', output_dir, is_empty)
+            plot_grad_norms(list(batch_grad_norms.keys()), output_dir, 'Batch', 20)
+            plot_grad_norms(list(grad_norms.keys()), output_dir, 'Train', 10)
             plot_losses(true_ELBO_train, output_dir, 'Train', 'Likelihood', 10)
             plot_losses(None, output_dir, 'Train', 'Loss', 10)
             plot_losses(None, output_dir, 'Batch', 'Likelihood', 20)
@@ -359,6 +368,8 @@ if __name__ == "__main__":
             ltriLkhd_test = []
             gains_train = []
             gains_test = []
+            batch_grad_norms = {name: [] for name, _ in model.named_parameters()}
+            grad_norms = {name: [] for name, _ in model.named_parameters()}
             print(output_str)
             start_time = time.time()
             if scheduler._last_lr[0] < 1e-5:

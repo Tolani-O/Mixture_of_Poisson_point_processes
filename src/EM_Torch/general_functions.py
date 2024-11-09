@@ -213,6 +213,7 @@ def create_relevant_files(output_dir, output_str, params=None, ground_truth=Fals
     with open(os.path.join(output_dir, 'log.txt'), 'w') as file:
         file.write(output_str)
 
+    output_dir = os.path.join(output_dir, 'json')
     if params is not None:
         with open(os.path.join(output_dir, 'params.json'), 'w') as file:
             json.dump(params, file, indent=4)
@@ -225,7 +226,20 @@ def create_relevant_files(output_dir, output_str, params=None, ground_truth=Fals
         'log_likelihoods_train',
         'losses_train',
         'epoch_train',
-
+        'alpha_batch_grad_norms',
+        'beta_batch_grad_norms',
+        'config_peak_offsets_batch_grad_norms',
+        'trial_peak_offset_covar_ltri_diag_batch_grad_norms',
+        'trial_peak_offset_covar_ltri_offdiag_batch_grad_norms',
+        'trial_peak_offset_proposal_means_batch_grad_norms',
+        'trial_peak_offset_proposal_sds_batch_grad_norms',
+        'alpha_train_grad_norms',
+        'beta_train_grad_norms',
+        'config_peak_offsets_train_grad_norms',
+        'trial_peak_offset_covar_ltri_diag_train_grad_norms',
+        'trial_peak_offset_covar_ltri_offdiag_train_grad_norms',
+        'trial_peak_offset_proposal_means_train_grad_norms',
+        'trial_peak_offset_proposal_sds_train_grad_norms'
     ]
     if ground_truth:
         test_file_names = [
@@ -497,7 +511,7 @@ def write_losses(list, name, metric, output_dir, starts_out_empty):
     else:
         file_name = metric
     file_name = f'{file_name}_{name.lower()}.json'
-    file_dir = os.path.join(output_dir, file_name)
+    file_dir = os.path.join(output_dir, 'json', file_name)
     if not os.path.exists(file_dir):
         raise Exception(f'File {file_name} has not been created yet')
     with open(file_dir, 'r+b') as file:
@@ -533,9 +547,8 @@ def plot_losses(true_likelihood, output_dir, name, metric, cutoff=0, merge=True)
         epoch_file_name = 'epoch_batch.json'
     else:
         epoch_file_name = 'epoch_train.json'
-    plt_path = os.path.join(output_dir, folder)
-    if not os.path.exists(plt_path):
-        os.makedirs(plt_path)
+    plt_path = os.path.join(output_dir, folder, 'Trajectories')
+    os.makedirs(plt_path, exist_ok=True)
 
     path_info = output_dir.split('Run_')
     parent_dir = path_info[0]
@@ -548,7 +561,7 @@ def plot_losses(true_likelihood, output_dir, name, metric, cutoff=0, merge=True)
     metric_data = []
     epoch_data = []
     for run_fldr in run_folders:
-        output_dir = os.path.join(parent_dir, run_fldr)
+        output_dir = os.path.join(parent_dir, run_fldr, 'json')
         json_path = os.path.join(output_dir, file_name)
         with open(json_path, 'r') as file:
             metric_data.extend(json.load(file))
@@ -575,40 +588,69 @@ def plot_losses(true_likelihood, output_dir, name, metric, cutoff=0, merge=True)
         plt.savefig(os.path.join(plt_path, f'{metric}_{name}_Trajectories.png'))
 
 
-def compute_uncertainty(model, processed_inputs, output_dir, epoch):
-    # check if file exists
-    models_path = os.path.join(output_dir, 'models')
-    file_path = os.path.join(models_path, f'hessian_diagonal_{epoch}.pkl')
-    if os.path.exists(file_path):
-        with open(file_path, 'rb') as f:
-            hessian_diagonal_dict = pickle.load(f)
-        return hessian_diagonal_dict
-    likelihood_term = model.log_likelihood(processed_inputs)
-    param_names = ['beta', 'alpha', 'config_peak_offsets', 'trial_peak_offset_covar_ltri_diag',
-                   'trial_peak_offset_covar_ltri_offdiag']
-    param_values = [p for n, p in model.named_parameters() if n in param_names]
-    first_grads = torch.autograd.grad(likelihood_term, param_values, create_graph=True)
-    hessian_diagonal_dict = {}
-    for i in range(len(first_grads)):
-        print(f'Computing Hessian diagonal for {param_names[i]}')
-        grad = first_grads[i].flatten()  # Flatten gradient tensor to vector
-        second_grad_diag = []
-        num_iter = len(grad)
-        unit_matrix = torch.eye(num_iter, device=model.device)
-        for j in range(num_iter):  # Iterate over each element in the gradient vector
-            # Compute second derivative (diagonal element)
-            second_grad = torch.autograd.grad(grad, param_values[i], unit_matrix[j], retain_graph=True)[0].flatten()[j]
-            # Append second derivative for the corresponding parameter
-            second_grad_diag.append(second_grad)
-            # print an indicator every 1000 iterations
-            if j % 100 == 0:
-                print(f'Iteration {j}/{num_iter}')
-        hessian_diagonal_dict[param_names[i]] = torch.tensor(second_grad_diag).reshape(first_grads[i].shape)
-    # save to disk
-    os.makedirs(models_path, exist_ok=True)
-    with open(file_path, 'wb') as f:
-        pickle.dump(hessian_diagonal_dict, f)
-    return hessian_diagonal_dict
+def write_grad_norms(norms, name, output_dir, starts_out_empty):
+    for param, list in norms.items():
+        file_name = f'{param}_{name.lower()}_grad_norms.json'
+        file_dir = os.path.join(output_dir, 'json', file_name)
+        if not os.path.exists(file_dir):
+            raise Exception(f'File {file_name} has not been created yet')
+        with open(file_dir, 'r+b') as file:
+            _ = file.seek(-1, 2)
+            if file.read(1) != b']':
+                raise ValueError("JSON file must end with a ']'")
+            _ = file.seek(-1, 2)
+            currently_empty = starts_out_empty
+            for item in list:
+                if not currently_empty:
+                    _ = file.write(b',' + json.dumps(item).encode('utf-8'))
+                else:
+                    _ = file.write(json.dumps(item).encode('utf-8'))
+                    currently_empty = 0
+            _ = file.write(b']')
+
+
+def plot_grad_norms(norms_list, output_dir, name, cutoff=0, merge=True):
+    if name.lower() == 'batch':
+        epoch_file_name = 'epoch_batch.json'
+    else:
+        epoch_file_name = 'epoch_train.json'
+    plt_path = os.path.join(output_dir, 'Train', 'Trajectories')
+    os.makedirs(plt_path, exist_ok=True)
+
+    path_info = output_dir.split('Run_')
+    parent_dir = path_info[0]
+    run_number = int(path_info[1])
+    if merge:
+        run_folders = sorted([folder for folder in os.listdir(parent_dir) if int(folder.split('Run_')[-1]) <= run_number])
+    else:
+        run_folders = [f'Run_{run_number}']
+
+    for param in norms_list:
+        file_name = f'{param}_{name.lower()}_grad_norms.json'
+        metric_data = []
+        epoch_data = []
+        for run_fldr in run_folders:
+            output_dir = os.path.join(parent_dir, run_fldr, 'json')
+            json_path = os.path.join(output_dir, file_name)
+            with open(json_path, 'r') as file:
+                metric_data.extend(json.load(file))
+            epoch_json_path = os.path.join(output_dir, epoch_file_name)
+            with open(epoch_json_path, 'r') as file:
+                epoch_data.extend(json.load(file))
+            metric_data = metric_data[cutoff:]
+            epoch_data = epoch_data[cutoff:]
+            plt.figure(figsize=(10, 6))
+            plt.plot(epoch_data, metric_data, label='grad norms')
+            plt.xlabel('Iterations')
+            plt.ylabel('Gradient Norm')
+            plt.title(f'Plot of {param} gradient norms')
+            plt.legend()
+            if cutoff > 0:
+                plt.savefig(os.path.join(plt_path, f'{param}_{name.lower()}_grad_norms_Trajectories_Cutoff{cutoff}.png'))
+            else:
+                plt.savefig(os.path.join(plt_path, f'{param}_{name.lower()}_grad_norms_Trajectories.png'))
+
+
 
 
 def load_tensors(arrays):

@@ -2,7 +2,7 @@ import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from src.EM_Torch.general_functions import create_first_diff_matrix, create_second_diff_matrix
+from src.EM_Torch.general_functions import create_second_diff_matrix
 import numpy as np
 import pandas as pd
 import pickle

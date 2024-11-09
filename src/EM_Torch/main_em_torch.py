@@ -20,6 +20,7 @@ args.n_trials = 15  # R
 args.n_configs = 5  # C
 args.K = 100  # K
 args.A = 3  # A
+args.L = 3  # L
 args.n_trial_samples = 10  # Number of samples to generate for each trial
 
 # args.n_trials = 5
@@ -45,7 +46,6 @@ args.weights = (99, 1)
 # args.tau_config = 500
 args.tau_sigma = 1
 args.tau_sd = 10000
-# args.L = 5
 sd_init = 0.5
 
 if args.eval_interval > args.log_interval:

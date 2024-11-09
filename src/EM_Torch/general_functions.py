@@ -214,6 +214,7 @@ def create_relevant_files(output_dir, output_str, params=None, ground_truth=Fals
         file.write(output_str)
 
     output_dir = os.path.join(output_dir, 'json')
+    os.makedirs(output_dir, exist_ok=True)
     if params is not None:
         with open(os.path.join(output_dir, 'params.json'), 'w') as file:
             json.dump(params, file, indent=4)
@@ -270,8 +271,7 @@ def write_log_and_model(output_str, output_dir, epoch, model, optimizer, schedul
     with open(os.path.join(output_dir, 'log.txt'), 'a') as file:
         file.write(output_str)
     models_path = os.path.join(output_dir, 'models')
-    if not os.path.exists(models_path):
-        os.makedirs(models_path)
+    os.makedirs(models_path, exist_ok=True)
     torch.save(model.state_dict(), os.path.join(models_path, f'model_{epoch}.pth'))
     with open(os.path.join(models_path, f'intermediate_vars_{epoch}.pkl'), 'wb') as f:
         pickle.dump({'W_CKL': model.W_CKL, 'a_CKL': model.a_CKL, 'theta': model.theta, 'pi': model.pi}, f)
@@ -302,38 +302,27 @@ def parse_folder_name(folder_name, parser_key, outputs_folder, load_run):
 def plot_outputs(model, unique_regions, output_dir, folder, epoch, stderr=False):
 
     output_dir = os.path.join(output_dir, folder)
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    os.makedirs(output_dir, exist_ok=True)
     beta_dir = os.path.join(output_dir, 'beta')
-    if not os.path.exists(beta_dir):
-        os.makedirs(beta_dir)
+    os.makedirs(beta_dir, exist_ok=True)
     log_beta_dir = os.path.join(output_dir, 'log_beta')
-    if not os.path.exists(log_beta_dir):
-        os.makedirs(log_beta_dir)
+    os.makedirs(log_beta_dir, exist_ok=True)
     alpha_dir = os.path.join(output_dir, 'alpha')
-    if not os.path.exists(alpha_dir):
-        os.makedirs(alpha_dir)
+    os.makedirs(alpha_dir, exist_ok=True)
     theta_dir = os.path.join(output_dir, 'theta')
-    if not os.path.exists(theta_dir):
-        os.makedirs(theta_dir)
+    os.makedirs(theta_dir, exist_ok=True)
     pi_dir = os.path.join(output_dir, 'pi')
-    if not os.path.exists(pi_dir):
-        os.makedirs(pi_dir)
+    os.makedirs(pi_dir, exist_ok=True)
     configoffset_dir = os.path.join(output_dir, 'configoffset')
-    if not os.path.exists(configoffset_dir):
-        os.makedirs(configoffset_dir)
+    os.makedirs(configoffset_dir, exist_ok=True)
     ltri_dir = os.path.join(output_dir, 'ltri')
-    if not os.path.exists(ltri_dir):
-        os.makedirs(ltri_dir)
+    os.makedirs(ltri_dir, exist_ok=True)
     sigma_dir = os.path.join(output_dir, 'sigma')
-    if not os.path.exists(sigma_dir):
-        os.makedirs(sigma_dir)
+    os.makedirs(sigma_dir, exist_ok=True)
     proposal_means_dir = os.path.join(output_dir, 'proposal_means')
-    if not os.path.exists(proposal_means_dir):
-        os.makedirs(proposal_means_dir)
+    os.makedirs(proposal_means_dir, exist_ok=True)
     trial_sd_dir = os.path.join(output_dir, 'trial_SDs')
-    if not os.path.exists(trial_sd_dir):
-        os.makedirs(trial_sd_dir)
+    os.makedirs(trial_sd_dir, exist_ok=True)
     with torch.no_grad():
         beta = model.unnormalized_log_factors().numpy()
         L = beta.shape[0]
@@ -489,8 +478,7 @@ def plot_initial_clusters(output_dir, data_folder, n_clusters):
 
 def plot_factor_assignments(factor_assignment, output_dir, folder, epoch, annot=True):
     cluster_dir = os.path.join(output_dir, folder)
-    if not os.path.exists(cluster_dir):
-        os.makedirs(cluster_dir)
+    os.makedirs(cluster_dir, exist_ok=True)
     neuron_factor_assignments = np.concatenate(factor_assignment, axis=0)
     plt.figure(figsize=(10, 30))
     sns.heatmap(neuron_factor_assignments, cmap="YlOrRd", annot=annot,

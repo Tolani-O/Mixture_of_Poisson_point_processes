@@ -645,12 +645,12 @@ def softplus(x):
     return np.log(1 + np.exp(x))
 
 
-def inv_softplus(x):
-    return np.log(np.exp(x) - 1)
+def inv_softplus(x, threshold=20):
+    return np.where(x < threshold, np.log(np.exp(x) - 1), x)
 
 
-def inv_softplus_torch(x):
-    return torch.log(torch.exp(x) - 1)
+def inv_softplus_torch(x, threshold=20):
+    return torch.where(x < threshold, torch.log(torch.exp(x) - 1), x)
 
 
 def int_or_str(value):

@@ -31,7 +31,6 @@ args.tau_sigma = 1
 args.tau_sd = 10000
 # args.L = 3
 sd_init = 0.5
-# args.cuda = False
 args.init_with_DTW = False
 args.n_trial_samples = 10  # Number of samples to generate for each trial
 # peak1_left_landmarks = [0.03, 0.03, 0.03]
@@ -142,8 +141,8 @@ if __name__ == "__main__":
     log_likelihoods_train = []
     losses_train = []
     epoch_train = []
-    batch_grad_norms = {name: [] for name, _ in model.named_parameters()}
-    grad_norms = {name: [] for name, _ in model.named_parameters()}
+    batch_grad_norms = {name: [] for name, param in model.named_parameters() if param.requires_grad}
+    grad_norms = {name: [] for name, param in model.named_parameters() if param.requires_grad}
     total_time = 0
     start_time = time.time()
     batch_ct = 0
@@ -160,12 +159,12 @@ if __name__ == "__main__":
         log_likelihoods_batch.append(likelihood_term.item())
         epoch_batch.append(batch_ct)
         model_named_parameters = dict(model.named_parameters())
-        [batch_grad_norms[name].append(param.grad.norm().item()) for name, param in model_named_parameters.items()]
+        [batch_grad_norms[name].append(model_named_parameters[name].grad.norm().item()) for name in batch_grad_norms.keys()]
         batch_ct += 1
         torch.cuda.empty_cache()
         if epoch == start_epoch or epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             with torch.no_grad():
-                [grad_norms[name].append(param.grad.norm().item()) for name, param in model_named_parameters.items()]
+                [grad_norms[name].append(model_named_parameters[name].grad.norm().item()) for name in grad_norms.keys()]
                 penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
                 likelihood_term = model.forward(processed_inputs_train, train=False)
                 true_likelihood_term = model.log_likelihood(processed_inputs_train)
@@ -210,13 +209,13 @@ if __name__ == "__main__":
             write_losses(losses_batch, 'batch', 'losses', output_dir, is_empty)
             write_losses(epoch_batch, 'batch', 'epoch', output_dir, is_empty)
 
-            plot_grad_norms(list(batch_grad_norms.keys()), output_dir, 'Batch', 20)
-            plot_grad_norms(list(grad_norms.keys()), output_dir, 'Train', 10)
-            plot_losses(None, output_dir, 'train', 'true_log_likelihoods', 10)
-            plot_losses(None, output_dir, 'train', 'log_likelihoods', 10)
-            plot_losses(None, output_dir, 'train', 'losses', 10)
-            plot_losses(None, output_dir, 'batch', 'log_likelihoods', 20)
-            plot_losses(None, output_dir, 'batch', 'losses', 20)
+            plot_grad_norms(list(batch_grad_norms.keys()), output_dir, 'batch', 20, False)
+            plot_grad_norms(list(grad_norms.keys()), output_dir, 'train', 10, False)
+            plot_losses(None, output_dir, 'train', 'true_log_likelihoods', 10, False)
+            plot_losses(None, output_dir, 'train', 'log_likelihoods', 10, False)
+            plot_losses(None, output_dir, 'train', 'losses', 10, False)
+            plot_losses(None, output_dir, 'batch', 'log_likelihoods', 20, False)
+            plot_losses(None, output_dir, 'batch', 'losses', 20, False)
 
             true_likelihoods_train = []
             log_likelihoods_batch = []
@@ -225,8 +224,8 @@ if __name__ == "__main__":
             log_likelihoods_train = []
             losses_train = []
             epoch_train = []
-            batch_grad_norms = {name: [] for name, _ in model.named_parameters()}
-            grad_norms = {name: [] for name, _ in model.named_parameters()}
+            batch_grad_norms = {name: [] for name, param in model.named_parameters() if param.requires_grad}
+            grad_norms = {name: [] for name, param in model.named_parameters() if param.requires_grad}
             print(output_str)
             start_time = time.time()
             if scheduler._last_lr[0] < 1e-5:

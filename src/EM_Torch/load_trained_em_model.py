@@ -38,8 +38,7 @@ args.tau_config = float(parser_dict['tauConfig'])
 args.tau_sigma = float(parser_dict['tauSigma'])
 args.tau_sd = float(parser_dict['tauSD'])
 args.n_trial_samples = int(parser_dict['posterior'])  # Number of samples to generate for each trial
-args.load_epoch = -1
-args.load_run = 0
+# args.load_run = 1
 
 if args.eval_interval > args.log_interval:
     args.log_interval = args.eval_interval
@@ -77,7 +76,6 @@ unique_regions = [f'region{i}' for i in range(args.A)]
 
 # initialize the model with ground truth params
 data.load_tensors()
-data.cuda(args.cuda)
 num_factors = data.beta.shape[0]
 model = LikelihoodELBOModel(data.time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
                             peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
@@ -154,6 +152,7 @@ params = {
 }
 create_relevant_files(output_dir, output_str, params=params, ground_truth=True)
 plot_outputs(model, unique_regions, output_dir, 'Train', -1)
+data.cuda(args.cuda)
 print(f'folder_name: {args.folder_name}\n\n')
 print(output_str)
 
@@ -180,8 +179,8 @@ if __name__ == "__main__":
     ltriLkhd_test = []
     gains_train = []
     gains_test = []
-    batch_grad_norms = {name: [] for name, _ in model.named_parameters()}
-    grad_norms = {name: [] for name, _ in model.named_parameters()}
+    batch_grad_norms = {name: [] for name, param in model.named_parameters() if param.requires_grad}
+    grad_norms = {name: [] for name, param in model.named_parameters() if param.requires_grad}
     total_time = 0
     start_time = time.time()
     batch_ct = 0
@@ -198,12 +197,12 @@ if __name__ == "__main__":
         log_likelihoods_batch.append(likelihood_term.item())
         epoch_batch.append(batch_ct)
         model_named_parameters = dict(model.named_parameters())
-        [batch_grad_norms[name].append(param.grad.norm().item()) for name, param in model_named_parameters.items()]
+        [batch_grad_norms[name].append(model_named_parameters[name].grad.norm().item()) for name in batch_grad_norms.keys()]
         batch_ct += 1
         torch.cuda.empty_cache()
         if epoch == start_epoch or epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             with torch.no_grad():
-                [grad_norms[name].append(param.grad.norm().item()) for name, param in model_named_parameters.items()]
+                [grad_norms[name].append(model_named_parameters[name].grad.norm().item()) for name in grad_norms.keys()]
                 penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
                 likelihood_term = model.forward(processed_inputs_train, train=False)
                 true_likelihood_term = model.log_likelihood(processed_inputs_train)
@@ -325,13 +324,13 @@ if __name__ == "__main__":
             write_losses(ltriLkhd_train, 'train', 'ltriLkhd', output_dir, is_empty)
             write_losses(ltriLkhd_test, 'test', 'ltriLkhd', output_dir, is_empty)
 
-            plot_grad_norms(list(batch_grad_norms.keys()), output_dir, 'batch', 20)
+            plot_grad_norms(list(batch_grad_norms.keys()), output_dir, 'batch',  merge=False)
             plot_grad_norms(list(grad_norms.keys()), output_dir, 'train', 10)
             plot_losses(likelihood_ground_truth_train, output_dir, 'train', 'true_log_likelihoods', 10)
             plot_losses(true_ELBO_train, output_dir, 'train', 'log_likelihoods', 10)
             plot_losses(None, output_dir, 'train', 'losses', 10)
-            plot_losses(None, output_dir, 'batch', 'log_likelihoods', 20)
-            plot_losses(None, output_dir, 'batch', 'losses', 20)
+            plot_losses(None, output_dir, 'batch', 'log_likelihoods',  merge=False)
+            plot_losses(None, output_dir, 'batch', 'losses',  merge=False)
             plot_losses(true_ELBO_test, output_dir, 'test', 'log_likelihoods', 10)
             plot_losses(None, output_dir, 'test', 'losses', 10)
             plot_losses(None, output_dir, 'test', 'beta_MSE')
@@ -368,8 +367,8 @@ if __name__ == "__main__":
             ltriLkhd_test = []
             gains_train = []
             gains_test = []
-            batch_grad_norms = {name: [] for name, _ in model.named_parameters()}
-            grad_norms = {name: [] for name, _ in model.named_parameters()}
+            batch_grad_norms = {name: [] for name, param in model.named_parameters() if param.requires_grad}
+            grad_norms = {name: [] for name, param in model.named_parameters() if param.requires_grad}
             print(output_str)
             start_time = time.time()
             if scheduler._last_lr[0] < 1e-5:

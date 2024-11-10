@@ -168,7 +168,7 @@ def plot_latent_coupling(latent_coupling, output_dir):
 
 def load_model_checkpoint(output_dir, load_epoch):
     if load_epoch < 0:
-        with open(os.path.join(output_dir, 'epoch_train.json'), 'r') as f:
+        with open(os.path.join(output_dir, 'json', 'epoch_train.json'), 'r') as f:
             load_epoch = json.load(f)[-1]
     print(f'Loading model from epoch {load_epoch}')
     load_model_dir = os.path.join(output_dir, 'models', f'model_{load_epoch}.pth')
@@ -226,6 +226,7 @@ def create_relevant_files(output_dir, output_str, params=None, ground_truth=Fals
         'losses_batch',
         'epoch_batch',
         'log_likelihoods_train',
+        'true_log_likelihoods_train',
         'losses_train',
         'epoch_train',
         'alpha_batch_grad_norms',
@@ -290,7 +291,7 @@ def parse_folder_name(folder_name, parser_key, outputs_folder, load_run):
                 end_idx = len(folder_name)
             value = folder_name[(start_idx + len(key)):end_idx]
             parsed_values[key] = value
-    load_dir = os.path.join(os.getcwd(), outputs_folder, folder_name, f'Run_{load_run}', 'params.json')
+    load_dir = os.path.join(os.getcwd(), outputs_folder, folder_name, f'Run_{load_run}', 'json', 'params.json')
     if os.path.exists(load_dir):
         with open(load_dir, 'r') as f:
             loaded_params = json.load(f)
@@ -491,15 +492,7 @@ def plot_factor_assignments(factor_assignment, output_dir, folder, epoch, annot=
 
 
 def write_losses(list, name, metric, output_dir, starts_out_empty):
-    if 'likelihood' in metric.lower():
-        file_name = 'log_likelihoods'
-    elif 'loss' in metric.lower():
-        file_name = 'losses'
-    elif 'epoch' in metric.lower():
-        file_name = 'epoch'
-    else:
-        file_name = metric
-    file_name = f'{file_name}_{name.lower()}.json'
+    file_name = f'{metric}_{name}.json'
     file_dir = os.path.join(output_dir, 'json', file_name)
     if not os.path.exists(file_dir):
         raise Exception(f'File {file_name} has not been created yet')
@@ -519,20 +512,12 @@ def write_losses(list, name, metric, output_dir, starts_out_empty):
 
 
 def plot_losses(true_likelihood, output_dir, name, metric, cutoff=0, merge=True):
-    if 'likelihood' in metric.lower():
-        file_name = 'log_likelihoods'
-    elif 'loss' in metric.lower():
-        file_name = 'losses'
-    elif 'epoch' in metric.lower():
-        file_name = 'epoch'
-    else:
-        file_name = metric
-    file_name = f'{file_name}_{name.lower()}.json'
-    if name.lower()=='test':
+    file_name = f'{metric}_{name}.json'
+    if name == 'test':
         folder = 'Test'
     else:
         folder = 'Train'
-    if name.lower()=='batch':
+    if name == 'batch':
         epoch_file_name = 'epoch_batch.json'
     else:
         epoch_file_name = 'epoch_train.json'
@@ -579,7 +564,7 @@ def plot_losses(true_likelihood, output_dir, name, metric, cutoff=0, merge=True)
 
 def write_grad_norms(norms, name, output_dir, starts_out_empty):
     for param, list in norms.items():
-        file_name = f'{param}_{name.lower()}_grad_norms.json'
+        file_name = f'{param}_{name}_grad_norms.json'
         file_dir = os.path.join(output_dir, 'json', file_name)
         if not os.path.exists(file_dir):
             raise Exception(f'File {file_name} has not been created yet')
@@ -599,7 +584,7 @@ def write_grad_norms(norms, name, output_dir, starts_out_empty):
 
 
 def plot_grad_norms(norms_list, output_dir, name, cutoff=0, merge=True):
-    if name.lower() == 'batch':
+    if name == 'batch':
         epoch_file_name = 'epoch_batch.json'
     else:
         epoch_file_name = 'epoch_train.json'
@@ -615,7 +600,7 @@ def plot_grad_norms(norms_list, output_dir, name, cutoff=0, merge=True):
         run_folders = [f'Run_{run_number}']
 
     for param in norms_list:
-        file_name = f'{param}_{name.lower()}_grad_norms.json'
+        file_name = f'{param}_{name}_grad_norms.json'
         metric_data = []
         epoch_data = []
         for run_fldr in run_folders:
@@ -635,9 +620,9 @@ def plot_grad_norms(norms_list, output_dir, name, cutoff=0, merge=True):
             plt.title(f'Plot of {param} gradient norms')
             plt.legend()
             if cutoff > 0:
-                plt.savefig(os.path.join(plt_path, f'{param}_{name.lower()}_grad_norms_Trajectories_Cutoff{cutoff}.png'))
+                plt.savefig(os.path.join(plt_path, f'{param}_{name}_grad_norms_Trajectories_Cutoff{cutoff}.png'))
             else:
-                plt.savefig(os.path.join(plt_path, f'{param}_{name.lower()}_grad_norms_Trajectories.png'))
+                plt.savefig(os.path.join(plt_path, f'{param}_{name}_grad_norms_Trajectories.png'))
 
 
 

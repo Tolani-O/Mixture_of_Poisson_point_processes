@@ -135,6 +135,7 @@ print(output_str)
 
 # torch.autograd.set_detect_anomaly(True)
 if __name__ == "__main__":
+    true_likelihoods_train = []
     log_likelihoods_batch = []
     losses_batch = []
     epoch_batch = []
@@ -167,9 +168,11 @@ if __name__ == "__main__":
                 [grad_norms[name].append(param.grad.norm().item()) for name, param in model_named_parameters.items()]
                 penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
                 likelihood_term = model.forward(processed_inputs_train, train=False)
+                true_likelihood_term = model.log_likelihood(processed_inputs_train)
                 model_factor_assignment_train, model_neuron_gains_train = model.infer_latent_variables()
                 losses_train.append((likelihood_term + penalty_term).item())
                 log_likelihoods_train.append((1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * likelihood_term.item())
+                true_likelihoods_train.append((1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * true_likelihood_term.item())
                 epoch_train.append(epoch)
                 scheduler.step(log_likelihoods_train[-1])
         if epoch == start_epoch or epoch % args.log_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
@@ -196,20 +199,26 @@ if __name__ == "__main__":
             write_log_and_model(output_str, output_dir, epoch, model, optimizer, scheduler)
             plot_outputs(model, unique_regions, output_dir, 'Train', epoch)
             is_empty = epoch == start_epoch
-            write_grad_norms(batch_grad_norms, 'Batch', output_dir, is_empty)
-            write_grad_norms(grad_norms, 'Train', output_dir, is_empty)
-            write_losses(log_likelihoods_train, 'Train', 'Likelihood', output_dir, is_empty)
-            write_losses(losses_train, 'Train', 'Loss', output_dir, is_empty)
-            write_losses(epoch_train, 'Train', 'Epoch', output_dir, is_empty)
-            write_losses(log_likelihoods_batch, 'Batch', 'Likelihood', output_dir, is_empty)
-            write_losses(losses_batch, 'Batch', 'Loss', output_dir, is_empty)
-            write_losses(epoch_batch, 'Batch', 'Epoch', output_dir, is_empty)
+
+            write_grad_norms(batch_grad_norms, 'batch', output_dir, is_empty)
+            write_grad_norms(grad_norms, 'train', output_dir, is_empty)
+            write_losses(true_likelihoods_train, 'train', 'true_log_likelihoods', output_dir, is_empty)
+            write_losses(log_likelihoods_train, 'train', 'log_likelihoods', output_dir, is_empty)
+            write_losses(losses_train, 'train', 'losses', output_dir, is_empty)
+            write_losses(epoch_train, 'train', 'epoch', output_dir, is_empty)
+            write_losses(log_likelihoods_batch, 'batch', 'log_likelihoods', output_dir, is_empty)
+            write_losses(losses_batch, 'batch', 'losses', output_dir, is_empty)
+            write_losses(epoch_batch, 'batch', 'epoch', output_dir, is_empty)
+
             plot_grad_norms(list(batch_grad_norms.keys()), output_dir, 'Batch', 20)
             plot_grad_norms(list(grad_norms.keys()), output_dir, 'Train', 10)
-            plot_losses(None, output_dir, 'Train', 'Likelihood', 10)
-            plot_losses(None, output_dir, 'Train', 'Loss', 10)
-            plot_losses(None, output_dir, 'Batch', 'Likelihood', 20)
-            plot_losses(None, output_dir, 'Batch', 'Loss', 20)
+            plot_losses(None, output_dir, 'train', 'true_log_likelihoods', 10)
+            plot_losses(None, output_dir, 'train', 'log_likelihoods', 10)
+            plot_losses(None, output_dir, 'train', 'losses', 10)
+            plot_losses(None, output_dir, 'batch', 'log_likelihoods', 20)
+            plot_losses(None, output_dir, 'batch', 'losses', 20)
+
+            true_likelihoods_train = []
             log_likelihoods_batch = []
             losses_batch = []
             epoch_batch = []

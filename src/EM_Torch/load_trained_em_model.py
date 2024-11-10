@@ -5,7 +5,7 @@ sys.path.append(os.path.abspath('.'))
 from src.EM_Torch.simulate_data_multitrial import DataAnalyzer
 from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
 from src.EM_Torch.general_functions import parse_folder_name, load_model_checkpoint, create_relevant_files, get_parser, plot_outputs, \
-    write_log_and_model, write_losses, plot_losses, load_tensors, to_cuda, \
+    write_log_and_model, write_losses, plot_losses, write_grad_norms, plot_grad_norms, load_tensors, to_cuda, \
     inv_softplus_torch, compute_uncertainty, preprocess_input_data
 import numpy as np
 import time
@@ -77,6 +77,7 @@ unique_regions = [f'region{i}' for i in range(args.A)]
 
 # initialize the model with ground truth params
 data.load_tensors()
+data.cuda(args.cuda)
 num_factors = data.beta.shape[0]
 model = LikelihoodELBOModel(data.time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
                             peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
@@ -98,8 +99,10 @@ with torch.no_grad():
                             W_CKL=factor_assignment_onehot_train,
                             init='')
     true_ELBO_train = model.forward(processed_inputs_train, update_membership=False, train=False)
+    likelihood_ground_truth_train = model.log_likelihood(processed_inputs_train, E_step=True)
 true_ELBO_train = (1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * true_ELBO_train.item()
 true_ELBO_test = (1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * true_ELBO_test.item()
+likelihood_ground_truth_train = (1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * likelihood_ground_truth_train.item()
 ltri_matrix = model.ltri_matix()
 true_offset_penalty_train = (1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_train, ltri_matrix).sum().item()
 true_offset_penalty_test = (1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_test, ltri_matrix).sum().item()
@@ -151,12 +154,12 @@ params = {
 }
 create_relevant_files(output_dir, output_str, params=params, ground_truth=True)
 plot_outputs(model, unique_regions, output_dir, 'Train', -1)
-data.cuda(args.cuda)
 print(f'folder_name: {args.folder_name}\n\n')
 print(output_str)
 
 # torch.autograd.set_detect_anomaly(True)
 if __name__ == "__main__":
+    true_likelihoods_train = []
     log_likelihoods_batch = []
     losses_batch = []
     epoch_batch = []
@@ -177,6 +180,8 @@ if __name__ == "__main__":
     ltriLkhd_test = []
     gains_train = []
     gains_test = []
+    batch_grad_norms = {name: [] for name, _ in model.named_parameters()}
+    grad_norms = {name: [] for name, _ in model.named_parameters()}
     total_time = 0
     start_time = time.time()
     batch_ct = 0
@@ -192,18 +197,23 @@ if __name__ == "__main__":
         losses_batch.append((likelihood_term + penalty_term).item())
         log_likelihoods_batch.append(likelihood_term.item())
         epoch_batch.append(batch_ct)
+        model_named_parameters = dict(model.named_parameters())
+        [batch_grad_norms[name].append(param.grad.norm().item()) for name, param in model_named_parameters.items()]
         batch_ct += 1
         torch.cuda.empty_cache()
         if epoch == start_epoch or epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             with torch.no_grad():
+                [grad_norms[name].append(param.grad.norm().item()) for name, param in model_named_parameters.items()]
                 penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
                 likelihood_term = model.forward(processed_inputs_train, train=False)
+                true_likelihood_term = model.log_likelihood(processed_inputs_train)
                 model_factor_assignment_train, model_neuron_gains_train = model.infer_latent_variables()
                 likelihood_term_test = model.forward(processed_inputs_test, train=False)
                 model_factor_assignment_test, model_neuron_gains_test = model.infer_latent_variables()
 
                 losses_train.append((likelihood_term + penalty_term).item())
                 log_likelihoods_train.append((1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * likelihood_term.item())
+                true_likelihoods_train.append((1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * true_likelihood_term.item())
                 losses_test.append((likelihood_term_test + penalty_term).item())
                 log_likelihoods_test.append((1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * likelihood_term_test.item())
                 epoch_train.append(epoch)
@@ -290,44 +300,54 @@ if __name__ == "__main__":
             write_log_and_model(output_str, output_dir, epoch, model, optimizer, scheduler)
             plot_outputs(model, unique_regions, output_dir, 'Train', epoch)
             is_empty = epoch == start_epoch
-            write_losses(log_likelihoods_train, 'Train', 'Likelihood', output_dir, is_empty)
-            write_losses(losses_train, 'Train', 'Loss', output_dir, is_empty)
-            write_losses(epoch_train, 'Train', 'Epoch', output_dir, is_empty)
-            write_losses(log_likelihoods_batch, 'Batch', 'Likelihood', output_dir, is_empty)
-            write_losses(losses_batch, 'Batch', 'Loss', output_dir, is_empty)
-            write_losses(epoch_batch, 'Batch', 'Epoch', output_dir, is_empty)
-            write_losses(log_likelihoods_test, 'Test', 'Likelihood', output_dir, is_empty)
-            write_losses(losses_test, 'Test', 'Loss', output_dir, is_empty)
-            write_losses(beta_mses, 'Test', 'beta_MSE', output_dir, is_empty)
-            write_losses(alpha_mses, 'Test', 'alpha_MSE', output_dir, is_empty)
-            write_losses(theta_mses, 'Test', 'theta_MSE', output_dir, is_empty)
-            write_losses(pi_mses, 'Test', 'pi_MSE', output_dir, is_empty)
-            write_losses(config_mses, 'Test', 'configoffset_MSE', output_dir, is_empty)
-            write_losses(ltri_mses, 'Test', 'ltri_MSE', output_dir, is_empty)
-            write_losses(Sigma_mses, 'Test', 'Sigma_MSE', output_dir, is_empty)
-            write_losses(proposal_means_mses, 'Test', 'proposal_means_MSE', output_dir, is_empty)
-            write_losses(ltriLkhd_train, 'Train', 'ltriLkhd', output_dir, is_empty)
-            write_losses(ltriLkhd_test, 'Test', 'ltriLkhd', output_dir, is_empty)
-            write_losses(gains_train, 'Train', 'gains_MSE', output_dir, is_empty)
-            write_losses(gains_test, 'Test', 'gains_MSE', output_dir, is_empty)
-            plot_losses(true_ELBO_train, output_dir, 'Train', 'Likelihood', 10)
-            plot_losses(None, output_dir, 'Train', 'Loss', 10)
-            plot_losses(None, output_dir, 'Batch', 'Likelihood', 20)
-            plot_losses(None, output_dir, 'Batch', 'Loss', 20)
-            plot_losses(true_ELBO_test, output_dir, 'Test', 'Likelihood', 10)
-            plot_losses(None, output_dir, 'Test', 'Loss', 10)
-            plot_losses(None, output_dir, 'Test', 'beta_MSE')
-            plot_losses(None, output_dir, 'Test', 'alpha_MSE')
-            plot_losses(None, output_dir, 'Test', 'theta_MSE')
-            plot_losses(None, output_dir, 'Test', 'pi_MSE')
-            plot_losses(None, output_dir, 'Test', 'configoffset_MSE')
-            plot_losses(None, output_dir, 'Test', 'ltri_MSE')
-            plot_losses(None, output_dir, 'Test', 'Sigma_MSE')
-            plot_losses(None, output_dir, 'Test', 'proposal_means_MSE')
-            plot_losses(true_offset_penalty_train, output_dir, 'Train', 'ltriLkhd', 10)
-            plot_losses(true_offset_penalty_test, output_dir, 'Test', 'ltriLkhd', 10)
-            plot_losses(None, output_dir, 'Train', 'gains_MSE')
-            plot_losses(None, output_dir, 'Test', 'gains_MSE')
+
+            write_grad_norms(batch_grad_norms, 'batch', output_dir, is_empty)
+            write_grad_norms(grad_norms, 'train', output_dir, is_empty)
+            write_losses(true_likelihoods_train, 'train', 'true_log_likelihoods', output_dir, is_empty)
+            write_losses(log_likelihoods_train, 'train', 'log_likelihoods', output_dir, is_empty)
+            write_losses(losses_train, 'train', 'losses', output_dir, is_empty)
+            write_losses(epoch_train, 'train', 'epoch', output_dir, is_empty)
+            write_losses(log_likelihoods_batch, 'batch', 'log_likelihoods', output_dir, is_empty)
+            write_losses(losses_batch, 'batch', 'losses', output_dir, is_empty)
+            write_losses(epoch_batch, 'batch', 'epoch', output_dir, is_empty)
+            write_losses(log_likelihoods_test, 'test', 'log_likelihoods', output_dir, is_empty)
+            write_losses(losses_test, 'test', 'losses', output_dir, is_empty)
+            write_losses(beta_mses, 'test', 'beta_MSE', output_dir, is_empty)
+            write_losses(alpha_mses, 'test', 'alpha_MSE', output_dir, is_empty)
+            write_losses(theta_mses, 'test', 'theta_MSE', output_dir, is_empty)
+            write_losses(pi_mses, 'test', 'pi_MSE', output_dir, is_empty)
+            write_losses(config_mses, 'test', 'configoffset_MSE', output_dir, is_empty)
+            write_losses(ltri_mses, 'test', 'ltri_MSE', output_dir, is_empty)
+            write_losses(Sigma_mses, 'test', 'Sigma_MSE', output_dir, is_empty)
+            write_losses(proposal_means_mses, 'test', 'proposal_means_MSE', output_dir, is_empty)
+            write_losses(gains_train, 'train', 'gains_MSE', output_dir, is_empty)
+            write_losses(gains_test, 'test', 'gains_MSE', output_dir, is_empty)
+            write_losses(ltriLkhd_train, 'train', 'ltriLkhd', output_dir, is_empty)
+            write_losses(ltriLkhd_test, 'test', 'ltriLkhd', output_dir, is_empty)
+
+            plot_grad_norms(list(batch_grad_norms.keys()), output_dir, 'batch', 20)
+            plot_grad_norms(list(grad_norms.keys()), output_dir, 'train', 10)
+            plot_losses(likelihood_ground_truth_train, output_dir, 'train', 'true_log_likelihoods', 10)
+            plot_losses(true_ELBO_train, output_dir, 'train', 'log_likelihoods', 10)
+            plot_losses(None, output_dir, 'train', 'losses', 10)
+            plot_losses(None, output_dir, 'batch', 'log_likelihoods', 20)
+            plot_losses(None, output_dir, 'batch', 'losses', 20)
+            plot_losses(true_ELBO_test, output_dir, 'test', 'log_likelihoods', 10)
+            plot_losses(None, output_dir, 'test', 'losses', 10)
+            plot_losses(None, output_dir, 'test', 'beta_MSE')
+            plot_losses(None, output_dir, 'test', 'alpha_MSE')
+            plot_losses(None, output_dir, 'test', 'theta_MSE')
+            plot_losses(None, output_dir, 'test', 'pi_MSE')
+            plot_losses(None, output_dir, 'test', 'configoffset_MSE')
+            plot_losses(None, output_dir, 'test', 'ltri_MSE')
+            plot_losses(None, output_dir, 'test', 'Sigma_MSE')
+            plot_losses(None, output_dir, 'test', 'proposal_means_MSE')
+            plot_losses(None, output_dir, 'train', 'gains_MSE')
+            plot_losses(None, output_dir, 'test', 'gains_MSE')
+            plot_losses(true_offset_penalty_train, output_dir, 'train', 'ltriLkhd', 10)
+            plot_losses(true_offset_penalty_test, output_dir, 'test', 'ltriLkhd', 10)
+
+            true_likelihoods_train = []
             log_likelihoods_batch = []
             losses_batch = []
             epoch_batch = []
@@ -348,6 +368,8 @@ if __name__ == "__main__":
             ltriLkhd_test = []
             gains_train = []
             gains_test = []
+            batch_grad_norms = {name: [] for name, _ in model.named_parameters()}
+            grad_norms = {name: [] for name, _ in model.named_parameters()}
             print(output_str)
             start_time = time.time()
             if scheduler._last_lr[0] < 1e-5:

@@ -67,7 +67,7 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def init_random(self):
-        self.beta = nn.Parameter(torch.log(torch.randn(self.n_factors, self.time.shape[0], dtype=torch.float64)))
+        self.beta = nn.Parameter(torch.log(torch.randn(self.n_factors, self.time.shape[0]-1, dtype=torch.float64)))
         self.alpha = nn.Parameter(torch.randn(self.n_factors, dtype=torch.float64))
         n_dims = 2 * self.n_factors
         num_elements = n_dims * (n_dims - 1) // 2
@@ -81,7 +81,7 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def init_zero(self):
-        self.beta = nn.Parameter(torch.zeros(self.n_factors, self.time.shape[0], dtype=torch.float64))
+        self.beta = nn.Parameter(torch.zeros(self.n_factors, self.time.shape[0]-1, dtype=torch.float64))
         self.alpha = nn.Parameter(torch.ones(self.n_factors, dtype=torch.float64))
         n_dims = 2 * self.n_factors
         num_elements = n_dims * (n_dims - 1) // 2
@@ -110,6 +110,7 @@ class LikelihoodELBOModel(nn.Module):
         elif init == 'random':
             self.init_random()
         if beta is not None:
+            beta = (beta - beta[:, 0].unsqueeze(1).expand_as(beta))[:, 1:]
             self.beta = nn.Parameter(beta)
         if alpha is not None:
             self.alpha = nn.Parameter(alpha)
@@ -232,7 +233,8 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def unnormalized_log_factors(self):
-        return self.beta - self.beta[:, 0].unsqueeze(1).expand_as(self.beta)
+        # return self.beta - self.beta[:, 0].unsqueeze(1).expand_as(self.beta)
+        return torch.cat([torch.zeros(self.n_factors, 1, device=self.device, dtype=torch.float64), self.beta], dim=1)
 
 
     def update_params(self, Y_sum_rt_plus_alpha, neuron_factor_access, R):
@@ -553,11 +555,11 @@ class LikelihoodELBOModel(nn.Module):
         return self.ELBO_term(processed_inputs)
 
 
-    def log_likelihood(self, processed_inputs):
+    def log_likelihood(self, processed_inputs, E_step=False):
         self.train(False)
-        # trial_peak_offset_proposal_samples 1 x R x C x 2AL
-        processed_inputs = self.prepare_inputs(processed_inputs)
-        self.E_step_posterior_updates(processed_inputs)
+        if E_step:
+            processed_inputs = self.prepare_inputs(processed_inputs)
+            self.E_step_posterior_updates(processed_inputs)
         # log_P  C x R
         log_P = -self.Sigma_log_likelihood(self.trial_peak_offset_proposal_means.unsqueeze(0), self.ltri_matix()).squeeze()
         log_likelihood = torch.sum(self.log_sum_exp_U_tensor) + torch.sum(log_P)

@@ -301,8 +301,9 @@ def parse_folder_name(folder_name, parser_key, outputs_folder, load_run):
     return parsed_values
 
 
-def plot_outputs(model, unique_regions, output_dir, folder, epoch, stderr=False):
+def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None):
 
+    stderr = se_dict is not None
     output_dir = os.path.join(output_dir, folder)
     os.makedirs(output_dir, exist_ok=True)
     beta_dir = os.path.join(output_dir, 'beta')
@@ -328,14 +329,23 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, stderr=False)
     with torch.no_grad():
         beta = model.unnormalized_log_factors().numpy()
         L = beta.shape[0]
-        global_max = np.max(beta)
-        upper_limit = global_max + 0.1
-        global_min = np.min(beta)
-        lower_limit = global_min - 0.01
+        if stderr:
+            beta_se = torch.cat([torch.zeros(L, 1), se_dict['beta']], dim=1).numpy() * 1.96
+            beta_ucl = beta + beta_se
+            beta_lcl = beta - beta_se
+        upper_limit = np.max(beta) + 0.1
+        lower_limit = np.min(beta) - 0.01
         plt.figure(figsize=(10, L*5))
         for l in range(L):
             plt.subplot(L, 1, l + 1)
-            plt.plot(beta[l, :], label=f'Log Factor [{l}, :]')
+            plt.plot(model.time, beta[l, :], label=f'Log Factor {l}')
+            if stderr:
+                plt.fill_between(model.time, beta_ucl[l, :], beta_lcl[l, :], color='grey', alpha=0.3,  label='Standard Error')
+                plt.plot(model.time, beta_ucl[l, :], linestyle='--', color='black', alpha=0.07)
+                plt.plot(model.time, beta_lcl[l, :], linestyle='--', color='black', alpha=0.07)
+                plt.legend()
+            plt.xlabel('Index')
+            plt.ylabel('Value')
             plt.title(f'Log Factor [{l}, :]')
             plt.ylim(bottom=lower_limit, top=upper_limit)
         plt.tight_layout()
@@ -348,16 +358,32 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, stderr=False)
         else:
             plot_factor_assignments(model.W_CKL.numpy(), output_dir, 'cluster', epoch, False)
             W_L = np.round((torch.sum(model.W_CKL, dim=(0, 1))/model.n_configs).numpy(), 1)
-        latent_factors = torch.softmax(model.unnormalized_log_factors(), dim=-1).numpy()
-        global_max = np.max(latent_factors)
-        upper_limit = global_max + 0.005
+        beta = model.unnormalized_log_factors()
+        latent_factors = torch.softmax(beta, dim=-1)
+        upper_limit = 0.005
+        if stderr:
+            beta_se = torch.cat([torch.zeros(latent_factors.shape[0], 1), se_dict['beta']], dim=1)
+            softmax_grad = latent_factors * (1 - latent_factors)
+            latent_factors_se = (torch.abs(softmax_grad) * beta_se).numpy() * 1.96
+            factor_ucl = latent_factors.numpy() + latent_factors_se
+            factor_lcl = latent_factors.numpy() - latent_factors_se
+            upper_limit = 0.01
+        latent_factors = latent_factors.numpy()
+        upper_limit += np.max(latent_factors)
         plt.figure(figsize=(model.n_areas*10, int(model.n_factors/model.n_areas)*5))
         L = np.arange(model.n_factors).reshape(model.n_areas, -1).T.flatten()
         c = 0
         factors_per_area = int(model.n_factors/model.n_areas)
         for l in L:
             plt.subplot(factors_per_area, model.n_areas, c + 1)
-            plt.plot(model.time, latent_factors[l, :], label=f'Factor [{l}, :]', alpha=np.max([pi[l], 0.7]), linewidth=np.exp(2.5*pi[l]))
+            plt.plot(model.time, latent_factors[l, :], alpha=np.max([pi[l], 0.7]), linewidth=np.exp(2.5*pi[l]))
+            if stderr:
+                plt.fill_between(model.time, factor_ucl[l, :], factor_lcl[l, :], color='grey', alpha=0.3, label='Standard Error')
+                plt.plot(model.time, factor_ucl[l, :], linestyle='--', color='black', alpha=0.07)
+                plt.plot(model.time, factor_lcl[l, :], linestyle='--', color='black', alpha=0.07)
+                plt.legend()
+            plt.xlabel('Intensity')
+            plt.ylabel('Trial time course (ms)')
             plt.vlines(x=model.time[torch.tensor([
                 model.peak1_left_landmarks[l], model.peak1_right_landmarks[l],
                 model.peak2_left_landmarks[l], model.peak2_right_landmarks[l]])],
@@ -625,6 +651,65 @@ def plot_grad_norms(norms_list, output_dir, name, cutoff=0, merge=True):
                 plt.savefig(os.path.join(plt_path, f'{param}_{name}_grad_norms_Trajectories.png'))
 
 
+def compute_uncertainty(model, processed_inputs, output_dir, epoch):
+    # check if file exists
+    models_path = os.path.join(output_dir, 'models')
+    os.makedirs(models_path, exist_ok=True)
+    file_path = os.path.join(models_path, f'se_dict_{epoch}.pkl')
+    if os.path.exists(file_path):
+        with open(file_path, 'rb') as f:
+            se_dict = pickle.load(f)
+        return se_dict
+
+    likelihood_term = model.log_likelihood(processed_inputs, E_step=True)
+    param_names = ['alpha', 'beta', 'config_peak_offsets', 'trial_peak_offset_covar_ltri_diag',
+                   'trial_peak_offset_covar_ltri_offdiag', 'trial_peak_offset_proposal_means']
+    model_named_parameters = dict(model.named_parameters())
+    param_values = {n: model_named_parameters[n] for n in param_names}
+    first_grads = {n: v.flatten() for n, v in zip(param_names, torch.autograd.grad(likelihood_term, list(param_values.values()), create_graph=True))}
+    outputs = {}
+
+    def compute_hessian(param_name1, param_name2):
+        w_r_t1 = first_grads[param_name1]
+        num_iter = len(w_r_t1)
+        unit_matrix = torch.eye(num_iter, device=model.device)
+        w_r_t2 = param_values[param_name2]
+        print(f'Computing Hessian w.r.t {param_name1}, {param_name2}')
+        second_grads = []
+        for i in range(num_iter):
+            second_grads.append((torch.autograd.grad(w_r_t1, w_r_t2, unit_matrix[i], retain_graph=True)[0]).flatten()[None, :])
+        outputs[f'{param_name1}_{param_name2}'] = torch.cat(second_grads, dim=0)
+
+    compute_hessian('alpha', 'alpha')
+    compute_hessian('alpha', 'beta')
+    compute_hessian('beta', 'beta')
+    compute_hessian('trial_peak_offset_covar_ltri_diag', 'trial_peak_offset_covar_ltri_diag')
+    compute_hessian('trial_peak_offset_covar_ltri_diag', 'trial_peak_offset_covar_ltri_offdiag')
+    compute_hessian('trial_peak_offset_covar_ltri_offdiag', 'trial_peak_offset_covar_ltri_offdiag')
+
+    alpha_beta_hess = torch.cat((torch.cat((outputs['alpha_alpha'], outputs['alpha_beta']), dim=1),
+                                 torch.cat((outputs['alpha_beta'].t(), outputs['beta_beta']), dim=1)), dim=0)
+    alpha_beta_hess = alpha_beta_hess + torch.eye(alpha_beta_hess.shape[0], device=model.device) * 1e-6
+
+    ltri_hess = torch.cat(
+        (torch.cat((outputs['trial_peak_offset_covar_ltri_diag_trial_peak_offset_covar_ltri_diag'],
+                    outputs['trial_peak_offset_covar_ltri_diag_trial_peak_offset_covar_ltri_offdiag']), dim=1),
+         torch.cat((outputs['trial_peak_offset_covar_ltri_diag_trial_peak_offset_covar_ltri_offdiag'].t(),
+                    outputs['trial_peak_offset_covar_ltri_offdiag_trial_peak_offset_covar_ltri_offdiag']), dim=1)), dim=0)
+    ltri_hess = ltri_hess + torch.eye(ltri_hess.shape[0], device=model.device) * 1e-6
+
+    alpha_beta_inv = torch.abs(torch.round(torch.inverse(-alpha_beta_hess).diag(), decimals=2))
+    ltri_inv = torch.abs(torch.round(torch.inverse(-ltri_hess).diag(), decimals=2))
+
+    alpha_se = torch.sqrt(alpha_beta_inv[:param_values['alpha'].shape[0]]) #  .numpy()[:,None]
+    beta_se = torch.sqrt(alpha_beta_inv[param_values['alpha'].shape[0]:]).reshape(*param_values['beta'].shape) #  .numpy().T
+    ltri_diag_se = torch.sqrt(ltri_inv[:param_values['trial_peak_offset_covar_ltri_diag'].shape[0]]) #  .numpy()[:,None]
+    ltri_offdiag_se = torch.sqrt(ltri_inv[param_values['trial_peak_offset_covar_ltri_diag'].shape[0]:]) #  .numpy()[:,None]
+
+    se_dict = {'alpha': alpha_se.cpu(), 'beta': beta_se.cpu(), 'ltri_diag': ltri_diag_se.cpu(), 'ltri_offdiag': ltri_offdiag_se.cpu()}
+    with open(file_path, 'wb') as f:
+        pickle.dump(se_dict, f)
+    return se_dict
 
 
 def load_tensors(arrays):

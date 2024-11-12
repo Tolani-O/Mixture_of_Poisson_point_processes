@@ -116,9 +116,9 @@ model.load_state_dict(model_state)
 model.W_CKL, model.a_CKL, model.theta, model.pi = W_CKL, a_CKL, theta, pi
 if args.num_epochs < 0:
     model.cuda(move_to_cuda=args.cuda)
-    hessian = compute_uncertainty(model, processed_inputs_train, output_dir, args.load_epoch)
+    se_dict = compute_uncertainty(model, processed_inputs_train, output_dir, args.load_epoch)
     model.cpu()
-    plot_outputs(model, unique_regions, output_dir, 'Train', args.load_epoch, stderr=True)
+    plot_outputs(model, unique_regions, output_dir, 'Train', args.load_epoch, se_dict)
     sys.exit()
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 optimizer.load_state_dict(optimizer_state)

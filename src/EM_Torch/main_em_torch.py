@@ -88,21 +88,21 @@ num_factors = data.beta.shape[0]
 model = LikelihoodELBOModel(data.time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
                             peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
                             temperature=args.temperature, weights=args.weights)
-model.init_ground_truth(beta=data.beta,
-                        alpha=inv_softplus_torch(data.alpha),
-                        config_peak_offsets=data.config_peak_offsets,
-                        trial_peak_offset_covar_ltri=data.trial_peak_offset_covar_ltri,
-                        theta=data.theta,
-                        pi=F.softmax(data.pi.reshape(args.A, -1), dim=1).flatten(),
+model.init_ground_truth(beta=data.beta.clone(),
+                        alpha=inv_softplus_torch(data.alpha.clone()),
+                        config_peak_offsets=data.config_peak_offsets.clone(),
+                        trial_peak_offset_covar_ltri=data.trial_peak_offset_covar_ltri.clone(),
+                        theta=data.theta.clone(),
+                        pi=F.softmax(data.pi.clone().reshape(args.A, -1), dim=1).flatten(),
                         sd_init=1e-5)
 model.cuda(move_to_cuda=args.cuda)
 with torch.no_grad():
-    model.init_ground_truth(trial_peak_offset_proposal_means=trial_offsets_test.squeeze(),
-                            W_CKL=factor_assignment_onehot_test,
+    model.init_ground_truth(trial_peak_offset_proposal_means=trial_offsets_test.clone().squeeze(),
+                            W_CKL=factor_assignment_onehot_test.clone(),
                             init='')
     true_ELBO_test = model.forward(processed_inputs_test, update_membership=False, train=False)
-    model.init_ground_truth(trial_peak_offset_proposal_means=trial_offsets_train.squeeze(),
-                            W_CKL=factor_assignment_onehot_train,
+    model.init_ground_truth(trial_peak_offset_proposal_means=trial_offsets_train.clone().squeeze(),
+                            W_CKL=factor_assignment_onehot_train.clone(),
                             init='')
     true_ELBO_train = model.forward(processed_inputs_train, update_membership=False, train=False)
     likelihood_ground_truth_train = model.log_likelihood(processed_inputs_train, E_step=True)
@@ -123,14 +123,14 @@ os.makedirs(output_dir, exist_ok=True)
 plot_outputs(model, unique_regions, output_dir, 'Train', -2)
 # Initialize the model
 if init == 'True':
-    model.init_ground_truth(beta=data.beta,
-                            alpha=inv_softplus_torch(data.alpha),
-                            config_peak_offsets=data.config_peak_offsets,
-                            trial_peak_offset_proposal_means=trial_offsets_train.squeeze().cpu(),
-                            trial_peak_offset_covar_ltri=data.trial_peak_offset_covar_ltri,
-                            W_CKL=factor_assignment_onehot_train.cpu(),
-                            theta=data.theta,
-                            pi=F.softmax(data.pi.reshape(args.A, -1), dim=1).flatten(),
+    model.init_ground_truth(beta=data.beta.clone(),
+                            alpha=inv_softplus_torch(data.alpha.clone()),
+                            config_peak_offsets=data.config_peak_offsets.clone(),
+                            trial_peak_offset_proposal_means=trial_offsets_train.clone().squeeze().cpu(),
+                            trial_peak_offset_covar_ltri=data.trial_peak_offset_covar_ltri.clone(),
+                            W_CKL=factor_assignment_onehot_train.clone().cpu(),
+                            theta=data.theta.clone(),
+                            pi=F.softmax(data.pi.clone().reshape(args.A, -1), dim=1).flatten(),
                             sd_init=1e-5, init=the_rest)
 elif init == 'Rand':
     model.init_random()
@@ -218,9 +218,9 @@ if __name__ == "__main__":
                 penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
                 likelihood_term = model.forward(processed_inputs_train, train=False)
                 true_likelihood_term = model.log_likelihood(processed_inputs_train)
-                model_factor_assignment_train, model_neuron_gains_train = model.infer_latent_variables()
+                model_factor_assignment_train, model_neuron_gains_train = model.infer_latent_variables(processed_inputs_train)
                 likelihood_term_test = model.forward(processed_inputs_test, train=False)
-                model_factor_assignment_test, model_neuron_gains_test = model.infer_latent_variables()
+                model_factor_assignment_test, model_neuron_gains_test = model.infer_latent_variables(processed_inputs_test)
 
                 losses_train.append((likelihood_term + penalty_term).item())
                 log_likelihoods_train.append((1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * likelihood_term.item())

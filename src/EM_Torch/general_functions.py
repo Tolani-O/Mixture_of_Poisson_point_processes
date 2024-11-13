@@ -331,6 +331,11 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None)
         L = beta.shape[0]
         if stderr:
             beta_se = torch.cat([torch.zeros(L, 1), se_dict['beta']], dim=1).numpy() * 1.96
+            for landmarks in [model.peak1_left_landmarks, model.peak2_left_landmarks,
+                              model.peak1_right_landmarks, model.peak2_right_landmarks]:
+                beta_se[range(15), landmarks] = (beta_se[range(15), landmarks - 1] +
+                                                 beta_se[range(15), landmarks + 1]) / 2
+            beta_se = np.where(beta_se == 0, (np.roll(beta_se, 1, axis=1) + np.roll(beta_se, -1, axis=1)) / 2, beta_se)
             beta_ucl = beta + beta_se
             beta_lcl = beta - beta_se
         upper_limit = np.max(beta) + 0.1
@@ -359,17 +364,13 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None)
             plot_factor_assignments(model.W_CKL.numpy(), output_dir, 'cluster', epoch, False)
             W_L = np.round((torch.sum(model.W_CKL, dim=(0, 1))/model.n_configs).numpy(), 1)
         beta = model.unnormalized_log_factors()
-        latent_factors = torch.softmax(beta, dim=-1)
-        upper_limit = 0.005
+        latent_factors = torch.softmax(beta, dim=-1).numpy()
         if stderr:
-            beta_se = torch.cat([torch.zeros(latent_factors.shape[0], 1), se_dict['beta']], dim=1)
-            softmax_grad = latent_factors * (1 - latent_factors)
-            latent_factors_se = (torch.abs(softmax_grad) * beta_se).numpy() * 1.96
-            factor_ucl = latent_factors.numpy() + latent_factors_se
-            factor_lcl = latent_factors.numpy() - latent_factors_se
-            upper_limit = 0.01
-        latent_factors = latent_factors.numpy()
-        upper_limit += np.max(latent_factors)
+            softmax_grad = np.abs(latent_factors * (1 - latent_factors))
+            latent_factors_se = softmax_grad * beta_se
+            factor_ucl = latent_factors + latent_factors_se
+            factor_lcl = latent_factors - latent_factors_se
+        upper_limit = np.max(latent_factors) + 0.005
         plt.figure(figsize=(model.n_areas*10, int(model.n_factors/model.n_areas)*5))
         L = np.arange(model.n_factors).reshape(model.n_areas, -1).T.flatten()
         c = 0
@@ -393,7 +394,7 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None)
                       f'Area {unique_regions[l//factors_per_area]}, '
                       f'Membership: {pi[l]:.2f}, '
                       f'Count: {W_L[l]:.1f}', fontsize=20)
-            plt.ylim(bottom=0, top=upper_limit)
+            plt.ylim(bottom=-5e-4, top=upper_limit)
             c += 1
         plt.tight_layout()
         plt.savefig(os.path.join(beta_dir, f'LatentFactors_{epoch}.png'))

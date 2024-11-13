@@ -153,17 +153,17 @@ class LikelihoodELBOModel(nn.Module):
             W_CKL, beta = data['neuron_factor_assignment'], data['beta']
             W_L = torch.sum(W_CKL, dim=(0, 1))
             pi = W_L / torch.sum(factor_access, dim=(0, 1))
-        spike_counts = torch.einsum('ktrc,ckl->krlc', Y, factor_access)
-        avg_spike_counts = torch.sum(spike_counts, dim=(0,1,3)) / (R * torch.sum(factor_access, dim=(0, 1)))
+        spike_counts = torch.einsum('ktrc,ckl->ckl', Y, factor_access)
+        avg_spike_counts = torch.sum(spike_counts, dim=(0, 1)) / torch.sum(factor_access, dim=(0, 1))
         print('Average spike counts:')
-        print(avg_spike_counts.reshape(self.n_areas, -1).numpy())
-        centered_spike_counts = torch.einsum('krlc,ckl->krlc', spike_counts - avg_spike_counts.unsqueeze(0).unsqueeze(1).unsqueeze(3), factor_access)
-        spike_ct_var = torch.sum(centered_spike_counts**2, dim=(0,1,3)) / ((R * torch.sum(factor_access, dim=(0, 1)))-1)
+        print(avg_spike_counts.reshape(self.n_areas, -1).numpy() / R)
+        sq_centered_spike_counts = (spike_counts - avg_spike_counts.unsqueeze(0).unsqueeze(1))**2 * factor_access
+        spike_ct_var = torch.sum(sq_centered_spike_counts, dim=(0,1)) / (torch.sum(factor_access, dim=(0, 1)))
         print('Spike count variance - Average spike counts:')
-        print((spike_ct_var-avg_spike_counts).reshape(self.n_areas, -1).numpy())
+        print((spike_ct_var-avg_spike_counts).reshape(self.n_areas, -1).numpy() / R)
         alpha = (avg_spike_counts)**2/(spike_ct_var-avg_spike_counts)
         alpha = alpha.expm1().clamp_min(1e-6).log()
-        theta = avg_spike_counts/(spike_ct_var-avg_spike_counts)
+        theta = R * avg_spike_counts/(spike_ct_var-avg_spike_counts)
         self.init_ground_truth(beta=beta, alpha=alpha, theta=theta, sd_init=sd_init, W_CKL=W_CKL, pi=pi, init=init)
 
 
@@ -252,20 +252,20 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def validated_W_CKL(self, W_CKL, tol=1e-10):
-        W_L = torch.sum(W_CKL, dim=(0, 1)).reshape(self.n_areas, -1)
-        W_CKL_L = W_CKL.reshape(W_CKL.shape[0], W_CKL.shape[1], self.n_areas, -1)
+        W_AL = torch.sum(W_CKL, dim=(0, 1)).reshape(self.n_areas, -1)
+        W_CKAL = W_CKL.reshape(W_CKL.shape[0], W_CKL.shape[1], self.n_areas, -1)
         for i in range(self.n_areas):
-            while torch.any(W_L[i] < tol):
-                min_idx = torch.argmin(W_L[i])  # index of min population factor
-                max_idx = torch.argmax(W_L[i])  # index of max population factor
-                highest_assignmet = torch.max(W_CKL_L[:, :, i, max_idx])  # highest assignment to max factor
-                max_members_idx = torch.where(W_CKL_L[:, :, i, max_idx] == highest_assignmet)
+            while torch.any(W_AL[i] < tol):
+                min_idx = torch.argmin(W_AL[i])  # index of min population factor
+                max_idx = torch.argmax(W_AL[i])  # index of max population factor
+                highest_assignmet = torch.max(W_CKAL[:, :, i, max_idx])  # highest assignment to max factor
+                max_members_idx = torch.where(W_CKAL[:, :, i, max_idx] == highest_assignmet)
                 singele_max_member_idx = [max_members_idx[0][0], max_members_idx[1][0]]
                 frac_to_move = tol if highest_assignmet/1000 > tol else highest_assignmet/1000
-                W_CKL_L[singele_max_member_idx[0], singele_max_member_idx[1], i, max_idx] -= frac_to_move
-                W_CKL_L[singele_max_member_idx[0], singele_max_member_idx[1], i, min_idx] += frac_to_move
-                W_L = torch.sum(W_CKL_L, dim=(0, 1))
-        self.W_CKL = W_CKL_L.reshape(*W_CKL.shape[:2], -1)
+                W_CKAL[singele_max_member_idx[0], singele_max_member_idx[1], i, max_idx] -= frac_to_move
+                W_CKAL[singele_max_member_idx[0], singele_max_member_idx[1], i, min_idx] += frac_to_move
+                W_AL = torch.sum(W_CKAL, dim=(0, 1))
+        self.W_CKL = W_CKAL.reshape(*W_CKL.shape[:2], -1)
 
 
     def generate_trial_peak_offset_samples(self):
@@ -533,17 +533,11 @@ class LikelihoodELBOModel(nn.Module):
         return penalty_term
 
 
-    def infer_latent_variables(self):
+    def infer_latent_variables(self, processed_inputs):
         # likelihoods # C x K x L
-        C, K, L = torch.where(self.W_CKL == torch.max(self.W_CKL, dim=-1, keepdim=True).values)
-        grouped = pd.DataFrame({
-            'C': C.cpu(),
-            'K': K.cpu(),
-            'L': L.cpu()
-        }).groupby(['C', 'K']).agg({'L': lambda x: np.random.choice(x)}).reset_index()
-        neuron_factor_assignment = torch.zeros_like(self.W_CKL)
-        neuron_factor_assignment[grouped['C'], grouped['K'], grouped['L']] = 1
-        neuron_firing_rates = torch.sum(self.a_CKL * neuron_factor_assignment, dim=2)
+        neuron_factor_assignment = torch.round(F.softmax(self.W_CKL.reshape(self.W_CKL.shape[0], self.W_CKL.shape[1], self.n_areas, -1)*1e5, dim=-1).reshape(self.W_CKL.shape), decimals=1)
+        neuron_factor_assignment = neuron_factor_assignment * processed_inputs['neuron_factor_access']
+        neuron_firing_rates = torch.sum(self.a_CKL * self.W_CKL, dim=-1)
         return neuron_factor_assignment, neuron_firing_rates
 
 

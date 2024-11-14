@@ -156,7 +156,7 @@ if __name__ == "__main__":
         'grad_norms': list(grad_norms.keys()),
         'likelihood_ground_truth_train': None,
         'true_ELBO_train': None,
-        'Y': Y_train
+        'Y': torch.tensor(Y_train)
     }
     total_time = 0
     start_time = time.time()

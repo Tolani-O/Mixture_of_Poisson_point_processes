@@ -328,7 +328,7 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
     trial_sd_dir = os.path.join(output_dir, 'trial_SDs')
     os.makedirs(trial_sd_dir, exist_ok=True)
     with torch.no_grad():
-        beta = model.unnormalized_log_factors().numpy()
+        beta = model.unnormalized_log_factors().cpu().numpy()
         L = beta.shape[0]
         if stderr:
             beta_se = torch.cat([torch.zeros(L, 1), se_dict['beta']], dim=1).numpy() * 1.96
@@ -342,13 +342,14 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         upper_limit = np.max(beta) + 0.1
         lower_limit = np.min(beta) - 0.01
         plt.figure(figsize=(10, L*5))
+        time = model.time.cpu().numpy()
         for l in range(L):
             plt.subplot(L, 1, l + 1)
-            plt.plot(model.time, beta[l, :], label=f'Log Factor {l}')
+            plt.plot(time, beta[l, :], label=f'Log Factor {l}')
             if stderr:
-                plt.fill_between(model.time, beta_ucl[l, :], beta_lcl[l, :], color='grey', alpha=0.3,  label='Standard Error')
-                plt.plot(model.time, beta_ucl[l, :], linestyle='--', color='black', alpha=0.07)
-                plt.plot(model.time, beta_lcl[l, :], linestyle='--', color='black', alpha=0.07)
+                plt.fill_between(time, beta_ucl[l, :], beta_lcl[l, :], color='grey', alpha=0.3,  label='Standard Error')
+                plt.plot(time, beta_ucl[l, :], linestyle='--', color='black', alpha=0.07)
+                plt.plot(time, beta_lcl[l, :], linestyle='--', color='black', alpha=0.07)
                 plt.legend()
             plt.xlabel('Index')
             plt.ylabel('Value')
@@ -358,17 +359,17 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(log_beta_dir, f'beta_{epoch}.png'))
         plt.close()
 
-        pi = model.pi.numpy()
+        pi = model.pi.cpu().numpy()
         if model.W_CKL is None:
             W_L = np.zeros(model.n_factors)
         else:
-            plot_factor_assignments(model.W_CKL.numpy(), output_dir, 'cluster', epoch, False)
-            W_L = np.round((torch.sum(model.W_CKL, dim=(0, 1))/model.n_configs).numpy(), 1)
+            plot_factor_assignments(model.W_CKL.cpu().numpy(), output_dir, 'cluster', epoch, False)
+            W_L = np.round((torch.sum(model.W_CKL, dim=(0, 1))/model.n_configs).cpu().numpy(), 1)
         beta = model.unnormalized_log_factors()
-        latent_factors = torch.softmax(beta, dim=-1).numpy()
+        latent_factors = torch.softmax(beta, dim=-1).cpu().numpy()
         if plot_data:
-            data = torch.einsum('ktrc,ckl->lt', Y, model.W_CKL)
-            scaled_data = (data / data.sum(dim=1).unsqueeze(1)).numpy()
+            data = torch.einsum('ktrc,ckl->lt', Y.to(model.W_CKL.dtype), model.W_CKL.cpu())
+            scaled_data = (data / data.sum(dim=1).unsqueeze(1)).cpu().numpy()
         if stderr:
             softmax_grad = np.abs(latent_factors * (1 - latent_factors))
             latent_factors_se = softmax_grad * beta_se
@@ -381,17 +382,17 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         factors_per_area = int(model.n_factors/model.n_areas)
         for l in L:
             plt.subplot(factors_per_area, model.n_areas, c + 1)
-            plt.plot(model.time, latent_factors[l, :], alpha=np.max([pi[l], 0.7]), linewidth=np.exp(2.5*pi[l]))
+            plt.plot(time, latent_factors[l, :], alpha=np.max([pi[l], 0.7]), linewidth=np.exp(2.5*pi[l]))
             if plot_data:
-                plt.plot(model.time, scaled_data[l, :], alpha=0.5, linewidth=1, linestyle='--')
+                plt.plot(time, scaled_data[l, :], alpha=0.5, linewidth=1, linestyle='--')
             if stderr:
-                plt.fill_between(model.time, factor_ucl[l, :], factor_lcl[l, :], color='grey', alpha=0.3, label='Standard Error')
-                plt.plot(model.time, factor_ucl[l, :], linestyle='--', color='black', alpha=0.07)
-                plt.plot(model.time, factor_lcl[l, :], linestyle='--', color='black', alpha=0.07)
+                plt.fill_between(time, factor_ucl[l, :], factor_lcl[l, :], color='grey', alpha=0.3, label='Standard Error')
+                plt.plot(time, factor_ucl[l, :], linestyle='--', color='black', alpha=0.07)
+                plt.plot(time, factor_lcl[l, :], linestyle='--', color='black', alpha=0.07)
                 plt.legend()
             plt.xlabel('Intensity')
             plt.ylabel('Trial time course (ms)')
-            plt.vlines(x=model.time[torch.tensor([
+            plt.vlines(x=time[torch.tensor([
                 model.peak1_left_landmarks[l], model.peak1_right_landmarks[l],
                 model.peak2_left_landmarks[l], model.peak2_right_landmarks[l]])],
                        ymin=0, ymax=upper_limit,
@@ -406,14 +407,14 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(beta_dir, f'LatentFactors_{epoch}.png'))
         plt.close()
 
-        alpha = F.softplus(model.alpha).numpy()
+        alpha = F.softplus(model.alpha).cpu().numpy()
         plt.figure(figsize=(10, 10))
         plt.plot(alpha, label='Alpha')
         plt.title('Alpha')
         plt.savefig(os.path.join(alpha_dir, f'alpha_{epoch}.png'))
         plt.close()
 
-        theta = model.theta.numpy()
+        theta = model.theta.cpu().numpy()
         plt.figure(figsize=(10, 10))
         plt.plot(theta, label='Theta')
         plt.title('Theta')
@@ -426,34 +427,34 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(pi_dir, f'pi_{epoch}.png'))
         plt.close()
 
-        configoffset = model.config_peak_offsets.flatten().numpy()
+        configoffset = model.config_peak_offsets.flatten().cpu().numpy()
         plt.figure(figsize=(10, 10))
         plt.plot(configoffset, label='ConfigOffset')
         plt.title('ConfigOffset')
         plt.savefig(os.path.join(configoffset_dir, f'configoffset_{epoch}.png'))
         plt.close()
 
-        ltri = model.ltri_matix('cpu').flatten().numpy()
+        ltri = model.ltri_matix().flatten().cpu().numpy()
         plt.figure(figsize=(10, 10))
         plt.plot(ltri, label='Ltri')
         plt.title('Ltri')
         plt.savefig(os.path.join(ltri_dir, f'ltri_{epoch}.png'))
         plt.close()
 
-        Sigma = (model.ltri_matix('cpu') @ model.ltri_matix('cpu').t()).flatten().numpy()
+        Sigma = (model.ltri_matix() @ model.ltri_matix().t()).flatten().cpu().numpy()
         plt.figure(figsize=(10, 10))
         plt.plot(Sigma, label='Sigma')
         plt.title('Sigma')
         plt.savefig(os.path.join(sigma_dir, f'Sigma_{epoch}.png'))
 
-        proposal_offsets = model.trial_peak_offset_proposal_means.flatten().numpy()
+        proposal_offsets = model.trial_peak_offset_proposal_means.flatten().cpu().numpy()
         plt.figure(figsize=(10, 10))
         plt.plot(proposal_offsets, label='Trial means Proposals')
         plt.title('Trial means Proposals')
         plt.savefig(os.path.join(proposal_means_dir, f'proposal_means_{epoch}.png'))
         plt.close()
 
-        trial_SDs = model.trial_peak_offset_proposal_sds.flatten().numpy()
+        trial_SDs = model.trial_peak_offset_proposal_sds.flatten().cpu().numpy()
         plt.figure(figsize=(10, 10))
         plt.plot(trial_SDs, label='Trial Standard Deviations')
         plt.title('Trial Standard Deviations')

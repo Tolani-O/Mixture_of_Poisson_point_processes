@@ -5,12 +5,13 @@ sys.path.append(os.path.abspath('.'))
 from src.EM_Torch.simulate_data_multitrial import DataAnalyzer
 from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
 from src.EM_Torch.general_functions import create_relevant_files, get_parser, plot_outputs, \
-    write_log_and_model, write_losses, plot_losses, write_grad_norms, plot_grad_norms, load_tensors, to_cuda, \
+    write_log_and_model, write_losses, plot_epoch_results, write_grad_norms, load_tensors, to_cuda, \
     inv_softplus_torch, preprocess_input_data
 import numpy as np
 import time
 import torch
 import torch.nn.functional as F
+import threading
 outputs_folder = 'outputs'
 
 args = get_parser().parse_args()
@@ -136,7 +137,7 @@ elif init == 'Rand':
     model.init_random()
 elif init == 'Zero':
     model.init_zero()
-elif 'Data' in init:
+elif init == 'Data':
     model.init_from_data(Y=Y_train, factor_access=processed_inputs_train['neuron_factor_access'].cpu(),
                          sd_init=sd_init, init=the_rest)
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -168,6 +169,7 @@ data.cuda(args.cuda)
 print(f'folder_name: {args.folder_name}\n\n')
 print(output_str)
 
+
 # torch.autograd.set_detect_anomaly(True)
 if __name__ == "__main__":
     true_likelihoods_train = []
@@ -193,6 +195,18 @@ if __name__ == "__main__":
     gains_test = []
     batch_grad_norms = {name: [] for name, param in model.named_parameters() if param.requires_grad}
     grad_norms = {name: [] for name, param in model.named_parameters() if param.requires_grad}
+    input_dict = {
+        'unique_regions': unique_regions,
+        'output_dir': output_dir,
+        'batch_grad_norms': list(batch_grad_norms.keys()),
+        'grad_norms': list(grad_norms.keys()),
+        'likelihood_ground_truth_train': likelihood_ground_truth_train,
+        'true_ELBO_train': true_ELBO_train,
+        'true_ELBO_test': true_ELBO_test,
+        'true_offset_penalty_train': true_offset_penalty_train,
+        'true_offset_penalty_test': true_offset_penalty_test,
+        'Y': Y_train
+    }
     total_time = 0
     start_time = time.time()
     batch_ct = 0
@@ -309,9 +323,7 @@ if __name__ == "__main__":
                 f"dataSeed: {args.data_seed},\n"
                 f"{args.notes}\n\n")
             write_log_and_model(output_str, output_dir, epoch, model, optimizer, scheduler)
-            plot_outputs(model, unique_regions, output_dir, 'Train', epoch)
             is_empty = epoch == start_epoch
-
             write_grad_norms(batch_grad_norms, 'batch', output_dir, is_empty)
             write_grad_norms(grad_norms, 'train', output_dir, is_empty)
             write_losses(true_likelihoods_train, 'train', 'true_log_likelihoods', output_dir, is_empty)
@@ -336,27 +348,10 @@ if __name__ == "__main__":
             write_losses(ltriLkhd_train, 'train', 'ltriLkhd', output_dir, is_empty)
             write_losses(ltriLkhd_test, 'test', 'ltriLkhd', output_dir, is_empty)
 
-            plot_grad_norms(list(batch_grad_norms.keys()), output_dir, 'batch', 20, False)
-            plot_grad_norms(list(grad_norms.keys()), output_dir, 'train', 10, False)
-            plot_losses(likelihood_ground_truth_train, output_dir, 'train', 'true_log_likelihoods', 10, False)
-            plot_losses(true_ELBO_train, output_dir, 'train', 'log_likelihoods', 10, False)
-            plot_losses(None, output_dir, 'train', 'losses', 10, False)
-            plot_losses(None, output_dir, 'batch', 'log_likelihoods', 20, False)
-            plot_losses(None, output_dir, 'batch', 'losses', 20, False)
-            plot_losses(true_ELBO_test, output_dir, 'test', 'log_likelihoods', 10, False)
-            plot_losses(None, output_dir, 'test', 'losses', 10, False)
-            plot_losses(None, output_dir, 'test', 'beta_MSE', merge=False)
-            plot_losses(None, output_dir, 'test', 'alpha_MSE', merge=False)
-            plot_losses(None, output_dir, 'test', 'theta_MSE', merge=False)
-            plot_losses(None, output_dir, 'test', 'pi_MSE', merge=False)
-            plot_losses(None, output_dir, 'test', 'configoffset_MSE', merge=False)
-            plot_losses(None, output_dir, 'test', 'ltri_MSE', merge=False)
-            plot_losses(None, output_dir, 'test', 'Sigma_MSE', merge=False)
-            plot_losses(None, output_dir, 'test', 'proposal_means_MSE', merge=False)
-            plot_losses(None, output_dir, 'train', 'gains_MSE', merge=False)
-            plot_losses(None, output_dir, 'test', 'gains_MSE', merge=False)
-            plot_losses(true_offset_penalty_train, output_dir, 'train', 'ltriLkhd', 10, False)
-            plot_losses(true_offset_penalty_test, output_dir, 'test', 'ltriLkhd', 10, False)
+            input_dict['epoch'] = epoch
+            input_dict['model'] = model
+            plot_thread = threading.Thread(target=plot_epoch_results, args=(input_dict, True))
+            plot_thread.start()
 
             true_likelihoods_train = []
             log_likelihoods_batch = []

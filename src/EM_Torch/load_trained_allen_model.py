@@ -5,12 +5,13 @@ sys.path.append(os.path.abspath('.'))
 from src.EM_Torch.Allen_data_torch import load_sample
 from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
 from src.EM_Torch.general_functions import parse_folder_name, load_model_checkpoint, create_relevant_files, get_parser, plot_outputs, \
-    write_log_and_model, write_losses, plot_losses, write_grad_norms, plot_grad_norms, \
+    write_log_and_model, write_losses, plot_epoch_results, write_grad_norms, match_neuron_to_factors, \
     load_tensors, to_cuda, preprocess_input_data, compute_uncertainty
 import numpy as np
 import time
 import torch
 import torch.nn.functional as F
+import threading
 from ast import literal_eval
 outputs_folder = 'outputs'
 
@@ -87,6 +88,7 @@ if args.num_epochs < 0:
     se_dict = compute_uncertainty(model, processed_inputs_train, output_dir, args.load_epoch)
     model.cpu()
     plot_outputs(model, unique_regions, output_dir, 'Train', args.load_epoch, se_dict)
+    match_neuron_to_factors(model, Y_train, unique_regions, output_dir, 'Train', args.load_epoch)
     sys.exit()
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 optimizer.load_state_dict(optimizer_state)
@@ -129,6 +131,15 @@ if __name__ == "__main__":
     epoch_train = []
     batch_grad_norms = {name: [] for name, param in model.named_parameters() if param.requires_grad}
     grad_norms = {name: [] for name, param in model.named_parameters() if param.requires_grad}
+    input_dict = {
+        'unique_regions': unique_regions,
+        'output_dir': output_dir,
+        'batch_grad_norms': list(batch_grad_norms.keys()),
+        'grad_norms': list(grad_norms.keys()),
+        'likelihood_ground_truth_train': None,
+        'true_ELBO_train': None,
+        'Y': Y_train
+    }
     total_time = 0
     start_time = time.time()
     batch_ct = 0
@@ -154,7 +165,7 @@ if __name__ == "__main__":
                 penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
                 likelihood_term = model.forward(processed_inputs_train, train=False)
                 true_likelihood_term = model.log_likelihood(processed_inputs_train)
-                model_factor_assignment_train, model_neuron_gains_train = model.infer_latent_variables()
+                model_factor_assignment_train, model_neuron_gains_train = model.infer_latent_variables(processed_inputs_train)
                 losses_train.append((likelihood_term + penalty_term).item())
                 log_likelihoods_train.append((1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * likelihood_term.item())
                 true_likelihoods_train.append((1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * true_likelihood_term.item())
@@ -182,9 +193,7 @@ if __name__ == "__main__":
                 f"dataSeed: {args.data_seed},\n"
                 f"{args.notes}\n\n")
             write_log_and_model(output_str, output_dir, epoch, model, optimizer, scheduler)
-            plot_outputs(model, unique_regions, output_dir, 'Train', epoch)
             is_empty = epoch == start_epoch
-
             write_grad_norms(batch_grad_norms, 'batch', output_dir, is_empty)
             write_grad_norms(grad_norms, 'train', output_dir, is_empty)
             write_losses(true_likelihoods_train, 'train', 'true_log_likelihoods', output_dir, is_empty)
@@ -195,13 +204,10 @@ if __name__ == "__main__":
             write_losses(losses_batch, 'batch', 'losses', output_dir, is_empty)
             write_losses(epoch_batch, 'batch', 'epoch', output_dir, is_empty)
 
-            plot_grad_norms(list(batch_grad_norms.keys()), output_dir, 'batch', merge=False)
-            plot_grad_norms(list(grad_norms.keys()), output_dir, 'train',  merge=False)
-            plot_losses(None, output_dir, 'train', 'true_log_likelihoods',  merge=False)
-            plot_losses(None, output_dir, 'train', 'log_likelihoods',  merge=False)
-            plot_losses(None, output_dir, 'train', 'losses',  merge=False)
-            plot_losses(None, output_dir, 'batch', 'log_likelihoods',  merge=False)
-            plot_losses(None, output_dir, 'batch', 'losses',  merge=False)
+            input_dict['epoch'] = epoch
+            input_dict['model'] = model
+            plot_thread = threading.Thread(target=plot_epoch_results, args=(input_dict, False))
+            plot_thread.start()
 
             true_likelihoods_train = []
             log_likelihoods_batch = []

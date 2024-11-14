@@ -510,6 +510,7 @@ def initialize_clusters(Y, factor_access, n_clusters, n_areas, output_dir, n_job
     regions_active = [regn[indc] for regn, indc in zip(regions, indices)]
     dba_km = TimeSeriesKMeans(n_clusters=n_clusters, n_init=10, metric='dtw', max_iter_barycenter=20, n_jobs=n_jobs)
     neuron_factor_assignment = torch.zeros((K*C, n_clusters*n_areas), dtype=torch.float64)
+    predicted_y = torch.zeros((C*K), dtype=torch.int64)
     region_log_factors = []
     print('Fitting DBA-KMeans')
     for i, regn_indc in enumerate(zip(regions_active, indices)):
@@ -519,40 +520,58 @@ def initialize_clusters(Y, factor_access, n_clusters, n_areas, output_dir, n_job
         neuron_factor_assignment[indc, (i*n_clusters)+y_pred] = 1
         beta = torch.log(torch.tensor(dba_km.cluster_centers_).squeeze())
         region_log_factors.append(beta)
+        predicted_y[indc] = torch.tensor((i*n_clusters)+y_pred)
     neuron_factor_assignment = neuron_factor_assignment.reshape(C, K, -1)
+    predicted_y = predicted_y.reshape(C, K)
     latent_factors = torch.cat(region_log_factors, dim=0)
     # save to disk
     os.makedirs(output_dir, exist_ok=True)
     save_dir = os.path.join(output_dir, 'cluster_initialization.pkl')
     print('Saving clusters to: ', save_dir)
     with open(save_dir, 'wb') as f:
-        pickle.dump({'neuron_factor_assignment': neuron_factor_assignment, 'beta': latent_factors}, f)
+        pickle.dump({'y_pred': predicted_y, 'neuron_factor_assignment': neuron_factor_assignment, 'beta': latent_factors}, f)
 
 
-def plot_initial_clusters(output_dir, data_folder, n_clusters):
+def plot_initial_clusters(output_dir, data_folder, n_clusters, data=None):
     # Y # K x T x R x C
-    data_dir = os.path.join(output_dir, data_folder, f'{data_folder}.pkl')
+    if data is None:
+        data_dir = os.path.join(output_dir, data_folder, f'{data_folder}.pkl')
+        if not os.path.exists(data_dir):
+            raise FileNotFoundError(f"Data directory not found: {data_dir}")
+        with open(data_dir, 'rb') as f:
+            data = pickle.load(f)
+    Y, time = data['Y'], data['time']
     cluster_dir = os.path.join(output_dir, data_folder, 'cluster_initialization.pkl')
-    if not os.path.exists(data_dir):
-        raise FileNotFoundError(f"Data directory not found: {data_dir}")
     if not os.path.exists(cluster_dir):
         raise FileNotFoundError(f"Cluster directory not found: {cluster_dir}")
-    with open(data_dir, 'rb') as f:
-        data = pickle.load(f)
-    Y, time = data['Y'], data['time']
     with open(cluster_dir, 'rb') as f:
-        data = pickle.load(f)
-    y_pred, neuron_factor_assignment, beta = data['y_pred'], data['neuron_factor_assignment'], data['beta']
-    factors = torch.exp(beta)
-    Y_train = Y.sum(axis=(2, 3))
-    y_upper = torch.max(factors).item()
-    for yi in range(n_clusters):
-        plt.subplot(n_clusters, 1, 1 + yi)
-        for xx in Y_train[y_pred == yi]:
+        cluster = pickle.load(f)
+    y_pred, neuron_factor_assignment, beta = cluster['y_pred'], cluster['neuron_factor_assignment'], cluster['beta']
+    y_pred = ((y_pred + 1) * neuron_factor_assignment.sum(dim=-1)).int()
+    factors = F.softmax(beta, dim=-1)
+    Y_train = Y.sum(axis=2).permute(2, 0, 1)  # C x K x T
+    Y_train = Y_train / Y_train.sum(dim=-1).unsqueeze(-1)
+    n_factors = beta.shape[0]
+    n_areas = n_factors // n_clusters
+    plt.figure(figsize=(n_areas * 10, n_clusters * 5))
+    L = np.arange(n_factors).reshape(n_areas, -1).T.flatten()
+    c = 0
+    factors_per_area = n_clusters
+    upper_limit = torch.max(factors).item() + 0.005
+    for l in L:
+        plt.subplot(factors_per_area, n_areas, c + 1)
+        units_indcs = torch.where(y_pred == (l+1))
+        units = Y_train[units_indcs]
+        for xx in units:
             plt.plot(time, xx.ravel(), "k-", alpha=0.2)
-        plt.plot(time, factors[yi], "r-")
-        plt.ylim(-1, y_upper)
-        plt.text(0.55, 0.85, 'Cluster %d' % (yi + 1), transform=plt.gca().transAxes)
+        plt.plot(time, factors[l, :], "r-")
+        plt.xlabel('Intensity')
+        plt.ylabel('Trial time course (ms)')
+        plt.ylim(bottom=-5e-4, top=upper_limit)
+        plt.title(f'Factor {(l % factors_per_area) + 1}, '
+                  f'Area {(l // factors_per_area) + 1}, '
+                  f'Count: {units.shape[0]:.1f}', fontsize=20)
+        c += 1
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, data_folder, 'cluster_initialization.png'))
     plt.close()

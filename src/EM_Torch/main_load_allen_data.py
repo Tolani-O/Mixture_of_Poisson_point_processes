@@ -93,7 +93,6 @@ if args.init_with_DTW:
                             processed_inputs_train['neuron_factor_access'].cpu(),
                             args.L, args.A, cluster_dir, n_jobs=15, bandwidth=4)
         plot_initial_clusters(folder_path, folder_name, args.L)
-        # sys.exit()
 else:
     cluster_dir = None
 model = LikelihoodELBOModel(bin_time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,

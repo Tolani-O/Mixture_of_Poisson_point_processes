@@ -255,6 +255,8 @@ class LikelihoodELBOModel(nn.Module):
         W_AL = torch.sum(W_CKL, dim=(0, 1)).reshape(self.n_areas, -1)
         W_CKAL = W_CKL.reshape(W_CKL.shape[0], W_CKL.shape[1], self.n_areas, -1)
         for i in range(self.n_areas):
+            if torch.all(W_AL[i] < tol):
+                continue
             while torch.any(W_AL[i] < tol):
                 min_idx = torch.argmin(W_AL[i])  # index of min population factor
                 max_idx = torch.argmax(W_AL[i])  # index of max population factor

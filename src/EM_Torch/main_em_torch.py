@@ -132,8 +132,7 @@ if args.init_with_DTW:
         initialize_clusters(processed_inputs_train['Y'].cpu(),
                             processed_inputs_train['neuron_factor_access'].cpu(),
                             args.L, args.A, cluster_dir, n_jobs=15, bandwidth=4)
-        plot_initial_clusters(folder_path, folder_name, args.L)
-        # sys.exit()
+        plot_initial_clusters(folder_path, folder_name, args.L, {'Y': Y_train, 'time': data.time})
 else:
     cluster_dir = None
 if init == 'True':

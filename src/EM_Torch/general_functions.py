@@ -301,9 +301,10 @@ def parse_folder_name(folder_name, parser_key, outputs_folder, load_run):
     return parsed_values
 
 
-def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None):
+def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None, Y=None):
 
     stderr = se_dict is not None
+    plot_data = Y is not None
     output_dir = os.path.join(output_dir, folder)
     os.makedirs(output_dir, exist_ok=True)
     beta_dir = os.path.join(output_dir, 'beta')
@@ -365,6 +366,9 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None)
             W_L = np.round((torch.sum(model.W_CKL, dim=(0, 1))/model.n_configs).numpy(), 1)
         beta = model.unnormalized_log_factors()
         latent_factors = torch.softmax(beta, dim=-1).numpy()
+        if plot_data:
+            data = torch.einsum('ktrc,ckl->lt', Y, model.W_CKL)
+            scaled_data = (data / data.sum(dim=1).unsqueeze(1)).numpy()
         if stderr:
             softmax_grad = np.abs(latent_factors * (1 - latent_factors))
             latent_factors_se = softmax_grad * beta_se
@@ -378,6 +382,8 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None)
         for l in L:
             plt.subplot(factors_per_area, model.n_areas, c + 1)
             plt.plot(model.time, latent_factors[l, :], alpha=np.max([pi[l], 0.7]), linewidth=np.exp(2.5*pi[l]))
+            if plot_data:
+                plt.plot(model.time, scaled_data[l, :], alpha=0.5, linewidth=1, linestyle='--')
             if stderr:
                 plt.fill_between(model.time, factor_ucl[l, :], factor_lcl[l, :], color='grey', alpha=0.3, label='Standard Error')
                 plt.plot(model.time, factor_ucl[l, :], linestyle='--', color='black', alpha=0.07)
@@ -454,6 +460,40 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None)
         plt.savefig(os.path.join(trial_sd_dir, f'trial_variances_{epoch}.png'))
         plt.close()
         plt.close('all')
+
+
+def match_neuron_to_factors(model, Y, unique_regions, output_dir, folder, epoch):
+    beta_dir = os.path.join(output_dir, folder, 'beta')
+    os.makedirs(beta_dir, exist_ok=True)
+    W_CKL = model.W_CKL
+    pi = model.pi.numpy()
+    W_L = np.round((torch.sum(model.W_CKL, dim=(0, 1)) / model.n_configs).numpy(), 1)
+    beta = torch.einsum('ktrc,ckl->lt', Y, W_CKL)
+    latent_factors = (beta/beta.sum(dim=1).unsqueeze(1)).numpy()
+    upper_limit = 0.03 #np.max(latent_factors) + 0.005
+    plt.figure(figsize=(model.n_areas * 10, int(model.n_factors / model.n_areas) * 5))
+    L = np.arange(model.n_factors).reshape(model.n_areas, -1).T.flatten()
+    c = 0
+    factors_per_area = int(model.n_factors / model.n_areas)
+    for l in L:
+        plt.subplot(factors_per_area, model.n_areas, c + 1)
+        plt.plot(model.time, latent_factors[l, :], alpha=np.max([pi[l], 0.7]), linewidth=np.exp(2.5 * pi[l]))
+        plt.xlabel('Spike count')
+        plt.ylabel('Trial time course (ms)')
+        plt.vlines(x=model.time[torch.tensor([
+            model.peak1_left_landmarks[l], model.peak1_right_landmarks[l],
+            model.peak2_left_landmarks[l], model.peak2_right_landmarks[l]])],
+                   ymin=0, ymax=upper_limit,
+                   color='grey', linestyle='--', alpha=0.5)
+        plt.title(f'Factor {(l % factors_per_area) + 1}, '
+                  f'Area {unique_regions[l // factors_per_area]}, '
+                  f'Membership: {pi[l]:.2f}, '
+                  f'Count: {W_L[l]:.1f}', fontsize=20)
+        plt.ylim(bottom=-5e-4, top=upper_limit)
+        c += 1
+    plt.tight_layout()
+    plt.savefig(os.path.join(beta_dir, f'Spike_Count_{epoch}.png'))
+    plt.close()
 
 
 def initialize_clusters(Y, factor_access, n_clusters, n_areas, output_dir, n_jobs=15, bandwidth=4):
@@ -711,6 +751,47 @@ def compute_uncertainty(model, processed_inputs, output_dir, epoch):
     with open(file_path, 'wb') as f:
         pickle.dump(se_dict, f)
     return se_dict
+
+
+def plot_epoch_results(input_dict, test=False):
+    plot_training_epoch_results(input_dict)
+    if test:
+        plot_test_epoch_results(input_dict)
+
+
+def plot_training_epoch_results(input_dict):
+    print('Plotting epoch results')
+    model, Y, unique_regions, output_dir, epoch = input_dict['model'], input_dict['Y'], input_dict['unique_regions'], input_dict['output_dir'], input_dict['epoch']
+    batch_grad_norms, grad_norms = input_dict['batch_grad_norms'], input_dict['grad_norms']
+    likelihood_ground_truth_train, true_ELBO_train = input_dict['likelihood_ground_truth_train'], input_dict['true_ELBO_train']
+    plot_outputs(model, unique_regions, output_dir, 'Train', epoch, Y=Y)
+    plot_grad_norms(batch_grad_norms, output_dir, 'batch', 20, False)
+    plot_grad_norms(grad_norms, output_dir, 'train', 10)
+    plot_losses(likelihood_ground_truth_train, output_dir, 'train', 'true_log_likelihoods', 10)
+    plot_losses(true_ELBO_train, output_dir, 'train', 'log_likelihoods', 10)
+    plot_losses(None, output_dir, 'train', 'losses', 10)
+    plot_losses(None, output_dir, 'batch', 'log_likelihoods', 20, False)
+    plot_losses(None, output_dir, 'batch', 'losses', 20, False)
+
+
+def plot_test_epoch_results(input_dict):
+    print('Plotting epoch results')
+    output_dir = input_dict['output_dir']
+    true_ELBO_test, true_offset_penalty_train, true_offset_penalty_test = input_dict['true_ELBO_test'], input_dict['true_offset_penalty_train'], input_dict['true_offset_penalty_test']
+    plot_losses(true_ELBO_test, output_dir, 'test', 'log_likelihoods', 10)
+    plot_losses(None, output_dir, 'test', 'losses', 10)
+    plot_losses(None, output_dir, 'test', 'beta_MSE')
+    plot_losses(None, output_dir, 'test', 'alpha_MSE')
+    plot_losses(None, output_dir, 'test', 'theta_MSE')
+    plot_losses(None, output_dir, 'test', 'pi_MSE')
+    plot_losses(None, output_dir, 'test', 'configoffset_MSE')
+    plot_losses(None, output_dir, 'test', 'ltri_MSE')
+    plot_losses(None, output_dir, 'test', 'Sigma_MSE')
+    plot_losses(None, output_dir, 'test', 'proposal_means_MSE')
+    plot_losses(None, output_dir, 'train', 'gains_MSE')
+    plot_losses(None, output_dir, 'test', 'gains_MSE')
+    plot_losses(true_offset_penalty_train, output_dir, 'train', 'ltriLkhd', 10)
+    plot_losses(true_offset_penalty_test, output_dir, 'test', 'ltriLkhd', 10)
 
 
 def load_tensors(arrays):

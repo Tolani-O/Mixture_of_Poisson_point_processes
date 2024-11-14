@@ -138,7 +138,21 @@ if __name__ == "__main__":
         'grad_norms': list(grad_norms.keys()),
         'likelihood_ground_truth_train': None,
         'true_ELBO_train': None,
-        'Y': Y_train
+        'Y': torch.tensor(Y_train),
+        'model_params': {
+            'time': bin_time,
+            'n_factors': num_factors,
+            'n_areas': args.A,
+            'n_configs': args.n_configs,
+            'n_trials': args.n_trials,
+            'n_trial_samples': args.n_trial_samples,
+            'peak1_left_landmarks': peak1_left_landmarks,
+            'peak1_right_landmarks': peak1_right_landmarks,
+            'peak2_left_landmarks': peak2_left_landmarks,
+            'peak2_right_landmarks': peak2_right_landmarks,
+            'temperature': args.temperature,
+            'weights': args.weights
+        }
     }
     total_time = 0
     start_time = time.time()
@@ -205,7 +219,6 @@ if __name__ == "__main__":
             write_losses(epoch_batch, 'batch', 'epoch', output_dir, is_empty)
 
             input_dict['epoch'] = epoch
-            input_dict['model'] = model
             plot_thread = threading.Thread(target=plot_epoch_results, args=(input_dict, False))
             plot_thread.start()
 

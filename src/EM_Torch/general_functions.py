@@ -10,6 +10,7 @@ import argparse
 from torch.utils.data import Dataset
 from tslearn.clustering import TimeSeriesKMeans
 from scipy.ndimage import gaussian_filter1d
+from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
 import pickle
 sns.set()
 plt.rcParams.update({'figure.max_open_warning': 0})
@@ -65,45 +66,6 @@ class CustomDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.Y[idx], self.neuron_factor_access[:, idx, :] # K x C x L
-
-
-def create_precision_matrix(P):
-    Omega = np.zeros((P, P))
-    # fill the main diagonal with 2s
-    np.fill_diagonal(Omega, 2)
-    # fill the subdiagonal and superdiagonal with -1s
-    np.fill_diagonal(Omega[1:], -1)
-    np.fill_diagonal(Omega[:, 1:], -1)
-    # set the last element to 1
-    Omega[-1, -1] = 1
-    return Omega
-
-
-def create_first_diff_matrix(P):
-    D = np.zeros((P-2, P))
-    # fill the main diagonal with -1s
-    np.fill_diagonal(D, -1)
-    # fill the superdiagonal with 1s
-    np.fill_diagonal(D[:, 2:], 1)
-    # first row is a forward difference
-    s0 = [-1, 1]
-    D0 = np.concatenate((s0, np.zeros(P - len(s0))))
-    D = P * np.vstack((D0, D/2, -np.flip(D0)))
-    return D
-
-
-def create_second_diff_matrix(P):
-    D = np.zeros((P-2, P))
-    # fill the main diagonal with 1s
-    np.fill_diagonal(D, 1)
-    # fill the subdiagonal and superdiagonal with -2s
-    np.fill_diagonal(D[:, 2:], 1)
-    np.fill_diagonal(D[:, 1:], -2)
-    # first row is a forward difference
-    s0 = [1, -2, 1]
-    D0 = np.concatenate((s0, np.zeros(P-len(s0))))
-    D = P**2 * np.vstack((D0, D, np.flip(D0)))
-    return D
 
 
 def preprocess_input_data(Y, neuron_factor_access, mask_threshold=0):
@@ -328,7 +290,7 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
     trial_sd_dir = os.path.join(output_dir, 'trial_SDs')
     os.makedirs(trial_sd_dir, exist_ok=True)
     with torch.no_grad():
-        beta = model.unnormalized_log_factors().cpu().numpy()
+        beta = model.unnormalized_log_factors().numpy()
         L = beta.shape[0]
         if stderr:
             beta_se = torch.cat([torch.zeros(L, 1), se_dict['beta']], dim=1).numpy() * 1.96
@@ -342,14 +304,13 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         upper_limit = np.max(beta) + 0.1
         lower_limit = np.min(beta) - 0.01
         plt.figure(figsize=(10, L*5))
-        time = model.time.cpu().numpy()
         for l in range(L):
             plt.subplot(L, 1, l + 1)
-            plt.plot(time, beta[l, :], label=f'Log Factor {l}')
+            plt.plot(model.time, beta[l, :], label=f'Log Factor {l}')
             if stderr:
-                plt.fill_between(time, beta_ucl[l, :], beta_lcl[l, :], color='grey', alpha=0.3,  label='Standard Error')
-                plt.plot(time, beta_ucl[l, :], linestyle='--', color='black', alpha=0.07)
-                plt.plot(time, beta_lcl[l, :], linestyle='--', color='black', alpha=0.07)
+                plt.fill_between(model.time, beta_ucl[l, :], beta_lcl[l, :], color='grey', alpha=0.3,  label='Standard Error')
+                plt.plot(model.time, beta_ucl[l, :], linestyle='--', color='black', alpha=0.07)
+                plt.plot(model.time, beta_lcl[l, :], linestyle='--', color='black', alpha=0.07)
                 plt.legend()
             plt.xlabel('Index')
             plt.ylabel('Value')
@@ -359,17 +320,17 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(log_beta_dir, f'beta_{epoch}.png'))
         plt.close()
 
-        pi = model.pi.cpu().numpy()
+        pi = model.pi.numpy()
         if model.W_CKL is None:
             W_L = np.zeros(model.n_factors)
         else:
-            plot_factor_assignments(model.W_CKL.cpu().numpy(), output_dir, 'cluster', epoch, False)
-            W_L = np.round((torch.sum(model.W_CKL, dim=(0, 1))/model.n_configs).cpu().numpy(), 1)
+            plot_factor_assignments(model.W_CKL.numpy(), output_dir, 'cluster', epoch, False)
+            W_L = np.round((torch.sum(model.W_CKL, dim=(0, 1))/model.n_configs).numpy(), 1)
         beta = model.unnormalized_log_factors()
-        latent_factors = torch.softmax(beta, dim=-1).cpu().numpy()
+        latent_factors = F.softmax(beta, dim=-1).numpy()
         if plot_data:
-            data = torch.einsum('ktrc,ckl->lt', Y.to(model.W_CKL.dtype), model.W_CKL.cpu())
-            scaled_data = (data / data.sum(dim=1).unsqueeze(1)).cpu().numpy()
+            data = torch.einsum('ktrc,ckl->lt', Y, model.W_CKL)
+            scaled_data = (data / data.sum(dim=1).unsqueeze(1)).numpy()
         if stderr:
             softmax_grad = np.abs(latent_factors * (1 - latent_factors))
             latent_factors_se = softmax_grad * beta_se
@@ -382,17 +343,17 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         factors_per_area = int(model.n_factors/model.n_areas)
         for l in L:
             plt.subplot(factors_per_area, model.n_areas, c + 1)
-            plt.plot(time, latent_factors[l, :], alpha=np.max([pi[l], 0.3]), linewidth=np.exp(1.5*pi[l]))
+            plt.plot(model.time, latent_factors[l, :], alpha=np.max([pi[l], 0.5]), linewidth=np.exp(1.5*pi[l]))
             if plot_data:
-                plt.plot(time, scaled_data[l, :], alpha=pi[l], linewidth=1, linestyle='--')
+                plt.plot(model.time, scaled_data[l, :], alpha=np.max([pi[l], 0.5]), linewidth=1, linestyle='--')
             if stderr:
-                plt.fill_between(time, factor_ucl[l, :], factor_lcl[l, :], color='grey', alpha=0.3, label='Standard Error')
-                plt.plot(time, factor_ucl[l, :], linestyle='--', color='black', alpha=0.07)
-                plt.plot(time, factor_lcl[l, :], linestyle='--', color='black', alpha=0.07)
+                plt.fill_between(model.time, factor_ucl[l, :], factor_lcl[l, :], color='grey', alpha=0.3, label='Standard Error')
+                plt.plot(model.time, factor_ucl[l, :], linestyle='--', color='black', alpha=0.07)
+                plt.plot(model.time, factor_lcl[l, :], linestyle='--', color='black', alpha=0.07)
                 plt.legend()
             plt.xlabel('Intensity')
             plt.ylabel('Trial time course (ms)')
-            plt.vlines(x=time[torch.tensor([
+            plt.vlines(x=model.time[torch.tensor([
                 model.peak1_left_landmarks[l], model.peak1_right_landmarks[l],
                 model.peak2_left_landmarks[l], model.peak2_right_landmarks[l]])],
                        ymin=0, ymax=upper_limit,
@@ -407,14 +368,14 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(beta_dir, f'LatentFactors_{epoch}.png'))
         plt.close()
 
-        alpha = F.softplus(model.alpha).cpu().numpy()
+        alpha = F.softplus(model.alpha).numpy()
         plt.figure(figsize=(10, 10))
         plt.plot(alpha, label='Alpha')
         plt.title('Alpha')
         plt.savefig(os.path.join(alpha_dir, f'alpha_{epoch}.png'))
         plt.close()
 
-        theta = model.theta.cpu().numpy()
+        theta = model.theta.numpy()
         plt.figure(figsize=(10, 10))
         plt.plot(theta, label='Theta')
         plt.title('Theta')
@@ -427,34 +388,34 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(pi_dir, f'pi_{epoch}.png'))
         plt.close()
 
-        configoffset = model.config_peak_offsets.flatten().cpu().numpy()
+        configoffset = model.config_peak_offsets.flatten().numpy()
         plt.figure(figsize=(10, 10))
         plt.plot(configoffset, label='ConfigOffset')
         plt.title('ConfigOffset')
         plt.savefig(os.path.join(configoffset_dir, f'configoffset_{epoch}.png'))
         plt.close()
 
-        ltri = model.ltri_matix().flatten().cpu().numpy()
+        ltri = model.ltri_matix('cpu').flatten().numpy()
         plt.figure(figsize=(10, 10))
         plt.plot(ltri, label='Ltri')
         plt.title('Ltri')
         plt.savefig(os.path.join(ltri_dir, f'ltri_{epoch}.png'))
         plt.close()
 
-        Sigma = (model.ltri_matix() @ model.ltri_matix().t()).flatten().cpu().numpy()
+        Sigma = (model.ltri_matix('cpu') @ model.ltri_matix('cpu').t()).flatten().numpy()
         plt.figure(figsize=(10, 10))
         plt.plot(Sigma, label='Sigma')
         plt.title('Sigma')
         plt.savefig(os.path.join(sigma_dir, f'Sigma_{epoch}.png'))
 
-        proposal_offsets = model.trial_peak_offset_proposal_means.flatten().cpu().numpy()
+        proposal_offsets = model.trial_peak_offset_proposal_means.flatten().numpy()
         plt.figure(figsize=(10, 10))
         plt.plot(proposal_offsets, label='Trial means Proposals')
         plt.title('Trial means Proposals')
         plt.savefig(os.path.join(proposal_means_dir, f'proposal_means_{epoch}.png'))
         plt.close()
 
-        trial_SDs = model.trial_peak_offset_proposal_sds.flatten().cpu().numpy()
+        trial_SDs = model.trial_peak_offset_proposal_sds.flatten().numpy()
         plt.figure(figsize=(10, 10))
         plt.plot(trial_SDs, label='Trial Standard Deviations')
         plt.title('Trial Standard Deviations')
@@ -793,8 +754,13 @@ def plot_epoch_results(input_dict, test=False):
 
 def plot_training_epoch_results(input_dict):
     print('Plotting epoch results')
-    model, Y, unique_regions, output_dir, epoch = input_dict['model'], input_dict['Y'], input_dict['unique_regions'], input_dict['output_dir'], input_dict['epoch']
+    Y, unique_regions, output_dir, epoch = input_dict['Y'], input_dict['unique_regions'], input_dict['output_dir'], input_dict['epoch']
     batch_grad_norms, grad_norms = input_dict['batch_grad_norms'], input_dict['grad_norms']
+    model_state, optimizer_state, scheduler_state, W_CKL, a_CKL, theta, pi, epoch = load_model_checkpoint(output_dir, epoch)
+    model = LikelihoodELBOModel(**input_dict['model_params'])
+    model.init_zero()
+    model.load_state_dict(model_state)
+    model.W_CKL, model.a_CKL, model.theta, model.pi = W_CKL, a_CKL, theta, pi
     likelihood_ground_truth_train, true_ELBO_train = input_dict['likelihood_ground_truth_train'], input_dict['true_ELBO_train']
     plot_outputs(model, unique_regions, output_dir, 'Train', epoch, Y=Y)
     plot_grad_norms(batch_grad_norms, output_dir, 'batch', 20, False)

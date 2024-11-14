@@ -217,7 +217,21 @@ if __name__ == "__main__":
         'true_ELBO_test': true_ELBO_test,
         'true_offset_penalty_train': true_offset_penalty_train,
         'true_offset_penalty_test': true_offset_penalty_test,
-        'Y': Y_train
+        'Y': Y_train,
+        'model_params': {
+            'time': data.time,
+            'n_factors': num_factors,
+            'n_areas': args.A,
+            'n_configs': args.n_configs,
+            'n_trials': args.n_trials,
+            'n_trial_samples': args.n_trial_samples,
+            'peak1_left_landmarks': peak1_left_landmarks,
+            'peak1_right_landmarks': peak1_right_landmarks,
+            'peak2_left_landmarks': peak2_left_landmarks,
+            'peak2_right_landmarks': peak2_right_landmarks,
+            'temperature': args.temperature,
+            'weights': args.weights
+        }
     }
     total_time = 0
     start_time = time.time()
@@ -361,7 +375,6 @@ if __name__ == "__main__":
             write_losses(ltriLkhd_test, 'test', 'ltriLkhd', output_dir, is_empty)
 
             input_dict['epoch'] = epoch
-            input_dict['model'] = model
             plot_thread = threading.Thread(target=plot_epoch_results, args=(input_dict, True))
             plot_thread.start()
 

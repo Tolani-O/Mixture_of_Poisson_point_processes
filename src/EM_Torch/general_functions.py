@@ -382,9 +382,9 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         factors_per_area = int(model.n_factors/model.n_areas)
         for l in L:
             plt.subplot(factors_per_area, model.n_areas, c + 1)
-            plt.plot(time, latent_factors[l, :], alpha=np.max([pi[l], 0.7]), linewidth=np.exp(2.5*pi[l]))
+            plt.plot(time, latent_factors[l, :], alpha=np.max([pi[l], 0.3]), linewidth=np.exp(1.5*pi[l]))
             if plot_data:
-                plt.plot(time, scaled_data[l, :], alpha=0.5, linewidth=1, linestyle='--')
+                plt.plot(time, scaled_data[l, :], alpha=pi[l], linewidth=1, linestyle='--')
             if stderr:
                 plt.fill_between(time, factor_ucl[l, :], factor_lcl[l, :], color='grey', alpha=0.3, label='Standard Error')
                 plt.plot(time, factor_ucl[l, :], linestyle='--', color='black', alpha=0.07)
@@ -501,20 +501,32 @@ def initialize_clusters(Y, factor_access, n_clusters, n_areas, output_dir, n_job
     # Y # K x T x R x C
     # factor_access  # C x K x L
     K, T, R, C = Y.shape
-    Y_train = gaussian_filter1d(Y.sum(axis=(2, 3)), sigma=bandwidth, axis=0)
+    Y_train = torch.tensor(gaussian_filter1d(Y.sum(axis=2), sigma=bandwidth, axis=1)).permute(2, 0, 1)  # C x K x T
+    Y_train = 100 * Y_train / Y_train.sum(dim=-1).unsqueeze(-1)
+    # data # C x K x T x A x L
+    data = torch.einsum('ckt,ckl->cktl', Y_train, factor_access).reshape(C, K, T, n_areas, n_clusters)
+    regions = [torch.cat(list(data[:, :, :, i, 0])) for i in range(n_areas)]
+    indices = [torch.where(reg.sum(dim=-1) > 0)[0] for reg in regions]
+    regions_active = [regn[indc] for regn, indc in zip(regions, indices)]
     dba_km = TimeSeriesKMeans(n_clusters=n_clusters, n_init=10, metric='dtw', max_iter_barycenter=20, n_jobs=n_jobs)
+    neuron_factor_assignment = torch.zeros((K*C, n_clusters*n_areas), dtype=torch.float64)
+    region_log_factors = []
     print('Fitting DBA-KMeans')
-    y_pred = dba_km.fit_predict(Y_train)
-    neuron_factor_assignment = torch.zeros((K, C, n_clusters), dtype=torch.float64)  # K x C x L
-    neuron_factor_assignment[torch.arange(K), :, y_pred] = 1
-    neuron_factor_assignment = torch.concat([neuron_factor_assignment] * n_areas, dim=-1).permute(1, 0, 2) * factor_access
-    beta = torch.log(torch.concat([torch.tensor(dba_km.cluster_centers_).squeeze()] * n_areas, dim=0))
+    for i, regn_indc in enumerate(zip(regions_active, indices)):
+        print(f'Fitting Area {i + 1}')
+        regn, indc = regn_indc
+        y_pred = dba_km.fit_predict(regn)
+        neuron_factor_assignment[indc, (i*n_clusters)+y_pred] = 1
+        beta = torch.log(torch.tensor(dba_km.cluster_centers_).squeeze())
+        region_log_factors.append(beta)
+    neuron_factor_assignment = neuron_factor_assignment.reshape(C, K, -1)
+    latent_factors = torch.cat(region_log_factors, dim=0)
     # save to disk
     os.makedirs(output_dir, exist_ok=True)
     save_dir = os.path.join(output_dir, 'cluster_initialization.pkl')
     print('Saving clusters to: ', save_dir)
     with open(save_dir, 'wb') as f:
-        pickle.dump({'y_pred': y_pred, 'neuron_factor_assignment': neuron_factor_assignment, 'beta': beta}, f)
+        pickle.dump({'neuron_factor_assignment': neuron_factor_assignment, 'beta': latent_factors}, f)
 
 
 def plot_initial_clusters(output_dir, data_folder, n_clusters):

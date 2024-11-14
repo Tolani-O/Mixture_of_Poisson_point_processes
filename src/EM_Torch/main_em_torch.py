@@ -4,8 +4,8 @@ import sys
 sys.path.append(os.path.abspath('.'))
 from src.EM_Torch.simulate_data_multitrial import DataAnalyzer
 from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
-from src.EM_Torch.general_functions import create_relevant_files, get_parser, plot_outputs, \
-    write_log_and_model, write_losses, plot_epoch_results, write_grad_norms, load_tensors, to_cuda, \
+from src.EM_Torch.general_functions import initialize_clusters, create_relevant_files, get_parser, plot_outputs, \
+    plot_initial_clusters, write_log_and_model, write_losses, plot_epoch_results, write_grad_norms, load_tensors, to_cuda, \
     inv_softplus_torch, preprocess_input_data
 import numpy as np
 import time
@@ -21,7 +21,7 @@ args.n_trials = 15  # R
 args.n_configs = 5  # C
 args.K = 100  # K
 args.A = 3  # A
-args.L = 3  # L
+args.L = 5  # L
 args.n_trial_samples = 10  # Number of samples to generate for each trial
 
 # args.n_trials = 5
@@ -48,6 +48,7 @@ args.weights = (99, 1)
 args.tau_sigma = 1
 args.tau_sd = 10000
 sd_init = 0.5
+args.init_with_DTW = True
 
 if args.eval_interval > args.log_interval:
     args.log_interval = args.eval_interval
@@ -123,6 +124,18 @@ output_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, 'Run_0'
 os.makedirs(output_dir, exist_ok=True)
 plot_outputs(model, unique_regions, output_dir, 'Train', -2)
 # Initialize the model
+folder_name = f'{args.data_seed}-seed_{args.A}-regions_{args.L}-factors'
+folder_path = os.path.join(os.getcwd(), outputs_folder, 'metadata')
+if args.init_with_DTW:
+    cluster_dir = os.path.join(folder_path, folder_name)
+    if not os.path.exists(os.path.join(cluster_dir, f'cluster_initialization.pkl')):
+        initialize_clusters(processed_inputs_train['Y'].cpu(),
+                            processed_inputs_train['neuron_factor_access'].cpu(),
+                            args.L, args.A, cluster_dir, n_jobs=15, bandwidth=4)
+        plot_initial_clusters(folder_path, folder_name, args.L)
+        # sys.exit()
+else:
+    cluster_dir = None
 if init == 'True':
     model.init_ground_truth(beta=data.beta.clone(),
                             alpha=inv_softplus_torch(data.alpha.clone()),
@@ -139,7 +152,7 @@ elif init == 'Zero':
     model.init_zero()
 elif init == 'Data':
     model.init_from_data(Y=Y_train, factor_access=processed_inputs_train['neuron_factor_access'].cpu(),
-                         sd_init=sd_init, init=the_rest)
+                         sd_init=sd_init, cluster_dir=cluster_dir, init=the_rest)
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 patience = args.scheduler_patience // args.eval_interval
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',

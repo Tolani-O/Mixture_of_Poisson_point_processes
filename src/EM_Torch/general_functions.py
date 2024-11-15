@@ -777,9 +777,7 @@ def plot_training_epoch_results(input_dict):
 def plot_test_epoch_results(input_dict):
     print('Plotting epoch results')
     output_dir = input_dict['output_dir']
-    true_ELBO_test, true_offset_penalty_train, true_offset_penalty_test = input_dict['true_ELBO_test'], input_dict['true_offset_penalty_train'], input_dict['true_offset_penalty_test']
-    plot_losses(true_ELBO_test, output_dir, 'test', 'log_likelihoods', 10)
-    plot_losses(None, output_dir, 'test', 'losses', 10)
+    true_offset_penalty_train = input_dict['true_offset_penalty_train']
     plot_losses(None, output_dir, 'test', 'beta_MSE')
     plot_losses(None, output_dir, 'test', 'alpha_MSE')
     plot_losses(None, output_dir, 'test', 'theta_MSE')
@@ -791,7 +789,10 @@ def plot_test_epoch_results(input_dict):
     plot_losses(None, output_dir, 'train', 'gains_MSE')
     plot_losses(None, output_dir, 'test', 'gains_MSE')
     plot_losses(true_offset_penalty_train, output_dir, 'train', 'ltriLkhd', 10)
-    plot_losses(true_offset_penalty_test, output_dir, 'test', 'ltriLkhd', 10)
+    # true_ELBO_test, true_offset_penalty_test = input_dict['true_ELBO_test'], input_dict['true_offset_penalty_test']
+    # plot_losses(true_ELBO_test, output_dir, 'test', 'log_likelihoods', 10)
+    # plot_losses(None, output_dir, 'test', 'losses', 10)
+    # plot_losses(true_offset_penalty_test, output_dir, 'test', 'ltriLkhd', 10)
 
 
 def load_tensors(arrays):

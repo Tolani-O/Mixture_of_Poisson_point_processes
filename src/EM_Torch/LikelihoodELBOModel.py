@@ -288,6 +288,7 @@ class LikelihoodELBOModel(nn.Module):
         W_CKAL = W_CKL.reshape(W_CKL.shape[0], W_CKL.shape[1], self.n_areas, -1)
         for i in range(self.n_areas):
             if torch.all(W_AL[i] < tol):
+                W_CKAL[:, :, i, :] = tol  # bandaid fix
                 continue
             while torch.any(W_AL[i] < tol):
                 min_idx = torch.argmin(W_AL[i])  # index of min population factor

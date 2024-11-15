@@ -4,53 +4,43 @@ import sys
 sys.path.append(os.path.abspath('.'))
 from src.EM_Torch.simulate_data_multitrial import DataAnalyzer
 from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
-from src.EM_Torch.general_functions import initialize_clusters, create_relevant_files, get_parser, plot_outputs, \
-    plot_initial_clusters, write_log_and_model, write_losses, plot_epoch_results, write_grad_norms, load_tensors, to_cuda, \
-    inv_softplus_torch, preprocess_input_data
+from src.EM_Torch.general_functions import parse_folder_name, load_model_checkpoint, create_relevant_files, get_parser, plot_outputs, \
+    write_log_and_model, write_losses, plot_epoch_results, write_grad_norms, load_tensors, to_cuda, \
+    inv_softplus_torch, compute_uncertainty, preprocess_input_data
 import numpy as np
 import time
 import torch
 import torch.nn.functional as F
 import threading
+from ast import literal_eval
 outputs_folder = 'outputs'
 
 args = get_parser().parse_args()
-args.data_seed = np.random.randint(0, 2 ** 32 - 1)
+parser_key = ['seed', 'K', 'A', 'C', 'L', 'R', 'tauBeta', 'tauConfig', 'tauSigma', 'tauSD', 'posterior', 'iters', 'lr', 'temp', 'weight', 'notes']
+args.folder_name = ('seed2062619067_simulated_DataInit_K100_A3_C5_L5_R15_tauBeta800_tauConfig500_tauSigma1_'
+                    'tauSD10000_posterior7_iters200000_lr0.0001_temp(1, 1000)_weight(10, 1)_notes-mask 0 theRest zeros')
+parser_dict = parse_folder_name(args.folder_name, parser_key, outputs_folder, args.load_run)
 
-args.n_trials = 15  # R
-args.n_configs = 5  # C
-args.K = 100  # K
-args.A = 3  # A
-args.L = 5  # L
-args.n_trial_samples = 10  # Number of samples to generate for each trial
-
-args.data_seed = 2000921404
-# args.n_trials = 5
-# args.n_configs = 3
-# args.K = 10
-# args.A = 2
-# args.L = 3  # L
-# args.n_trial_samples = 1
-
-init = 'Data'
-# init = 'Rand'
-# init = 'Zero'
-# init = 'True'
-the_rest = 'zeros'
-args.notes = f'mask 0 theRest zeros'
-args.time_warp = False
+args.data_seed = int(parser_dict['seed'])
+args.n_trials = int(parser_dict['R'])  # R
+args.n_configs = int(parser_dict['C'])  # C
+args.K = int(parser_dict['K'])  # K
+args.A = int(parser_dict['A'])  # A
+args.L = int(parser_dict['L'])  # L
+args.notes = parser_dict['notes']
 args.log_interval = 500
 args.eval_interval = 500
-args.lr = 0.0001
-args.num_epochs = 200000
-# args.temperature = (1,)
-# args.weights = (1,)
-args.tau_beta = 800
-args.tau_config = 500
-args.tau_sigma = 1
-args.tau_sd = 10000
-sd_init = 0.5
-args.init_with_DTW = True
+args.lr = float(parser_dict['lr'])
+args.temperature = literal_eval(parser_dict['temp'])
+args.weights = literal_eval(parser_dict['weight'])
+if args.num_epochs >= 0:
+    args.num_epochs = int(parser_dict['iters'])
+args.tau_beta = float(parser_dict['tauBeta'])
+args.tau_config = float(parser_dict['tauConfig'])
+args.tau_sigma = float(parser_dict['tauSigma'])
+args.tau_sd = float(parser_dict['tauSD'])
+args.n_trial_samples = int(parser_dict['posterior'])  # Number of samples to generate for each trial
+# args.load_run = 1
 
 if args.eval_interval > args.log_interval:
     args.log_interval = args.eval_interval
@@ -80,18 +70,10 @@ _, _, factor_assignment_onehot_test, neuron_gains_test, trial_offsets_test = to_
                                                                                      move_to_cuda=args.cuda)
 processed_inputs_train = preprocess_input_data(*to_cuda((Y_train, factor_access_train), move_to_cuda=args.cuda))
 processed_inputs_test = preprocess_input_data(*to_cuda((Y_test, factor_access_test), move_to_cuda=args.cuda))
-
-#DELETE
-remove_indcs = torch.concat(torch.where(factor_assignment_onehot_train == 1)).reshape(3, -1)
-remove_indcs = remove_indcs[:, torch.isin(remove_indcs[2], torch.tensor([0,1,3,4,5,8], device=remove_indcs.device.type))]
-processed_inputs_train['neuron_factor_access'][remove_indcs[0], remove_indcs[1]] = 0
-factor_assignment_onehot_train[remove_indcs[0], remove_indcs[1]] = 0
-neuron_gains_train[remove_indcs[0], remove_indcs[1]] = 0
-
-peak1_left_landmarks = data.time[[data.left_landmark1] * args.L]
-peak1_right_landmarks = data.time[[data.right_landmark1] * args.L]
-peak2_left_landmarks = data.time[[data.left_landmark2] * args.L]
-peak2_right_landmarks = data.time[[data.right_landmark2] * args.L]
+peak1_left_landmarks = parser_dict['peak1_left_landmarks']
+peak1_right_landmarks = parser_dict['peak1_right_landmarks']
+peak2_left_landmarks = parser_dict['peak2_left_landmarks']
+peak2_right_landmarks = parser_dict['peak2_right_landmarks']
 unique_regions = [f'region{i}' for i in range(args.A)]
 
 # initialize the model with ground truth params
@@ -125,49 +107,34 @@ ltri_matrix = model.ltri_matix()
 true_offset_penalty_train = (1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_train, ltri_matrix).sum().item()
 true_offset_penalty_test = (1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_test, ltri_matrix).sum().item()
 model.cpu()
-args.folder_name = (
-    f'seed{args.data_seed}_simulated_{init}Init_K{args.K}_A{args.A}_C{args.n_configs}_L{args.L}'
-    f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauSD{args.tau_sd}'
-    f'_posterior{args.n_trial_samples}_iters{args.num_epochs}_lr{args.lr}_temp{args.temperature}_weight{args.weights}'
-    f'_notes-{args.notes}')
-output_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, 'Run_0')
+output_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, f'Run_{args.load_run + 1}')
 os.makedirs(output_dir, exist_ok=True)
 plot_outputs(model, unique_regions, output_dir, 'Train', -2)
-# Initialize the model
-folder_name = f'{args.data_seed}-seed_{args.A}-regions_{args.L}-factors'
-folder_path = os.path.join(os.getcwd(), outputs_folder, 'metadata')
-if args.init_with_DTW:
-    cluster_dir = os.path.join(folder_path, folder_name)
-    if not os.path.exists(os.path.join(cluster_dir, f'cluster_initialization.pkl')):
-        initialize_clusters(processed_inputs_train['Y'].cpu(),
-                            processed_inputs_train['neuron_factor_access'].cpu(),
-                            args.L, args.A, cluster_dir, n_jobs=15, bandwidth=4)
-        plot_initial_clusters(folder_path, folder_name, args.L, {'Y': Y_train, 'time': data.time})
-else:
-    cluster_dir = None
-if init == 'True':
-    model.init_ground_truth(beta=data.beta.clone(),
-                            alpha=inv_softplus_torch(data.alpha.clone()),
-                            config_peak_offsets=data.config_peak_offsets.clone(),
-                            trial_peak_offset_proposal_means=trial_offsets_train.clone().squeeze().cpu(),
-                            trial_peak_offset_covar_ltri=data.trial_peak_offset_covar_ltri.clone(),
-                            W_CKL=factor_assignment_onehot_train.clone().cpu(),
-                            theta=data.theta.clone(),
-                            pi=F.softmax(data.pi.clone().reshape(args.A, -1), dim=1).flatten(),
-                            sd_init=1e-5, init=the_rest)
-elif init == 'Rand':
-    model.init_random()
-elif init == 'Zero':
-    model.init_zero()
-elif init == 'Data':
-    model.init_from_data(Y=Y_train, factor_access=processed_inputs_train['neuron_factor_access'].cpu(),
-                         sd_init=sd_init, cluster_dir=cluster_dir, init=the_rest)
+# Load the model
+load_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, f'Run_{args.load_run}')
+model_state, optimizer_state, scheduler_state, W_CKL, a_CKL, theta, pi, args.load_epoch = load_model_checkpoint(load_dir, args.load_epoch)
+model.init_zero()
+model.load_state_dict(model_state)
+model.W_CKL, model.a_CKL, model.theta, model.pi = W_CKL, a_CKL, theta, pi
+if args.num_epochs < 0:
+    model.cuda(move_to_cuda=args.cuda)
+    se_dict = compute_uncertainty(model, processed_inputs_train, output_dir, args.load_epoch)
+    model.cpu()
+    plot_outputs(model, unique_regions, output_dir, 'Train', args.load_epoch, se_dict)
+    sys.exit()
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+optimizer.load_state_dict(optimizer_state)
+if args.cuda:
+    for state in optimizer.state.values():
+        for k, v in state.items():
+            if isinstance(v, torch.Tensor):
+                state[k] = v.to('cuda')
 patience = args.scheduler_patience // args.eval_interval
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
                                                        factor=args.scheduler_factor,
                                                        patience=patience, threshold_mode='abs',
                                                        threshold=args.scheduler_threshold)
+scheduler.load_state_dict(scheduler_state)
 output_str = (
     f"Using CUDA: {args.cuda}\n"
     f"Num available GPUs: {torch.cuda.device_count()}\n"
@@ -180,10 +147,10 @@ output_str = (
     f"True Offset Likelihood Training: {true_offset_penalty_train},\n"
     f"True Offset Likelihood Test: {true_offset_penalty_test}\n\n")
 params = {
-    'peak1_left_landmarks': peak1_left_landmarks.tolist(),
-    'peak1_right_landmarks': peak1_right_landmarks.tolist(),
-    'peak2_left_landmarks': peak2_left_landmarks.tolist(),
-    'peak2_right_landmarks': peak2_right_landmarks.tolist(),
+    'peak1_left_landmarks': peak1_left_landmarks,
+    'peak1_right_landmarks': peak1_right_landmarks,
+    'peak2_left_landmarks': peak2_left_landmarks,
+    'peak2_right_landmarks': peak2_right_landmarks,
 }
 create_relevant_files(output_dir, output_str, params=params, ground_truth=True)
 plot_outputs(model, unique_regions, output_dir, 'Train', -1)
@@ -201,8 +168,6 @@ if __name__ == "__main__":
     log_likelihoods_train = []
     losses_train = []
     epoch_train = []
-    log_likelihoods_test = []
-    losses_test = []
     beta_mses = []
     alpha_mses = []
     theta_mses = []
@@ -212,9 +177,7 @@ if __name__ == "__main__":
     Sigma_mses = []
     proposal_means_mses = []
     ltriLkhd_train = []
-    ltriLkhd_test = []
     gains_train = []
-    gains_test = []
     batch_grad_norms = {name: [] for name, param in model.named_parameters() if param.requires_grad}
     grad_norms = {name: [] for name, param in model.named_parameters() if param.requires_grad}
     input_dict = {
@@ -224,9 +187,7 @@ if __name__ == "__main__":
         'grad_norms': list(grad_norms.keys()),
         'likelihood_ground_truth_train': likelihood_ground_truth_train,
         'true_ELBO_train': true_ELBO_train,
-        'true_ELBO_test': true_ELBO_test,
         'true_offset_penalty_train': true_offset_penalty_train,
-        'true_offset_penalty_test': true_offset_penalty_test,
         'Y': Y_train,
         'model_params': {
             'time': data.time,
@@ -246,7 +207,7 @@ if __name__ == "__main__":
     total_time = 0
     start_time = time.time()
     batch_ct = 0
-    start_epoch = 0
+    start_epoch = args.load_epoch + 1
     for epoch in range(start_epoch, start_epoch + args.num_epochs):
         model.cuda(move_to_cuda=args.cuda)
         optimizer.zero_grad()
@@ -269,21 +230,16 @@ if __name__ == "__main__":
                 likelihood_term = model.forward(processed_inputs_train, train=False)
                 true_likelihood_term = model.log_likelihood(processed_inputs_train)
                 model_factor_assignment_train, model_neuron_gains_train = model.infer_latent_variables(processed_inputs_train)
-                likelihood_term_test = model.forward(processed_inputs_test, train=False)
-                model_factor_assignment_test, model_neuron_gains_test = model.infer_latent_variables(processed_inputs_test)
 
                 losses_train.append((likelihood_term + penalty_term).item())
                 log_likelihoods_train.append((1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * likelihood_term.item())
                 true_likelihoods_train.append((1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * true_likelihood_term.item())
-                losses_test.append((likelihood_term_test + penalty_term).item())
-                log_likelihoods_test.append((1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * likelihood_term_test.item())
+
                 epoch_train.append(epoch)
                 scheduler.step(log_likelihoods_train[-1])
 
                 non_zero_model_train = torch.nonzero(model_factor_assignment_train)
-                non_zero_model_test = torch.nonzero(model_factor_assignment_test)
                 non_zero_data_train = torch.nonzero(factor_assignment_onehot_train)
-                non_zero_data_test = torch.nonzero(factor_assignment_onehot_test)
 
                 beta_model = model.unnormalized_log_factors()[non_zero_model_train[:, 2]]
                 beta_data = data.beta[non_zero_data_train[:, 2]]
@@ -319,7 +275,6 @@ if __name__ == "__main__":
                 config_mses.append(F.mse_loss(config_model, config_data).item())
 
                 gains_train.append(F.mse_loss(neuron_gains_train, model_neuron_gains_train).item())
-                gains_test.append(F.mse_loss(neuron_gains_test, model_neuron_gains_test).item())
                 trial_offsets_data_train = trial_offsets_train.squeeze().permute(1, 0, 2).reshape(
                     trial_offsets_train.shape[2],
                     trial_offsets_train.shape[1],
@@ -330,7 +285,6 @@ if __name__ == "__main__":
                     2, model.n_factors)[non_zero_data_train[:, 0], :, :, non_zero_data_train[:, 2]]
                 proposal_means_mses.append(F.mse_loss(trial_offsets_data_train, trial_offsets_proposal_means).item())
                 ltriLkhd_train.append((1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_train, ltri_matrix).sum().item())
-                ltriLkhd_test.append((1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_test, ltri_matrix).sum().item())
 
         if epoch == start_epoch or epoch % args.log_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             end_time = time.time()  # Record the end time of the epoch
@@ -338,10 +292,7 @@ if __name__ == "__main__":
             total_time += elapsed_time  # Calculate the total time for training
             cur_log_likelihood_train = log_likelihoods_train[-1]
             cur_loss_train = losses_train[-1]
-            cur_log_likelihood_test = log_likelihoods_test[-1]
-            cur_loss_test = losses_test[-1]
             cur_ltriLkhd_train = ltriLkhd_train[-1]
-            cur_ltriLkhd_test = ltriLkhd_test[-1]
             model.cpu()
             with torch.no_grad():
                 pi = model.pi.numpy().round(3)
@@ -350,8 +301,7 @@ if __name__ == "__main__":
             output_str = (
                 f"Epoch: {epoch:2d}, Elapsed Time: {elapsed_time / 60:.2f} mins, Total Time: {total_time / (60 * 60):.2f} hrs,\n"
                 f"Loss train: {cur_loss_train:.5f}, Log Likelihood train: {cur_log_likelihood_train:.5f},\n"
-                f"Loss test: {cur_loss_test:.5f}, Log Likelihood test: {cur_log_likelihood_test:.5f},\n"
-                f"ltriLkhd_train: {cur_ltriLkhd_train:.5f}, ltriLkhd_test: {cur_ltriLkhd_test:.5f},\n"
+                f"ltriLkhd_train: {cur_ltriLkhd_train:.5f},\n"
                 f"pi:\n{pi.T.reshape(model.n_areas, -1)},\n"
                 f"alpha:\n{alpha.reshape(model.n_areas, -1)},\n"
                 f"theta:\n{theta.reshape(model.n_areas, -1)},\n"
@@ -369,8 +319,6 @@ if __name__ == "__main__":
             write_losses(log_likelihoods_batch, 'batch', 'log_likelihoods', output_dir, is_empty)
             write_losses(losses_batch, 'batch', 'losses', output_dir, is_empty)
             write_losses(epoch_batch, 'batch', 'epoch', output_dir, is_empty)
-            write_losses(log_likelihoods_test, 'test', 'log_likelihoods', output_dir, is_empty)
-            write_losses(losses_test, 'test', 'losses', output_dir, is_empty)
             write_losses(beta_mses, 'test', 'beta_MSE', output_dir, is_empty)
             write_losses(alpha_mses, 'test', 'alpha_MSE', output_dir, is_empty)
             write_losses(theta_mses, 'test', 'theta_MSE', output_dir, is_empty)
@@ -380,9 +328,7 @@ if __name__ == "__main__":
             write_losses(Sigma_mses, 'test', 'Sigma_MSE', output_dir, is_empty)
             write_losses(proposal_means_mses, 'test', 'proposal_means_MSE', output_dir, is_empty)
             write_losses(gains_train, 'train', 'gains_MSE', output_dir, is_empty)
-            write_losses(gains_test, 'test', 'gains_MSE', output_dir, is_empty)
             write_losses(ltriLkhd_train, 'train', 'ltriLkhd', output_dir, is_empty)
-            write_losses(ltriLkhd_test, 'test', 'ltriLkhd', output_dir, is_empty)
 
             input_dict['epoch'] = epoch
             plot_thread = threading.Thread(target=plot_epoch_results, args=(input_dict, True))
@@ -395,8 +341,6 @@ if __name__ == "__main__":
             log_likelihoods_train = []
             losses_train = []
             epoch_train = []
-            log_likelihoods_test = []
-            losses_test = []
             beta_mses = []
             alpha_mses = []
             theta_mses = []
@@ -406,9 +350,7 @@ if __name__ == "__main__":
             Sigma_mses = []
             proposal_means_mses = []
             ltriLkhd_train = []
-            ltriLkhd_test = []
             gains_train = []
-            gains_test = []
             batch_grad_norms = {name: [] for name, param in model.named_parameters() if param.requires_grad}
             grad_norms = {name: [] for name, param in model.named_parameters() if param.requires_grad}
             print(output_str)

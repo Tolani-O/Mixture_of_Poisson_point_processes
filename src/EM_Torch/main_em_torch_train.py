@@ -32,10 +32,10 @@ args.data_seed = 2000921404
 # args.L = 3  # L
 # args.n_trial_samples = 1
 
-init = 'Data'
-# init = 'Rand'
-# init = 'Zero'
-# init = 'True'
+args.init = 'dtw'
+# args.init = 'rand'
+# args.init = 'zero'
+# args.init = 'true'
 the_rest = 'zeros'
 args.notes = f'mask 0 theRest zeros'
 args.time_warp = False
@@ -50,7 +50,6 @@ args.tau_config = 500
 args.tau_sigma = 1
 args.tau_sd = 10000
 sd_init = 0.5
-args.init_with_DTW = True
 
 if args.eval_interval > args.log_interval:
     args.log_interval = args.eval_interval
@@ -115,7 +114,7 @@ ltri_matrix = model.ltri_matix()
 true_offset_penalty_train = (1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_train, ltri_matrix).sum().item()
 model.cpu()
 args.folder_name = (
-    f'seed{args.data_seed}_simulated_{init}Init_K{args.K}_A{args.A}_C{args.n_configs}_L{args.L}'
+    f'seed{args.data_seed}_simulated_{args.init}Init_K{args.K}_A{args.A}_C{args.n_configs}_L{args.L}'
     f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauSD{args.tau_sd}'
     f'_posterior{args.n_trial_samples}_iters{args.num_epochs}_lr{args.lr}_temp{args.temperature}_weight{args.weights}'
     f'_notes-{args.notes}')
@@ -125,16 +124,7 @@ plot_outputs(model, unique_regions, output_dir, 'Train', -2)
 # Initialize the model
 folder_name = f'{args.data_seed}-seed_{args.A}-regions_{args.L}-factors'
 folder_path = os.path.join(os.getcwd(), outputs_folder, 'metadata')
-if args.init_with_DTW:
-    cluster_dir = os.path.join(folder_path, folder_name)
-    if not os.path.exists(os.path.join(cluster_dir, f'cluster_initialization.pkl')):
-        initialize_clusters(processed_inputs_train['Y'].cpu(),
-                            processed_inputs_train['neuron_factor_access'].cpu(),
-                            args.L, args.A, cluster_dir, n_jobs=15, bandwidth=4)
-        plot_initial_clusters(folder_path, folder_name, args.L, {'Y': Y_train, 'time': data.time})
-else:
-    cluster_dir = None
-if init == 'True':
+if args.init.lower() == 'true':
     model.init_ground_truth(beta=data.beta.clone(),
                             alpha=inv_softplus_torch(data.alpha.clone()),
                             config_peak_offsets=data.config_peak_offsets.clone(),
@@ -144,13 +134,22 @@ if init == 'True':
                             theta=data.theta.clone(),
                             pi=F.softmax(data.pi.clone().reshape(args.A, -1), dim=1).flatten(),
                             sd_init=1e-5, init=the_rest)
-elif init == 'Rand':
+elif args.init.lower() == 'rand':
     model.init_random()
-elif init == 'Zero':
+elif args.init.lower() == 'zero':
     model.init_zero()
-elif init == 'Data':
+elif args.init.lower() == 'dtw':
+    cluster_dir = os.path.join(folder_path, folder_name)
+    if not os.path.exists(os.path.join(cluster_dir, f'cluster_initialization.pkl')):
+        initialize_clusters(processed_inputs_train['Y'].cpu(),
+                            processed_inputs_train['neuron_factor_access'].cpu(),
+                            args.L, args.A, cluster_dir, n_jobs=15, bandwidth=4)
+        plot_initial_clusters(folder_path, folder_name, args.L, {'Y': Y_train, 'time': data.time})
     model.init_from_data(Y=Y_train, factor_access=processed_inputs_train['neuron_factor_access'].cpu(),
                          sd_init=sd_init, cluster_dir=cluster_dir, init=the_rest)
+elif args.init.lower() == 'mom':
+    model.init_from_data(Y=Y_train, factor_access=processed_inputs_train['neuron_factor_access'].cpu(),
+                         sd_init=sd_init, init=the_rest)
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 patience = args.scheduler_patience // args.eval_interval
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',

@@ -49,8 +49,8 @@ def get_parser():
     parser.add_argument('--param_seed', type=int_or_str, default='', help='options are: seed (int), Truth (str)')
     parser.add_argument('--log_interval', type=int, default=100, metavar='N', help='report interval (default: 100')
     parser.add_argument('--eval_interval', type=int, default=100, metavar='N', help='report interval (default: 10')
-    parser.add_argument('--batch_size', type=int_or_str, default='All', help='the batch size for training')
-    parser.add_argument('--init_with_DTW', type=bool, default=False, help='How should the latent factors be initialized')
+    parser.add_argument('--init', type=str, default='dtw', help='initialization for the algorithm. options are: '
+                                                                'dtw, mom, rand, zero, true')
     return parser
 
 

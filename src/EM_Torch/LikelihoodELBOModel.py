@@ -109,6 +109,7 @@ class LikelihoodELBOModel(nn.Module):
         self.trial_peak_offset_proposal_means = nn.Parameter(torch.randn(self.n_trials, self.n_configs, n_dims, dtype=torch.float64))
         self.trial_peak_offset_proposal_sds = nn.Parameter(torch.rand(self.n_trials, self.n_configs, n_dims, dtype=torch.float64) + 1)
         self.pi = F.softmax(torch.randn(self.n_areas, self.n_factors // self.n_areas, dtype=torch.float64), dim=1).flatten()
+        self.theta = torch.rand(self.n_factors, dtype=torch.float64)
         self.standard_init()
 
 
@@ -123,11 +124,11 @@ class LikelihoodELBOModel(nn.Module):
         self.trial_peak_offset_proposal_means = nn.Parameter(torch.zeros(self.n_trials, self.n_configs, n_dims, dtype=torch.float64))
         self.trial_peak_offset_proposal_sds = nn.Parameter(torch.ones(self.n_trials, self.n_configs, n_dims, dtype=torch.float64))
         self.pi = F.softmax(torch.zeros(self.n_areas, self.n_factors // self.n_areas, dtype=torch.float64), dim=1).flatten()
+        self.theta = torch.ones(self.n_factors, dtype=torch.float64)
         self.standard_init()
 
 
     def standard_init(self):
-        self.theta = None
         self.W_CKL = None
         self.a_CKL = None
 
@@ -339,8 +340,8 @@ class LikelihoodELBOModel(nn.Module):
         s_new = avg_peak_times + offsets
         left_landmarks = (self.time[torch.cat([self.peak1_left_landmarks, self.peak2_left_landmarks])]).unsqueeze(0).unsqueeze(1).unsqueeze(2)
         right_landmarks = (self.time[torch.cat([self.peak1_right_landmarks, self.peak2_right_landmarks])]).unsqueeze(0).unsqueeze(1).unsqueeze(2)
-        s_new = torch.where(s_new <= left_landmarks, left_landmarks + self.dt, s_new)
-        s_new = torch.where(s_new >= right_landmarks, right_landmarks - self.dt, s_new)
+        s_new = torch.where(s_new <= left_landmarks, left_landmarks, s_new)
+        s_new = torch.where(s_new >= right_landmarks, right_landmarks, s_new)
         return avg_peak_times, left_landmarks, right_landmarks, s_new
 
 

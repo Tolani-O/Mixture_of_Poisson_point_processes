@@ -17,7 +17,7 @@ outputs_folder = 'outputs'
 args = get_parser().parse_args()
 args.data_seed = np.random.randint(0, 2 ** 32 - 1)
 
-init = 'Data'
+args.init = 'dtw'
 the_rest = 'zeros'
 args.notes = f'masking 5'
 args.log_interval = 500
@@ -32,16 +32,16 @@ args.tau_sigma = 1
 args.tau_sd = 10000
 # args.L = 3
 sd_init = 0.5
-args.init_with_DTW = False
+args.n_trial_samples = 7  # Number of samples to generate for each trial
 args.n_trial_samples = 10  # Number of samples to generate for each trial
 # peak1_left_landmarks = [0.03, 0.03, 0.03]
 # peak1_right_landmarks = [0.11, 0.14, 0.13]
 # peak2_left_landmarks = [0.17, 0.18, 0.18]
 # peak2_right_landmarks = [0.31, 0.32, 0.30]
-peak1_left_landmarks = [0.01] * args.L
-peak1_right_landmarks = [0.14] * args.L
-peak2_left_landmarks = [0.15] * args.L
-peak2_right_landmarks = [0.30] * args.L
+peak1_left_landmarks = [0.02] * args.L
+peak1_right_landmarks = [0.12] * args.L
+peak2_left_landmarks = [0.16] * args.L
+peak2_right_landmarks = [0.27] * args.L
 dt = 0.002
 
 regions = None
@@ -86,27 +86,26 @@ print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_acces
 args.K, T, args.n_trials, args.n_configs = Y_train.shape
 num_factors = factor_access_train.shape[-1]
 args.A = int(num_factors/args.L)
-if args.init_with_DTW:
+model = LikelihoodELBOModel(bin_time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
+                            peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
+                            temperature=args.temperature, weights=args.weights)
+# Initialize the model
+if args.init.lower() == 'rand':
+    model.init_random()
+elif args.init.lower() == 'zero':
+    model.init_zero()
+elif args.init.lower() == 'dtw':
     cluster_dir = os.path.join(folder_path, folder_name)
     if not os.path.exists(os.path.join(cluster_dir, f'cluster_initialization.pkl')):
         initialize_clusters(processed_inputs_train['Y'].cpu(),
                             processed_inputs_train['neuron_factor_access'].cpu(),
                             args.L, args.A, cluster_dir, n_jobs=15, bandwidth=4)
         plot_initial_clusters(folder_path, folder_name, args.L)
-else:
-    cluster_dir = None
-model = LikelihoodELBOModel(bin_time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
-                            peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
-                            temperature=args.temperature, weights=args.weights)
-# Initialize the model
-if init == 'Rand':
-    model.init_random()
-elif init == 'Zero':
-    model.init_zero()
-elif init == 'Data':
-    model.init_from_data(Y=processed_inputs_train['Y'].cpu(),
-                         factor_access=processed_inputs_train['neuron_factor_access'].cpu(),
+    model.init_from_data(Y=processed_inputs_train['Y'].cpu(), factor_access=processed_inputs_train['neuron_factor_access'].cpu(),
                          sd_init=sd_init, cluster_dir=cluster_dir, init=the_rest)
+elif args.init.lower() == 'mom':
+    model.init_from_data(Y=processed_inputs_train['Y'].cpu(), factor_access=processed_inputs_train['neuron_factor_access'].cpu(),
+                         sd_init=sd_init, init=the_rest)
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 patience = args.scheduler_patience//args.eval_interval
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
@@ -114,7 +113,7 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
                                                        patience=patience, threshold_mode='abs',
                                                        threshold=args.scheduler_threshold)
 args.folder_name = (
-    f'seed{args.data_seed}_Real_{init}Init_K{args.K}_A{args.A}_C{args.n_configs}_L{args.L}'
+    f'seed{args.data_seed}_Real_{args.init}Init_K{args.K}_A{args.A}_C{args.n_configs}_L{args.L}'
     f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauSD{args.tau_sd}'
     f'_posterior{args.n_trial_samples}_iters{args.num_epochs}_lr{args.lr}_temp{args.temperature}_weight{args.weights}'
     f'_notes-{args.notes}')

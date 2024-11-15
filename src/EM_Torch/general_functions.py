@@ -501,7 +501,7 @@ def plot_initial_clusters(output_dir, data_folder, n_clusters, data=None):
             raise FileNotFoundError(f"Data directory not found: {data_dir}")
         with open(data_dir, 'rb') as f:
             data = pickle.load(f)
-    Y, time = data['Y'], data['time']
+    Y, time = torch.tensor(data['Y']), torch.tensor(data['time'])
     cluster_dir = os.path.join(output_dir, data_folder, 'cluster_initialization.pkl')
     if not os.path.exists(cluster_dir):
         raise FileNotFoundError(f"Cluster directory not found: {cluster_dir}")
@@ -510,8 +510,9 @@ def plot_initial_clusters(output_dir, data_folder, n_clusters, data=None):
     y_pred, neuron_factor_assignment, beta = cluster['y_pred'], cluster['neuron_factor_assignment'], cluster['beta']
     y_pred = ((y_pred + 1) * neuron_factor_assignment.sum(dim=-1)).int()
     factors = F.softmax(beta, dim=-1)
-    Y_train = Y.sum(axis=2).permute(2, 0, 1)  # C x K x T
-    Y_train = Y_train / Y_train.sum(dim=-1).unsqueeze(-1)
+    Y_train = Y.sum(axis=2).permute(2, 0, 1).float()  # C x K x T
+    Y_train = F.softmax(Y_train, dim=-1)
+    # Y_train = (Y_train / Y_train.sum(dim=-1).unsqueeze(-1)).nan_to_num(0) * neuron_factor_assignment.sum(dim=-1).unsqueeze(-1)
     n_factors = beta.shape[0]
     n_areas = n_factors // n_clusters
     plt.figure(figsize=(n_areas * 10, n_clusters * 5))
@@ -761,6 +762,7 @@ def plot_training_epoch_results(input_dict):
     model.init_zero()
     model.load_state_dict(model_state)
     model.W_CKL, model.a_CKL, model.theta, model.pi = W_CKL, a_CKL, theta, pi
+    Y = torch.tensor(Y, dtype=model.W_CKL.dtype)
     likelihood_ground_truth_train, true_ELBO_train = input_dict['likelihood_ground_truth_train'], input_dict['true_ELBO_train']
     plot_outputs(model, unique_regions, output_dir, 'Train', epoch, Y=Y)
     plot_grad_norms(batch_grad_norms, output_dir, 'batch', 20, False)

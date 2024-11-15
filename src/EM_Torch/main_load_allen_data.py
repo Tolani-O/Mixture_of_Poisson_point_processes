@@ -155,7 +155,7 @@ if __name__ == "__main__":
         'grad_norms': list(grad_norms.keys()),
         'likelihood_ground_truth_train': None,
         'true_ELBO_train': None,
-        'Y': torch.tensor(Y_train),
+        'Y': Y_train,
         'model_params': {
             'time': bin_time,
             'n_factors': num_factors,

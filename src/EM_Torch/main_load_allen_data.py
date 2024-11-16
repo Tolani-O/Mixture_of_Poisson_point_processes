@@ -6,7 +6,7 @@ from src.EM_Torch.Allen_data_torch import EcephysAnalyzer, save_sample, load_sam
 from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
 from src.EM_Torch.general_functions import initialize_clusters, create_relevant_files, get_parser, plot_outputs, \
     plot_initial_clusters, write_log_and_model, write_losses, plot_epoch_results, write_grad_norms, \
-    load_tensors, to_cuda, preprocess_input_data
+    load_tensors, to_cuda, preprocess_input_data, plot_data_dispersion
 import numpy as np
 import time
 import torch
@@ -17,23 +17,22 @@ outputs_folder = 'outputs'
 args = get_parser().parse_args()
 args.data_seed = np.random.randint(0, 2 ** 32 - 1)
 
-args.init = 'dtw'
+# args.init = 'rand'
 the_rest = 'zeros'
-args.notes = f'masking 5'
 args.log_interval = 500
 args.eval_interval = 500
 args.lr = 0.0001
 args.num_epochs = 200000
-args.temperature = (1, 1000)
-args.weights = (99, 1)
+# args.temperature = (1, 1000)
+# args.weights = (10, 1)
 args.mask_neuron_threshold = 5
-# args.tau_config = 500
+args.tau_beta = 800
+args.tau_config = 500
 args.tau_sigma = 1
 args.tau_sd = 10000
-# args.L = 3
+args.L = 5
 sd_init = 0.5
 args.n_trial_samples = 7  # Number of samples to generate for each trial
-args.n_trial_samples = 10  # Number of samples to generate for each trial
 # peak1_left_landmarks = [0.03, 0.03, 0.03]
 # peak1_right_landmarks = [0.11, 0.14, 0.13]
 # peak2_left_landmarks = [0.17, 0.18, 0.18]
@@ -43,10 +42,11 @@ peak1_right_landmarks = [0.12] * args.L
 peak2_left_landmarks = [0.16] * args.L
 peak2_right_landmarks = [0.27] * args.L
 dt = 0.002
+args.notes = f'masking {args.mask_neuron_threshold} the_rest {the_rest}'
 
 regions = None
 conditions = None
-# regions = ['VISp', 'VISl', 'VISal']
+regions = ['VISp', 'VISl', 'VISal']
 # conditions = [246, 251]
 
 if args.eval_interval > args.log_interval:
@@ -81,6 +81,7 @@ if Y_train is None:
     save_sample(Y_train, bin_time, factor_access_train, unique_regions, folder_path, folder_name)
 processed_inputs_train = preprocess_input_data(*to_cuda(load_tensors((Y_train, factor_access_train)),
                                                         move_to_cuda=args.cuda), mask_threshold=args.mask_neuron_threshold)
+Y_train, factor_access_train = processed_inputs_train['Y'].cpu(), processed_inputs_train['neuron_factor_access'].cpu()
 print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')
 
 args.K, T, args.n_trials, args.n_configs = Y_train.shape
@@ -97,15 +98,11 @@ elif args.init.lower() == 'zero':
 elif args.init.lower() == 'dtw':
     cluster_dir = os.path.join(folder_path, folder_name)
     if not os.path.exists(os.path.join(cluster_dir, f'cluster_initialization.pkl')):
-        initialize_clusters(processed_inputs_train['Y'].cpu(),
-                            processed_inputs_train['neuron_factor_access'].cpu(),
-                            args.L, args.A, cluster_dir, n_jobs=15, bandwidth=4)
+        initialize_clusters(Y_train, factor_access_train, args.L, args.A, cluster_dir, n_jobs=15, bandwidth=4)
         plot_initial_clusters(folder_path, folder_name, args.L)
-    model.init_from_data(Y=processed_inputs_train['Y'].cpu(), factor_access=processed_inputs_train['neuron_factor_access'].cpu(),
-                         sd_init=sd_init, cluster_dir=cluster_dir, init=the_rest)
+    model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, cluster_dir=cluster_dir, init=the_rest)
 elif args.init.lower() == 'mom':
-    model.init_from_data(Y=processed_inputs_train['Y'].cpu(), factor_access=processed_inputs_train['neuron_factor_access'].cpu(),
-                         sd_init=sd_init, init=the_rest)
+    model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, init=the_rest)
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 patience = args.scheduler_patience//args.eval_interval
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
@@ -133,6 +130,7 @@ params = {
 }
 create_relevant_files(output_dir, output_str, params=params)
 plot_outputs(model, unique_regions, output_dir, 'Train', -1)
+plot_data_dispersion(Y_train, factor_access_train, args.A, folder_path, folder_name, unique_regions, model.W_CKL)
 print(f'folder_name: {args.folder_name}\n\n')
 print(output_str)
 

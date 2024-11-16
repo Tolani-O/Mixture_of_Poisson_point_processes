@@ -17,7 +17,8 @@ outputs_folder = 'outputs'
 
 args = get_parser().parse_args()
 parser_key = ['seed', 'A', 'L', 'tauBeta', 'tauConfig', 'tauSigma', 'tauSD', 'posterior', 'iters', 'lr', 'temp', 'weight', 'notes']
-args.folder_name = 'seed3051898919_Real_DataInit_K305_A7_C40_L4_R15_tauBeta800.0_tauConfig500.0_tauSigma1_tauSD10000_posterior10_iters200000_lr0.0001_temp(1, 1000)_weight(99, 1)_notes-masking 5'
+args.folder_name = ('seed2997063451_Real_DataInit_K222_A3_C40_L5_R15_tauBeta800_tauConfig500_tauSigma1_tauSD10000_'
+                    'posterior7_iters200000_lr0.0001_temp(1, 1000)_weight(10, 1)_notes-masking 10 the_rest zeros')
 parser_dict = parse_folder_name(args.folder_name, parser_key, outputs_folder, args.load_run)
 
 args.data_seed = int(parser_dict['seed'])

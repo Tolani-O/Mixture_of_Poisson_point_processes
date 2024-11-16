@@ -99,8 +99,8 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def init_random(self):
-        self.beta = nn.Parameter(torch.log(torch.randn(self.n_factors, self.time.shape[0]-1, dtype=torch.float64)))
-        self.alpha = nn.Parameter(torch.randn(self.n_factors, dtype=torch.float64))
+        self.beta = nn.Parameter(torch.log(torch.rand(self.n_factors, self.time.shape[0]-1, dtype=torch.float64)))
+        self.alpha = nn.Parameter(torch.rand(self.n_factors, dtype=torch.float64))
         n_dims = 2 * self.n_factors
         num_elements = n_dims * (n_dims - 1) // 2
         self.config_peak_offsets = nn.Parameter(torch.randn(self.n_configs, n_dims, dtype=torch.float64))
@@ -176,6 +176,7 @@ class LikelihoodELBOModel(nn.Module):
             summed_neurons = torch.einsum('ktrc,ckl->lt', Y, factor_access)
             latent_factors = summed_neurons + torch.sqrt(torch.sum(summed_neurons, dim=-1)).unsqueeze(1) * torch.rand(self.n_factors, T)
             beta = torch.log(latent_factors)
+            filter = factor_access
         else:
             cluster_dir = os.path.join(cluster_dir, 'cluster_initialization.pkl')
             if not os.path.exists(cluster_dir):
@@ -186,17 +187,20 @@ class LikelihoodELBOModel(nn.Module):
             W_CKL, beta = data['neuron_factor_assignment'], data['beta']
             W_L = torch.sum(W_CKL, dim=(0, 1))
             pi = W_L / torch.sum(factor_access, dim=(0, 1))
-        spike_counts = torch.einsum('ktrc,ckl->ckl', Y, factor_access)
-        avg_spike_counts = torch.sum(spike_counts, dim=(0, 1)) / torch.sum(factor_access, dim=(0, 1))
-        print('Average spike counts:')
+            filter = W_CKL
+        # NOTE: Empirical average and variance of spike counts are for NB,not for gamma
+        spike_counts = torch.einsum('ktrc,ckl->ckl', Y, filter)
+        avg_spike_counts = torch.sum(spike_counts, dim=(0, 1)) / torch.sum(filter, dim=(0, 1))
+        print('Gamma average spike counts:')
         print(avg_spike_counts.reshape(self.n_areas, -1).numpy() / R)
-        sq_centered_spike_counts = (spike_counts - avg_spike_counts.unsqueeze(0).unsqueeze(1))**2 * factor_access
-        spike_ct_var = torch.sum(sq_centered_spike_counts, dim=(0,1)) / (torch.sum(factor_access, dim=(0, 1)))
-        print('Spike count variance - Average spike counts:')
-        print((spike_ct_var-avg_spike_counts).reshape(self.n_areas, -1).numpy() / R)
-        alpha = (avg_spike_counts)**2/(spike_ct_var-avg_spike_counts)
+        sq_centered_spike_counts = (spike_counts - avg_spike_counts.unsqueeze(0).unsqueeze(1))**2 * filter
+        spike_ct_var = torch.sum(sq_centered_spike_counts, dim=(0,1)) / (torch.sum(filter, dim=(0, 1)))
+        dispersion = spike_ct_var-avg_spike_counts
+        print('Gamma spike count sd:')
+        print(torch.sqrt(dispersion).reshape(self.n_areas, -1).numpy() / R)
+        alpha = (avg_spike_counts)**2/dispersion
         alpha = alpha.expm1().clamp_min(1e-6).log()
-        theta = R * avg_spike_counts/(spike_ct_var-avg_spike_counts)
+        theta = R * avg_spike_counts/dispersion
         self.init_ground_truth(beta=beta, alpha=alpha, theta=theta, sd_init=sd_init, W_CKL=W_CKL, pi=pi, init=init)
 
 
@@ -340,8 +344,8 @@ class LikelihoodELBOModel(nn.Module):
         s_new = avg_peak_times + offsets
         left_landmarks = (self.time[torch.cat([self.peak1_left_landmarks, self.peak2_left_landmarks])]).unsqueeze(0).unsqueeze(1).unsqueeze(2)
         right_landmarks = (self.time[torch.cat([self.peak1_right_landmarks, self.peak2_right_landmarks])]).unsqueeze(0).unsqueeze(1).unsqueeze(2)
-        s_new = torch.where(s_new <= left_landmarks, left_landmarks, s_new)
-        s_new = torch.where(s_new >= right_landmarks, right_landmarks, s_new)
+        s_new = torch.max(torch.stack([s_new, left_landmarks], dim=0), dim=0).values
+        s_new = torch.min(torch.stack([s_new, right_landmarks], dim=0), dim=0).values
         return avg_peak_times, left_landmarks, right_landmarks, s_new
 
 

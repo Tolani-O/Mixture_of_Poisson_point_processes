@@ -552,6 +552,28 @@ def plot_factor_assignments(factor_assignment, output_dir, folder, epoch, annot=
     plt.close()
 
 
+def plot_data_dispersion(Y, factor_access, n_areas, save_path, save_folder, regions, W_CKL=None):
+    # Y # K x T x R x C
+    # factor_access  # C x K x L
+    _, T, R, _ = Y.shape
+    if W_CKL is None:
+        filter = factor_access
+    else:
+        filter = W_CKL
+    spike_counts = torch.einsum('ktrc,ckl->ckl', Y, filter)
+    avg_spike_counts = torch.sum(spike_counts, dim=(0, 1)) / torch.sum(filter, dim=(0, 1))
+    sq_centered_spike_counts = (spike_counts - avg_spike_counts.unsqueeze(0).unsqueeze(1))**2 * filter
+    spike_ct_var = torch.sum(sq_centered_spike_counts, dim=(0,1)) / (torch.sum(filter, dim=(0, 1)))
+    dispersion = (spike_ct_var - avg_spike_counts).reshape(n_areas, -1)[:, 0]
+    plt.figure(figsize=(10, 6))
+    plt.bar(regions, dispersion)
+    plt.xlabel('Area')
+    plt.ylabel('Dispersion')
+    plt.title('Dispersion of Spike Counts')
+    plt.savefig(os.path.join(save_path, save_folder, 'data_dispersion.png'), dpi=200)
+    plt.close()
+
+
 def write_losses(list, name, metric, output_dir, starts_out_empty):
     file_name = f'{metric}_{name}.json'
     file_dir = os.path.join(output_dir, 'json', file_name)
@@ -745,6 +767,26 @@ def compute_uncertainty(model, processed_inputs, output_dir, epoch):
     with open(file_path, 'wb') as f:
         pickle.dump(se_dict, f)
     return se_dict
+
+
+def interpret_results(model, processed_inputs, output_dir, epoch):
+    # Interpret trial peak times # R x C x 2AL
+    factors = torch.exp(model.unnormalized_log_factors())
+    avg_peak1_times = model.time[torch.tensor([model.peak1_left_landmarks[i] + torch.argmax(factors[i, model.peak1_left_landmarks[i]:model.peak1_right_landmarks[i]]) for i in range(model.peak1_left_landmarks.shape[0])])]
+    avg_peak2_times = model.time[torch.tensor([model.peak2_left_landmarks[i] + torch.argmax(factors[i, model.peak2_left_landmarks[i]:model.peak2_right_landmarks[i]]) for i in range(model.peak2_left_landmarks.shape[0])])]
+    avg_peak_times = torch.cat([avg_peak1_times, avg_peak2_times]).unsqueeze(0).unsqueeze(1)
+    offsets = model.trial_peak_offset_proposal_means + model.config_peak_offsets.unsqueeze(0)
+    peak_times = avg_peak_times + offsets
+    left_landmarks = (model.time[torch.cat([model.peak1_left_landmarks, model.peak2_left_landmarks])]).unsqueeze(0).unsqueeze(1).expand_as(peak_times)
+    right_landmarks = (model.time[torch.cat([model.peak1_right_landmarks, model.peak2_right_landmarks])]).unsqueeze(0).unsqueeze(1).expand_as(peak_times)
+    peak_times = torch.max(torch.stack([peak_times, left_landmarks], dim=0), dim=0).values
+    peak_times = torch.min(torch.stack([peak_times, right_landmarks], dim=0), dim=0).values
+
+    # a = torch.cat(list(peak_times.permute(1, 0, 2)), dim=0).numpy()
+    # a2 = torch.cat(list(peak_times.permute(1, 0, 2)), dim=0).numpy()
+    # a3 = torch.cat(list(peak_times.permute(1, 0, 2)), dim=0).numpy()
+    # a = torch.cat(list(model.trial_peak_offset_proposal_means.permute(1, 0, 2)), dim=0).numpy()
+    # b = torch.cat(list((model.trial_peak_offset_proposal_means + model.config_peak_offsets.unsqueeze(0)).permute(1, 0, 2)), dim=0).numpy()
 
 
 def plot_epoch_results(input_dict, test=False):

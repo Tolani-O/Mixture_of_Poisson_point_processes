@@ -6,7 +6,7 @@ from src.EM_Torch.simulate_data_multitrial import DataAnalyzer
 from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
 from src.EM_Torch.general_functions import initialize_clusters, create_relevant_files, get_parser, plot_outputs, \
     plot_initial_clusters, write_log_and_model, write_losses, plot_epoch_results, write_grad_norms, load_tensors, to_cuda, \
-    inv_softplus_torch, preprocess_input_data
+    inv_softplus_torch, preprocess_input_data, plot_data_dispersion, interpret_results
 import numpy as np
 import time
 import torch
@@ -37,8 +37,7 @@ args.init = 'dtw'
 # args.init = 'zero'
 # args.init = 'true'
 the_rest = 'zeros'
-args.notes = f'mask 0 theRest zeros'
-args.time_warp = False
+# args.time_warp = False
 args.log_interval = 500
 args.eval_interval = 500
 args.lr = 0.0001
@@ -50,6 +49,7 @@ args.tau_config = 500
 args.tau_sigma = 1
 args.tau_sd = 10000
 sd_init = 0.5
+args.notes = f''
 
 if args.eval_interval > args.log_interval:
     args.log_interval = args.eval_interval
@@ -74,6 +74,7 @@ print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_acces
 _, _, factor_assignment_onehot_train, neuron_gains_train, trial_offsets_train = to_cuda(load_tensors(data.get_sample_ground_truth()),
                                                                                         move_to_cuda=args.cuda)
 processed_inputs_train = preprocess_input_data(*to_cuda((Y_train, factor_access_train), move_to_cuda=args.cuda))
+Y_train, factor_access_train = processed_inputs_train['Y'].cpu(), processed_inputs_train['neuron_factor_access'].cpu()
 
 #DELETE
 remove_indcs = torch.concat(torch.where(factor_assignment_onehot_train == 1)).reshape(3, -1)
@@ -108,6 +109,7 @@ with torch.no_grad():
                             init='')
     true_ELBO_train = model.forward(processed_inputs_train, update_membership=False, train=False)
     likelihood_ground_truth_train = model.log_likelihood(processed_inputs_train, E_step=True)
+    interpret_results(model, processed_inputs_train, 'output_dir', -2)
 true_ELBO_train = (1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * true_ELBO_train.item()
 likelihood_ground_truth_train = (1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * likelihood_ground_truth_train.item()
 ltri_matrix = model.ltri_matix()
@@ -141,15 +143,11 @@ elif args.init.lower() == 'zero':
 elif args.init.lower() == 'dtw':
     cluster_dir = os.path.join(folder_path, folder_name)
     if not os.path.exists(os.path.join(cluster_dir, f'cluster_initialization.pkl')):
-        initialize_clusters(processed_inputs_train['Y'].cpu(),
-                            processed_inputs_train['neuron_factor_access'].cpu(),
-                            args.L, args.A, cluster_dir, n_jobs=15, bandwidth=4)
+        initialize_clusters(Y_train, factor_access_train, args.L, args.A, cluster_dir, n_jobs=15, bandwidth=4)
         plot_initial_clusters(folder_path, folder_name, args.L, {'Y': Y_train, 'time': data.time})
-    model.init_from_data(Y=Y_train, factor_access=processed_inputs_train['neuron_factor_access'].cpu(),
-                         sd_init=sd_init, cluster_dir=cluster_dir, init=the_rest)
+    model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, cluster_dir=cluster_dir, init=the_rest)
 elif args.init.lower() == 'mom':
-    model.init_from_data(Y=Y_train, factor_access=processed_inputs_train['neuron_factor_access'].cpu(),
-                         sd_init=sd_init, init=the_rest)
+    model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, init=the_rest)
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 patience = args.scheduler_patience // args.eval_interval
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
@@ -173,6 +171,7 @@ params = {
 }
 create_relevant_files(output_dir, output_str, params=params, ground_truth=True)
 plot_outputs(model, unique_regions, output_dir, 'Train', -1)
+plot_data_dispersion(Y_train, factor_access_train, args.A, folder_path, folder_name, unique_regions, model.W_CKL)
 data.cuda(args.cuda)
 print(f'folder_name: {args.folder_name}\n\n')
 print(output_str)

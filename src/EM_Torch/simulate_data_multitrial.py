@@ -43,7 +43,7 @@ class DataAnalyzer:
         # define parameters on terms of mean and sqrt variance
         # alpha = (mu/sigma)^2, theta = mu/sigma^2
         mu = 90*np.ones(n_factors, dtype=np.float64)
-        sigma = 8
+        sigma = 5 # 8
         self.alpha = (mu/sigma)**2
         self.theta = mu/(sigma**2)
         self.pi = np.zeros(n_factors)

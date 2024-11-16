@@ -6,7 +6,7 @@ from src.EM_Torch.simulate_data_multitrial import DataAnalyzer
 from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
 from src.EM_Torch.general_functions import parse_folder_name, load_model_checkpoint, create_relevant_files, get_parser, plot_outputs, \
     write_log_and_model, write_losses, plot_epoch_results, write_grad_norms, load_tensors, to_cuda, \
-    inv_softplus_torch, compute_uncertainty, preprocess_input_data
+    inv_softplus_torch, compute_uncertainty, preprocess_input_data, plot_data_dispersion, interpret_results
 import numpy as np
 import time
 import torch
@@ -64,12 +64,8 @@ Y_train, factor_access_train = load_tensors(data.sample_data(K=args.K, A=args.A,
 print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')
 _, _, factor_assignment_onehot_train, neuron_gains_train, trial_offsets_train = to_cuda(load_tensors(data.get_sample_ground_truth()),
                                                                                         move_to_cuda=args.cuda)
-# Validation data
-Y_test, factor_access_test = load_tensors(data.sample_data(K=args.K, A=args.A, n_trials=args.n_trials))
-_, _, factor_assignment_onehot_test, neuron_gains_test, trial_offsets_test = to_cuda(load_tensors(data.get_sample_ground_truth()),
-                                                                                     move_to_cuda=args.cuda)
 processed_inputs_train = preprocess_input_data(*to_cuda((Y_train, factor_access_train), move_to_cuda=args.cuda))
-processed_inputs_test = preprocess_input_data(*to_cuda((Y_test, factor_access_test), move_to_cuda=args.cuda))
+Y_train, factor_access_train = processed_inputs_train['Y'].cpu(), processed_inputs_train['neuron_factor_access'].cpu()
 peak1_left_landmarks = parser_dict['peak1_left_landmarks']
 peak1_right_landmarks = parser_dict['peak1_right_landmarks']
 peak2_left_landmarks = parser_dict['peak2_left_landmarks']
@@ -91,21 +87,16 @@ model.init_ground_truth(beta=data.beta.clone(),
                         sd_init=1e-5)
 model.cuda(move_to_cuda=args.cuda)
 with torch.no_grad():
-    model.init_ground_truth(trial_peak_offset_proposal_means=trial_offsets_test.clone().squeeze(),
-                            W_CKL=factor_assignment_onehot_test.clone(),
-                            init='')
-    true_ELBO_test = model.forward(processed_inputs_test, update_membership=False, train=False)
     model.init_ground_truth(trial_peak_offset_proposal_means=trial_offsets_train.clone().squeeze(),
                             W_CKL=factor_assignment_onehot_train.clone(),
                             init='')
     true_ELBO_train = model.forward(processed_inputs_train, update_membership=False, train=False)
     likelihood_ground_truth_train = model.log_likelihood(processed_inputs_train, E_step=True)
+    interpret_results(model, processed_inputs_train, 'output_dir', -2)
 true_ELBO_train = (1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * true_ELBO_train.item()
-true_ELBO_test = (1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * true_ELBO_test.item()
 likelihood_ground_truth_train = (1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * likelihood_ground_truth_train.item()
 ltri_matrix = model.ltri_matix()
 true_offset_penalty_train = (1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_train, ltri_matrix).sum().item()
-true_offset_penalty_test = (1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_test, ltri_matrix).sum().item()
 model.cpu()
 output_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, f'Run_{args.load_run + 1}')
 os.makedirs(output_dir, exist_ok=True)
@@ -142,10 +133,8 @@ output_str = (
     f"peak1_right_landmarks:\n{model.time[model.peak1_right_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
     f"peak2_left_landmarks:\n{model.time[model.peak2_left_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
     f"peak2_right_landmarks:\n{model.time[model.peak2_right_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
-    f"True ELBO Training: {true_ELBO_train},\n"
-    f"True ELBO Test: {true_ELBO_test},\n"
-    f"True Offset Likelihood Training: {true_offset_penalty_train},\n"
-    f"True Offset Likelihood Test: {true_offset_penalty_test}\n\n")
+    f"True ELBO Training: {true_ELBO_train}\n"
+    f"True Offset Likelihood Training: {true_offset_penalty_train}\n\n")
 params = {
     'peak1_left_landmarks': peak1_left_landmarks,
     'peak1_right_landmarks': peak1_right_landmarks,
@@ -154,6 +143,7 @@ params = {
 }
 create_relevant_files(output_dir, output_str, params=params, ground_truth=True)
 plot_outputs(model, unique_regions, output_dir, 'Train', -1)
+plot_data_dispersion(Y_train, factor_access_train, args.A, folder_path, folder_name, unique_regions, model.W_CKL)
 data.cuda(args.cuda)
 print(f'folder_name: {args.folder_name}\n\n')
 print(output_str)

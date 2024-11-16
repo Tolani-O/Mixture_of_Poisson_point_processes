@@ -6,7 +6,7 @@ from src.EM_Torch.Allen_data_torch import load_sample
 from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
 from src.EM_Torch.general_functions import parse_folder_name, load_model_checkpoint, create_relevant_files, get_parser, plot_outputs, \
     write_log_and_model, write_losses, plot_epoch_results, write_grad_norms, \
-    load_tensors, to_cuda, preprocess_input_data, compute_uncertainty
+    load_tensors, to_cuda, preprocess_input_data, compute_uncertainty, plot_data_dispersion, interpret_results
 import numpy as np
 import time
 import torch
@@ -16,7 +16,7 @@ from ast import literal_eval
 outputs_folder = 'outputs'
 
 args = get_parser().parse_args()
-parser_key = ['seed', 'A', 'L', 'tauBeta', 'tauConfig', 'tauSigma', 'tauSD', 'posterior', 'iters', 'lr', 'temp', 'weight', 'notes']
+parser_key = ['seed', 'A', 'L', 'tauBeta', 'tauConfig', 'tauSigma', 'tauSD', 'posterior', 'iters', 'lr', 'temp', 'weight', 'maskLimit', 'notes']
 args.folder_name = ('seed2997063451_Real_DataInit_K222_A3_C40_L5_R15_tauBeta800_tauConfig500_tauSigma1_tauSD10000_'
                     'posterior7_iters200000_lr0.0001_temp(1, 1000)_weight(10, 1)_notes-masking 10 the_rest zeros')
 parser_dict = parse_folder_name(args.folder_name, parser_key, outputs_folder, args.load_run)
@@ -30,6 +30,7 @@ args.eval_interval = 500
 args.lr = float(parser_dict['lr'])
 args.temperature = literal_eval(parser_dict['temp'])
 args.weights = literal_eval(parser_dict['weight'])
+args.mask_neuron_threshold = int(parser_dict['maskLimit'])
 if args.num_epochs >= 0:
     args.num_epochs = int(parser_dict['iters'])
 args.tau_beta = float(parser_dict['tauBeta'])
@@ -63,7 +64,8 @@ Y_train, bin_time, factor_access_train, unique_regions = load_sample(folder_path
 if Y_train is None:
     raise ValueError("No training data found")
 processed_inputs_train = preprocess_input_data(*to_cuda(load_tensors((Y_train, factor_access_train)),
-                                                        move_to_cuda=args.cuda), mask_threshold=5)
+                                                        move_to_cuda=args.cuda), mask_threshold=args.mask_neuron_threshold)
+Y_train, factor_access_train = processed_inputs_train['Y'].cpu(), processed_inputs_train['neuron_factor_access'].cpu()
 peak1_left_landmarks = parser_dict['peak1_left_landmarks']
 peak1_right_landmarks = parser_dict['peak1_right_landmarks']
 peak2_left_landmarks = parser_dict['peak2_left_landmarks']
@@ -118,6 +120,7 @@ params = {
 }
 create_relevant_files(output_dir, output_str, params=params)
 plot_outputs(model, unique_regions, output_dir, 'Train', -1)
+plot_data_dispersion(Y_train, factor_access_train, args.A, folder_path, folder_name, unique_regions, model.W_CKL)
 print(f'folder_name: {args.folder_name}\n\n')
 print(output_str)
 

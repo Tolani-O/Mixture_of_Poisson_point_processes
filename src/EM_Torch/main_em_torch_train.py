@@ -6,7 +6,7 @@ from src.EM_Torch.simulate_data_multitrial import DataAnalyzer
 from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
 from src.EM_Torch.general_functions import initialize_clusters, create_relevant_files, get_parser, plot_outputs, \
     plot_initial_clusters, write_log_and_model, write_losses, plot_epoch_results, write_grad_norms, load_tensors, to_cuda, \
-    inv_softplus_torch, preprocess_input_data, plot_data_dispersion, interpret_results
+    inv_softplus_torch, preprocess_input_data, plot_data_dispersion
 import numpy as np
 import time
 import torch
@@ -109,7 +109,6 @@ with torch.no_grad():
                             init='')
     true_ELBO_train = model.forward(processed_inputs_train, update_membership=False, train=False)
     likelihood_ground_truth_train = model.log_likelihood(processed_inputs_train, E_step=True)
-    interpret_results(model, processed_inputs_train, 'output_dir', -2)
 true_ELBO_train = (1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * true_ELBO_train.item()
 likelihood_ground_truth_train = (1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * likelihood_ground_truth_train.item()
 ltri_matrix = model.ltri_matix()
@@ -119,7 +118,7 @@ args.folder_name = (
     f'seed{args.data_seed}_simulated_{args.init}Init_K{args.K}_A{args.A}_C{args.n_configs}_L{args.L}'
     f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauSD{args.tau_sd}'
     f'_posterior{args.n_trial_samples}_iters{args.num_epochs}_lr{args.lr}_temp{args.temperature}_weight{args.weights}'
-    f'_notes-{args.notes}')
+    f'_maskLimit{args.mask_neuron_threshold}_notes-{args.notes}')
 output_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, 'Run_0')
 os.makedirs(output_dir, exist_ok=True)
 plot_outputs(model, unique_regions, output_dir, 'Train', -2)

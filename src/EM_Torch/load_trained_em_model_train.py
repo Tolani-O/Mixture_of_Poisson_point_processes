@@ -16,7 +16,7 @@ from ast import literal_eval
 outputs_folder = 'outputs'
 
 args = get_parser().parse_args()
-parser_key = ['seed', 'K', 'A', 'C', 'L', 'R', 'tauBeta', 'tauConfig', 'tauSigma', 'tauSD', 'posterior', 'iters', 'lr', 'temp', 'weight', 'notes']
+parser_key = ['seed', 'K', 'A', 'C', 'L', 'R', 'tauBeta', 'tauConfig', 'tauSigma', 'tauSD', 'posterior', 'iters', 'lr', 'temp', 'weight', 'maskLimit' 'notes']
 args.folder_name = ('seed2062619067_simulated_DataInit_K100_A3_C5_L5_R15_tauBeta800_tauConfig500_tauSigma1_'
                     'tauSD10000_posterior7_iters200000_lr0.0001_temp(1, 1000)_weight(10, 1)_notes-mask 0 theRest zeros')
 parser_dict = parse_folder_name(args.folder_name, parser_key, outputs_folder, args.load_run)
@@ -33,6 +33,7 @@ args.eval_interval = 500
 args.lr = float(parser_dict['lr'])
 args.temperature = literal_eval(parser_dict['temp'])
 args.weights = literal_eval(parser_dict['weight'])
+args.mask_neuron_threshold = int(parser_dict['maskLimit'])
 if args.num_epochs >= 0:
     args.num_epochs = int(parser_dict['iters'])
 args.tau_beta = float(parser_dict['tauBeta'])
@@ -64,7 +65,8 @@ Y_train, factor_access_train = load_tensors(data.sample_data(K=args.K, A=args.A,
 print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')
 _, _, factor_assignment_onehot_train, neuron_gains_train, trial_offsets_train = to_cuda(load_tensors(data.get_sample_ground_truth()),
                                                                                         move_to_cuda=args.cuda)
-processed_inputs_train = preprocess_input_data(*to_cuda((Y_train, factor_access_train), move_to_cuda=args.cuda))
+processed_inputs_train = preprocess_input_data(*to_cuda((Y_train, factor_access_train),
+                                                        move_to_cuda=args.cuda), mask_threshold=args.mask_neuron_threshold)
 Y_train, factor_access_train = processed_inputs_train['Y'].cpu(), processed_inputs_train['neuron_factor_access'].cpu()
 peak1_left_landmarks = parser_dict['peak1_left_landmarks']
 peak1_right_landmarks = parser_dict['peak1_right_landmarks']
@@ -92,7 +94,6 @@ with torch.no_grad():
                             init='')
     true_ELBO_train = model.forward(processed_inputs_train, update_membership=False, train=False)
     likelihood_ground_truth_train = model.log_likelihood(processed_inputs_train, E_step=True)
-    interpret_results(model, processed_inputs_train, 'output_dir', -2)
 true_ELBO_train = (1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * true_ELBO_train.item()
 likelihood_ground_truth_train = (1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * likelihood_ground_truth_train.item()
 ltri_matrix = model.ltri_matix()
@@ -112,6 +113,7 @@ if args.num_epochs < 0:
     se_dict = compute_uncertainty(model, processed_inputs_train, output_dir, args.load_epoch)
     model.cpu()
     plot_outputs(model, unique_regions, output_dir, 'Train', args.load_epoch, se_dict)
+    interpret_results(model, processed_inputs_train, 'output_dir', -2)
     sys.exit()
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 optimizer.load_state_dict(optimizer_state)
@@ -143,6 +145,8 @@ params = {
 }
 create_relevant_files(output_dir, output_str, params=params, ground_truth=True)
 plot_outputs(model, unique_regions, output_dir, 'Train', -1)
+folder_name = f'{args.data_seed}-seed_{args.A}-regions_{args.L}-factors'
+folder_path = os.path.join(os.getcwd(), outputs_folder, 'metadata')
 plot_data_dispersion(Y_train, factor_access_train, args.A, folder_path, folder_name, unique_regions, model.W_CKL)
 data.cuda(args.cuda)
 print(f'folder_name: {args.folder_name}\n\n')

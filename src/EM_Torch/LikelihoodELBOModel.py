@@ -344,8 +344,8 @@ class LikelihoodELBOModel(nn.Module):
         s_new = avg_peak_times + offsets
         left_landmarks = (self.time[torch.cat([self.peak1_left_landmarks, self.peak2_left_landmarks])]).unsqueeze(0).unsqueeze(1).unsqueeze(2)
         right_landmarks = (self.time[torch.cat([self.peak1_right_landmarks, self.peak2_right_landmarks])]).unsqueeze(0).unsqueeze(1).unsqueeze(2)
-        s_new = torch.max(torch.stack([s_new, left_landmarks], dim=0), dim=0).values
-        s_new = torch.min(torch.stack([s_new, right_landmarks], dim=0), dim=0).values
+        s_new = torch.max(torch.stack([s_new, left_landmarks.expand_as(s_new)], dim=0), dim=0).values
+        s_new = torch.min(torch.stack([s_new, right_landmarks.expand_as(s_new)], dim=0), dim=0).values
         return avg_peak_times, left_landmarks, right_landmarks, s_new
 
 

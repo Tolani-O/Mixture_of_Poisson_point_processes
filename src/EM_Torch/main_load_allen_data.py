@@ -113,7 +113,7 @@ args.folder_name = (
     f'seed{args.data_seed}_Real_{args.init}Init_K{args.K}_A{args.A}_C{args.n_configs}_L{args.L}'
     f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauSD{args.tau_sd}'
     f'_posterior{args.n_trial_samples}_iters{args.num_epochs}_lr{args.lr}_temp{args.temperature}_weight{args.weights}'
-    f'_notes-{args.notes}')
+    f'_maskLimit{args.mask_neuron_threshold}_notes-{args.notes}')
 output_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, 'Run_0')
 os.makedirs(output_dir, exist_ok=True)
 output_str = (f"Using CUDA: {args.cuda}\n"

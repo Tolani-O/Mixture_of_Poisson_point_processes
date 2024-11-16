@@ -42,7 +42,7 @@ peak1_right_landmarks = [0.12] * args.L
 peak2_left_landmarks = [0.16] * args.L
 peak2_right_landmarks = [0.27] * args.L
 dt = 0.002
-args.notes = f'masking {args.mask_neuron_threshold} the_rest {the_rest}'
+args.notes = f'maskLimit{args.mask_neuron_threshold}_temp{args.temperature}_weight{args.weights}'
 
 regions = None
 conditions = None
@@ -110,10 +110,9 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
                                                        patience=patience, threshold_mode='abs',
                                                        threshold=args.scheduler_threshold)
 args.folder_name = (
-    f'seed{args.data_seed}_Real_{args.init}Init_K{args.K}_A{args.A}_C{args.n_configs}_L{args.L}'
+    f'Real_ID{args.data_seed}_Init{args.init}_K{args.K}_A{args.A}_C{args.n_configs}_L{args.L}'
     f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauSD{args.tau_sd}'
-    f'_posterior{args.n_trial_samples}_iters{args.num_epochs}_lr{args.lr}_temp{args.temperature}_weight{args.weights}'
-    f'_maskLimit{args.mask_neuron_threshold}_notes-{args.notes}')
+    f'_posterior{args.n_trial_samples}_iters{args.num_epochs}_lr{args.lr}_{args.notes}')
 output_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, 'Run_0')
 os.makedirs(output_dir, exist_ok=True)
 output_str = (f"Using CUDA: {args.cuda}\n"
@@ -211,15 +210,14 @@ if __name__ == "__main__":
                 alpha = F.softplus(model.alpha).numpy().round(3)
                 theta = model.theta.numpy().round(3)
             output_str = (
-                f"Epoch: {epoch:2d}, Elapsed Time: {elapsed_time / 60:.2f} mins, Total Time: {total_time / (60 * 60):.2f} hrs,\n"
-                f"Loss train: {cur_loss_train:.5f},\n"
-                f"Log Likelihood train: {cur_log_likelihood_train:.5f},\n"
-                f"pi:\n{pi.T.reshape(model.n_areas, -1)},\n"
-                f"alpha:\n{alpha.reshape(model.n_areas, -1)},\n"
-                f"theta:\n{theta.reshape(model.n_areas, -1)},\n"
-                f"lr: {args.lr:.5f}, scheduler_lr: {scheduler._last_lr[0]:.5f},\n"
-                f"dataSeed: {args.data_seed},\n"
-                f"{args.notes}\n\n")
+                f"Epoch: {epoch:2d}, Elapsed Time: {elapsed_time / 60:.2f} mins, Total Time: {total_time / (60 * 60):.2f} hrs\n"
+                f"Loss train: {cur_loss_train:.5f}\n"
+                f"Log Likelihood train: {cur_log_likelihood_train:.5f}\n"
+                f"pi:\n{pi.T.reshape(model.n_areas, -1)}\n"
+                f"alpha:\n{alpha.reshape(model.n_areas, -1)}\n"
+                f"theta:\n{theta.reshape(model.n_areas, -1)}\n"
+                f"lr: {args.lr:.5f}, scheduler_lr: {scheduler._last_lr[0]:.5f}\n"
+                f"ID: {args.data_seed}\n\n")
             write_log_and_model(output_str, output_dir, epoch, model, optimizer, scheduler)
             is_empty = epoch == start_epoch
             write_grad_norms(batch_grad_norms, 'batch', output_dir, is_empty)

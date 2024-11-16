@@ -16,15 +16,13 @@ from ast import literal_eval
 outputs_folder = 'outputs'
 
 args = get_parser().parse_args()
-parser_key = ['seed', 'A', 'L', 'tauBeta', 'tauConfig', 'tauSigma', 'tauSD', 'posterior', 'iters', 'lr', 'temp', 'weight', 'maskLimit', 'notes']
-args.folder_name = ('seed2997063451_Real_DataInit_K222_A3_C40_L5_R15_tauBeta800_tauConfig500_tauSigma1_tauSD10000_'
-                    'posterior7_iters200000_lr0.0001_temp(1, 1000)_weight(10, 1)_notes-masking 10 the_rest zeros')
+parser_key = ['ID', 'A', 'L', 'tauBeta', 'tauConfig', 'tauSigma', 'tauSD', 'posterior', 'iters', 'lr', 'temp', 'weight', 'maskLimit']
+# args.folder_name = ''
 parser_dict = parse_folder_name(args.folder_name, parser_key, outputs_folder, args.load_run)
 
-args.data_seed = int(parser_dict['seed'])
+args.data_seed = int(parser_dict['ID'])
 args.A = int(parser_dict['A'])  # A
 args.L = int(parser_dict['L'])  # L
-args.notes = parser_dict['notes']
 args.log_interval = 500
 args.eval_interval = 500
 args.lr = float(parser_dict['lr'])
@@ -201,15 +199,14 @@ if __name__ == "__main__":
                 alpha = F.softplus(model.alpha).numpy().round(3)
                 theta = model.theta.numpy().round(3)
             output_str = (
-                f"Epoch: {epoch:2d}, Elapsed Time: {elapsed_time / 60:.2f} mins, Total Time: {total_time / (60 * 60):.2f} hrs,\n"
-                f"Loss train: {cur_loss_train:.5f},\n"
-                f"Log Likelihood train: {cur_log_likelihood_train:.5f},\n"
-                f"pi:\n{pi.T.reshape(model.n_areas, -1)},\n"
-                f"alpha:\n{alpha.reshape(model.n_areas, -1)},\n"
-                f"theta:\n{theta.reshape(model.n_areas, -1)},\n"
-                f"lr: {args.lr:.5f}, scheduler_lr: {scheduler._last_lr[0]:.5f},\n"
-                f"dataSeed: {args.data_seed},\n"
-                f"{args.notes}\n\n")
+                f"Epoch: {epoch:2d}, Elapsed Time: {elapsed_time / 60:.2f} mins, Total Time: {total_time / (60 * 60):.2f} hrs\n"
+                f"Loss train: {cur_loss_train:.5f}\n"
+                f"Log Likelihood train: {cur_log_likelihood_train:.5f}\n"
+                f"pi:\n{pi.T.reshape(model.n_areas, -1)}\n"
+                f"alpha:\n{alpha.reshape(model.n_areas, -1)}\n"
+                f"theta:\n{theta.reshape(model.n_areas, -1)}\n"
+                f"lr: {args.lr:.5f}, scheduler_lr: {scheduler._last_lr[0]:.5f}\n"
+                f"ID: {args.data_seed}\n\n")
             write_log_and_model(output_str, output_dir, epoch, model, optimizer, scheduler)
             is_empty = epoch == start_epoch
             write_grad_norms(batch_grad_norms, 'batch', output_dir, is_empty)

@@ -735,7 +735,7 @@ def compute_uncertainty(model, processed_inputs, output_dir, epoch):
     return se_dict
 
 
-def interpret_results(model, processed_inputs, output_dir, epoch):
+def interpret_results(model, processed_inputs, factors_of_interest, output_dir, epoch):
     # Interpret trial peak times # R x C x 2AL
     factors = torch.exp(model.unnormalized_log_factors())
     avg_peak1_times = model.time[torch.tensor([model.peak1_left_landmarks[i] + torch.argmax(factors[i, model.peak1_left_landmarks[i]:model.peak1_right_landmarks[i]]) for i in range(model.peak1_left_landmarks.shape[0])])]
@@ -748,6 +748,7 @@ def interpret_results(model, processed_inputs, output_dir, epoch):
     peak_times = torch.max(torch.stack([peak_times, left_landmarks], dim=0), dim=0).values
     peak_times = torch.min(torch.stack([peak_times, right_landmarks], dim=0), dim=0).values
 
+    a = 1
     # a = torch.cat(list(peak_times.permute(1, 0, 2)), dim=0).numpy()
     # a2 = torch.cat(list(peak_times.permute(1, 0, 2)), dim=0).numpy()
     # a3 = torch.cat(list(peak_times.permute(1, 0, 2)), dim=0).numpy()
@@ -770,9 +771,8 @@ def plot_training_epoch_results(input_dict):
     model.init_zero()
     model.load_state_dict(model_state)
     model.W_CKL, model.a_CKL, model.theta, model.pi = W_CKL, a_CKL, theta, pi
-    Y = torch.tensor(Y, dtype=model.W_CKL.dtype)
     likelihood_ground_truth_train, true_ELBO_train = input_dict['likelihood_ground_truth_train'], input_dict['true_ELBO_train']
-    plot_outputs(model, unique_regions, output_dir, 'Train', epoch, Y=Y)
+    plot_outputs(model, unique_regions, output_dir, 'Train', epoch, Y=Y.to(model.W_CKL.dtype))
     plot_grad_norms(batch_grad_norms, output_dir, 'batch', 20, False)
     plot_grad_norms(grad_norms, output_dir, 'train', 10)
     plot_losses(likelihood_ground_truth_train, output_dir, 'train', 'true_log_likelihoods', 10)
@@ -795,12 +795,12 @@ def plot_test_epoch_results(input_dict):
     plot_losses(None, output_dir, 'test', 'Sigma_MSE')
     plot_losses(None, output_dir, 'test', 'proposal_means_MSE')
     plot_losses(None, output_dir, 'train', 'gains_MSE')
-    plot_losses(None, output_dir, 'test', 'gains_MSE')
     plot_losses(true_offset_penalty_train, output_dir, 'train', 'ltriLkhd', 10)
     # true_ELBO_test, true_offset_penalty_test = input_dict['true_ELBO_test'], input_dict['true_offset_penalty_test']
     # plot_losses(true_ELBO_test, output_dir, 'test', 'log_likelihoods', 10)
     # plot_losses(None, output_dir, 'test', 'losses', 10)
     # plot_losses(true_offset_penalty_test, output_dir, 'test', 'ltriLkhd', 10)
+    # plot_losses(None, output_dir, 'test', 'gains_MSE')
 
 
 def load_tensors(arrays):

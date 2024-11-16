@@ -49,7 +49,7 @@ args.tau_config = 500
 args.tau_sigma = 1
 args.tau_sd = 10000
 sd_init = 0.5
-args.notes = f''
+args.notes = f'maskLimit{args.mask_neuron_threshold}_temp{args.temperature}_weight{args.weights}_warping{int(args.time_warp)}'
 
 if args.eval_interval > args.log_interval:
     args.log_interval = args.eval_interval
@@ -73,8 +73,8 @@ Y_train, factor_access_train = load_tensors(data.sample_data(K=args.K, A=args.A,
 print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')
 _, _, factor_assignment_onehot_train, neuron_gains_train, trial_offsets_train = to_cuda(load_tensors(data.get_sample_ground_truth()),
                                                                                         move_to_cuda=args.cuda)
-processed_inputs_train = preprocess_input_data(*to_cuda((Y_train, factor_access_train), move_to_cuda=args.cuda))
-Y_train, factor_access_train = processed_inputs_train['Y'].cpu(), processed_inputs_train['neuron_factor_access'].cpu()
+processed_inputs_train = preprocess_input_data(*to_cuda((Y_train, factor_access_train),
+                                                        move_to_cuda=args.cuda), mask_threshold=args.mask_neuron_threshold)
 
 #DELETE
 remove_indcs = torch.concat(torch.where(factor_assignment_onehot_train == 1)).reshape(3, -1)
@@ -82,7 +82,9 @@ remove_indcs = remove_indcs[:, torch.isin(remove_indcs[2], torch.tensor([0,1,3,4
 processed_inputs_train['neuron_factor_access'][remove_indcs[0], remove_indcs[1]] = 0
 factor_assignment_onehot_train[remove_indcs[0], remove_indcs[1]] = 0
 neuron_gains_train[remove_indcs[0], remove_indcs[1]] = 0
+#DELETE
 
+Y_train, factor_access_train = processed_inputs_train['Y'].cpu(), processed_inputs_train['neuron_factor_access'].cpu()
 peak1_left_landmarks = data.time[[data.left_landmark1] * args.L]
 peak1_right_landmarks = data.time[[data.right_landmark1] * args.L]
 peak2_left_landmarks = data.time[[data.left_landmark2] * args.L]
@@ -115,10 +117,9 @@ ltri_matrix = model.ltri_matix()
 true_offset_penalty_train = (1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_train, ltri_matrix).sum().item()
 model.cpu()
 args.folder_name = (
-    f'seed{args.data_seed}_simulated_{args.init}Init_K{args.K}_A{args.A}_C{args.n_configs}_L{args.L}'
+    f'Simulated_ID{args.data_seed}_Init{args.init}_K{args.K}_A{args.A}_C{args.n_configs}_L{args.L}'
     f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauSD{args.tau_sd}'
-    f'_posterior{args.n_trial_samples}_iters{args.num_epochs}_lr{args.lr}_temp{args.temperature}_weight{args.weights}'
-    f'_maskLimit{args.mask_neuron_threshold}_notes-{args.notes}')
+    f'_posterior{args.n_trial_samples}_iters{args.num_epochs}_lr{args.lr}_{args.notes}')
 output_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, 'Run_0')
 os.makedirs(output_dir, exist_ok=True)
 plot_outputs(model, unique_regions, output_dir, 'Train', -2)
@@ -316,15 +317,14 @@ if __name__ == "__main__":
                 alpha = F.softplus(model.alpha).numpy().round(3)
                 theta = model.theta.numpy().round(3)
             output_str = (
-                f"Epoch: {epoch:2d}, Elapsed Time: {elapsed_time / 60:.2f} mins, Total Time: {total_time / (60 * 60):.2f} hrs,\n"
-                f"Loss train: {cur_loss_train:.5f}, Log Likelihood train: {cur_log_likelihood_train:.5f},\n"
-                f"ltriLkhd_train: {cur_ltriLkhd_train:.5f},\n"
-                f"pi:\n{pi.T.reshape(model.n_areas, -1)},\n"
-                f"alpha:\n{alpha.reshape(model.n_areas, -1)},\n"
-                f"theta:\n{theta.reshape(model.n_areas, -1)},\n"
-                f"lr: {args.lr:.5f}, scheduler_lr: {scheduler._last_lr[0]:.5f},\n"
-                f"dataSeed: {args.data_seed},\n"
-                f"{args.notes}\n\n")
+                f"Epoch: {epoch:2d}, Elapsed Time: {elapsed_time / 60:.2f} mins, Total Time: {total_time / (60 * 60):.2f} hrs\n"
+                f"Loss train: {cur_loss_train:.5f}, Log Likelihood train: {cur_log_likelihood_train:.5f}\n"
+                f"ltriLkhd_train: {cur_ltriLkhd_train:.5f}\n"
+                f"pi:\n{pi.T.reshape(model.n_areas, -1)}\n"
+                f"alpha:\n{alpha.reshape(model.n_areas, -1)}\n"
+                f"theta:\n{theta.reshape(model.n_areas, -1)}\n"
+                f"lr: {args.lr:.5f}, scheduler_lr: {scheduler._last_lr[0]:.5f}\n"
+                f"ID: {args.data_seed}\n\n")
             write_log_and_model(output_str, output_dir, epoch, model, optimizer, scheduler)
             is_empty = epoch == start_epoch
             write_grad_norms(batch_grad_norms, 'batch', output_dir, is_empty)

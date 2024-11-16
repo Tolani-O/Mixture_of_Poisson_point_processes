@@ -5,7 +5,7 @@ sys.path.append(os.path.abspath('.'))
 from src.EM_Torch.Allen_data_torch import load_sample
 from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
 from src.EM_Torch.general_functions import parse_folder_name, load_model_checkpoint, create_relevant_files, get_parser, plot_outputs, \
-    write_log_and_model, write_losses, plot_epoch_results, write_grad_norms, match_neuron_to_factors, \
+    write_log_and_model, write_losses, plot_epoch_results, write_grad_norms, \
     load_tensors, to_cuda, preprocess_input_data, compute_uncertainty
 import numpy as np
 import time
@@ -89,7 +89,7 @@ if args.num_epochs < 0:
     se_dict = compute_uncertainty(model, processed_inputs_train, output_dir, args.load_epoch)
     model.cpu()
     plot_outputs(model, unique_regions, output_dir, 'Train', args.load_epoch, se_dict)
-    match_neuron_to_factors(model, Y_train, unique_regions, output_dir, 'Train', args.load_epoch)
+    interpret_results(model, processed_inputs_train, 'output_dir', -2)
     sys.exit()
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 optimizer.load_state_dict(optimizer_state)

@@ -424,40 +424,6 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.close('all')
 
 
-def match_neuron_to_factors(model, Y, unique_regions, output_dir, folder, epoch):
-    beta_dir = os.path.join(output_dir, folder, 'beta')
-    os.makedirs(beta_dir, exist_ok=True)
-    W_CKL = model.W_CKL
-    pi = model.pi.numpy()
-    W_L = np.round((torch.sum(model.W_CKL, dim=(0, 1)) / model.n_configs).numpy(), 1)
-    beta = torch.einsum('ktrc,ckl->lt', Y, W_CKL)
-    latent_factors = (beta/beta.sum(dim=1).unsqueeze(1)).numpy()
-    upper_limit = 0.03 #np.max(latent_factors) + 0.005
-    plt.figure(figsize=(model.n_areas * 10, int(model.n_factors / model.n_areas) * 5))
-    L = np.arange(model.n_factors).reshape(model.n_areas, -1).T.flatten()
-    c = 0
-    factors_per_area = int(model.n_factors / model.n_areas)
-    for l in L:
-        plt.subplot(factors_per_area, model.n_areas, c + 1)
-        plt.plot(model.time, latent_factors[l, :], alpha=np.max([pi[l], 0.7]), linewidth=np.exp(2.5 * pi[l]))
-        plt.xlabel('Spike count')
-        plt.ylabel('Trial time course (ms)')
-        plt.vlines(x=model.time[torch.tensor([
-            model.peak1_left_landmarks[l], model.peak1_right_landmarks[l],
-            model.peak2_left_landmarks[l], model.peak2_right_landmarks[l]])],
-                   ymin=0, ymax=upper_limit,
-                   color='grey', linestyle='--', alpha=0.5)
-        plt.title(f'Factor {(l % factors_per_area) + 1}, '
-                  f'Area {unique_regions[l // factors_per_area]}, '
-                  f'Membership: {pi[l]:.2f}, '
-                  f'Count: {W_L[l]:.1f}', fontsize=20)
-        plt.ylim(bottom=-5e-4, top=upper_limit)
-        c += 1
-    plt.tight_layout()
-    plt.savefig(os.path.join(beta_dir, f'Spike_Count_{epoch}.png'))
-    plt.close()
-
-
 def initialize_clusters(Y, factor_access, n_clusters, n_areas, output_dir, n_jobs=15, bandwidth=4):
     # Y # K x T x R x C
     # factor_access  # C x K x L

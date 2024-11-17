@@ -335,12 +335,11 @@ class LikelihoodELBOModel(nn.Module):
                                                   for i in range(self.peak1_left_landmarks.shape[0])])]
         avg_peak2_times = self.time[torch.tensor([self.peak2_left_landmarks[i] + torch.argmax(factors[i, self.peak2_left_landmarks[i]:self.peak2_right_landmarks[i]])
                                                   for i in range(self.peak2_left_landmarks.shape[0])])]
-        avg_peak_times = torch.cat([avg_peak1_times, avg_peak2_times])
-        # avg_peak_times  # 2AL
+        # avg_peak_times  # N x R x C x 2AL
+        avg_peak_times = torch.cat([avg_peak1_times, avg_peak2_times]).unsqueeze(0).unsqueeze(1).unsqueeze(2)
         # self.trial_peak_offset_proposal_samples # N x R x C x 2AL
         # self.config_peak_offsets  # C x 2AL
         offsets = self.trial_peak_offset_proposal_samples + self.config_peak_offsets.unsqueeze(0).unsqueeze(1)
-        avg_peak_times = avg_peak_times.unsqueeze(0).unsqueeze(1).unsqueeze(2)
         s_new = avg_peak_times + offsets
         left_landmarks = (self.time[torch.cat([self.peak1_left_landmarks, self.peak2_left_landmarks])]).unsqueeze(0).unsqueeze(1).unsqueeze(2)
         right_landmarks = (self.time[torch.cat([self.peak1_right_landmarks, self.peak2_right_landmarks])]).unsqueeze(0).unsqueeze(1).unsqueeze(2)
@@ -375,7 +374,7 @@ class LikelihoodELBOModel(nn.Module):
 
     def compute_warped_factors(self, warped_times):
         factors = torch.exp(self.unnormalized_log_factors())
-        # warped_time  # len(peak_landmark_spread) x N x R X C X AL
+        # warped_time  # 2AL x len(landmark_spread) x N x R X C
         warped_indices = [warped_times[i]/self.dt for i in range(len(warped_times))]
         floor_warped_indices = [torch.floor(warped_indices[i]).int() for i in range(len(warped_times))]
         ceil_warped_indices = [torch.ceil(warped_indices[i]).int() for i in range(len(warped_times))]

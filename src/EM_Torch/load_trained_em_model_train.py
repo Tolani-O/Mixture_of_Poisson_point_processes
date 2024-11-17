@@ -99,7 +99,7 @@ true_offset_penalty_train = (1 / (args.n_trials * args.n_configs)) * model.Sigma
 model.cpu()
 output_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, f'Run_{args.load_run + 1}')
 os.makedirs(output_dir, exist_ok=True)
-plot_outputs(model, unique_regions, output_dir, 'Train', -2)
+plot_outputs(model, unique_regions, output_dir, 'Train', -2, Y=Y_train, factor_access=factor_access_train)
 # Load the model
 load_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, f'Run_{args.load_run}')
 model_state, optimizer_state, scheduler_state, W_CKL, a_CKL, theta, pi, args.load_epoch = load_model_checkpoint(load_dir, args.load_epoch)
@@ -142,7 +142,7 @@ params = {
     'peak2_right_landmarks': peak2_right_landmarks,
 }
 create_relevant_files(output_dir, output_str, params=params, ground_truth=True)
-plot_outputs(model, unique_regions, output_dir, 'Train', -1)
+plot_outputs(model, unique_regions, output_dir, 'Train', -1, Y=Y_train, factor_access=factor_access_train)
 folder_name = f'{args.data_seed}-seed_{args.A}-regions_{args.L}-factors'
 folder_path = os.path.join(os.getcwd(), outputs_folder, 'metadata')
 plot_data_dispersion(Y_train, factor_access_train, args.A, folder_path, folder_name, unique_regions, model.W_CKL)
@@ -181,6 +181,7 @@ if __name__ == "__main__":
         'true_ELBO_train': true_ELBO_train,
         'true_offset_penalty_train': true_offset_penalty_train,
         'Y': Y_train,
+        'neuron_factor_access': factor_access_train,
         'model_params': {
             'time': data.time,
             'n_factors': num_factors,

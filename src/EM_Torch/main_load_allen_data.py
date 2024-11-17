@@ -128,7 +128,7 @@ params = {
     'peak2_right_landmarks': peak2_right_landmarks,
 }
 create_relevant_files(output_dir, output_str, params=params)
-plot_outputs(model, unique_regions, output_dir, 'Train', -1)
+plot_outputs(model, unique_regions, output_dir, 'Train', -1, Y=Y_train, factor_access=factor_access_train)
 plot_data_dispersion(Y_train, factor_access_train, args.A, folder_path, folder_name, unique_regions, model.W_CKL)
 print(f'folder_name: {args.folder_name}\n\n')
 print(output_str)
@@ -152,6 +152,7 @@ if __name__ == "__main__":
         'likelihood_ground_truth_train': None,
         'true_ELBO_train': None,
         'Y': Y_train,
+        'neuron_factor_access': factor_access_train,
         'model_params': {
             'time': bin_time,
             'n_factors': num_factors,

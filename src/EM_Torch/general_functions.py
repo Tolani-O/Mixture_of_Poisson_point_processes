@@ -263,7 +263,7 @@ def parse_folder_name(folder_name, parser_key, outputs_folder, load_run):
     return parsed_values
 
 
-def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None, Y=None):
+def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None, Y=None, factor_access=None, warp_data=True):
 
     stderr = se_dict is not None
     plot_data = Y is not None
@@ -329,8 +329,15 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         beta = model.unnormalized_log_factors()
         latent_factors = F.softmax(beta, dim=-1).numpy()
         if plot_data:
-            data = torch.einsum('ktrc,ckl->lt', Y, model.W_CKL)
-            scaled_data = (data / data.sum(dim=1).unsqueeze(1)).numpy()
+            neuron_factor_assignment, neuron_firing_rates = model.infer_latent_variables({'neuron_factor_access': factor_access})
+            K, T, R, C = Y.shape
+            data = Y / (1e-10 + neuron_firing_rates.t().unsqueeze(1).unsqueeze(2))
+            # scaled_data L x C x R x T
+            if warp_data:
+                scaled_data = reverse_warp_data(model, data)
+            else:
+                scaled_data = torch.einsum('ktrc,ckl->lcrt', data, model.W_CKL)
+            scaled_data = scaled_data.sum(dim=(1, 2))/(R * model.W_CKL.sum(dim=(0, 1)).unsqueeze(-1))
         if stderr:
             softmax_grad = np.abs(latent_factors * (1 - latent_factors))
             latent_factors_se = softmax_grad * beta_se
@@ -735,25 +742,52 @@ def compute_uncertainty(model, processed_inputs, output_dir, epoch):
     return se_dict
 
 
-def interpret_results(model, processed_inputs, factors_of_interest, output_dir, epoch):
-    # Interpret trial peak times # R x C x 2AL
-    factors = torch.exp(model.unnormalized_log_factors())
-    avg_peak1_times = model.time[torch.tensor([model.peak1_left_landmarks[i] + torch.argmax(factors[i, model.peak1_left_landmarks[i]:model.peak1_right_landmarks[i]]) for i in range(model.peak1_left_landmarks.shape[0])])]
-    avg_peak2_times = model.time[torch.tensor([model.peak2_left_landmarks[i] + torch.argmax(factors[i, model.peak2_left_landmarks[i]:model.peak2_right_landmarks[i]]) for i in range(model.peak2_left_landmarks.shape[0])])]
-    avg_peak_times = torch.cat([avg_peak1_times, avg_peak2_times]).unsqueeze(0).unsqueeze(1)
-    offsets = model.trial_peak_offset_proposal_means + model.config_peak_offsets.unsqueeze(0)
-    peak_times = avg_peak_times + offsets
-    left_landmarks = (model.time[torch.cat([model.peak1_left_landmarks, model.peak2_left_landmarks])]).unsqueeze(0).unsqueeze(1).expand_as(peak_times)
-    right_landmarks = (model.time[torch.cat([model.peak1_right_landmarks, model.peak2_right_landmarks])]).unsqueeze(0).unsqueeze(1).expand_as(peak_times)
-    peak_times = torch.max(torch.stack([peak_times, left_landmarks], dim=0), dim=0).values
-    peak_times = torch.min(torch.stack([peak_times, right_landmarks], dim=0), dim=0).values
+def compute_warped_factors(model, data, warped_times):
+    factors = torch.einsum('ktrc,ckl->lcrt', data, model.W_CKL)
+    # warped_indices  # 2AL x len(landmark_spread) x R X C
+    warped_indices = [warped_times[i].squeeze()/model.dt for i in range(len(warped_times))]
+    floor_warped_indices = [torch.floor(warped_indices[i]).int() for i in range(len(warped_times))]
+    ceil_warped_indices = [torch.ceil(warped_indices[i]).int() for i in range(len(warped_times))]
+    ceil_weights = [warped_indices[i] - floor_warped_indices[i] for i in range(len(warped_times))]
+    floor_weights = [1 - ceil_weights[i] for i in range(len(warped_times))]
+    left_landmarks = torch.cat([model.peak1_left_landmarks, model.peak2_left_landmarks])
+    right_landmarks = torch.cat([model.peak1_right_landmarks, model.peak2_right_landmarks])
+    full_warped_factors = []
+    L, C, R, T = factors.shape
+    for l in range(L):
+        full_warped_factors_l = []
+        for c in range(C):
+            full_warped_factors_c = []
+            for r in range(R):
+                floor_warped_factor_l = factors[l, c, r, floor_warped_indices[l][:, r, c]]
+                weighted_floor_warped_factor_l = floor_warped_factor_l * floor_weights[l][:, r, c]
+                ceil_warped_factor_l = factors[l, c, r, ceil_warped_indices[l][:, r, c]]
+                weighted_ceil_warped_factor_l = ceil_warped_factor_l * ceil_weights[l][:, r, c]
+                peak1 = weighted_floor_warped_factor_l + weighted_ceil_warped_factor_l
 
-    a = 1
-    # a = torch.cat(list(peak_times.permute(1, 0, 2)), dim=0).numpy()
-    # a2 = torch.cat(list(peak_times.permute(1, 0, 2)), dim=0).numpy()
-    # a3 = torch.cat(list(peak_times.permute(1, 0, 2)), dim=0).numpy()
-    # a = torch.cat(list(model.trial_peak_offset_proposal_means.permute(1, 0, 2)), dim=0).numpy()
-    # b = torch.cat(list((model.trial_peak_offset_proposal_means + model.config_peak_offsets.unsqueeze(0)).permute(1, 0, 2)), dim=0).numpy()
+                floor_warped_factor_l = factors[l, c, r, floor_warped_indices[l+model.n_factors][:, r, c]]
+                weighted_floor_warped_factor_l = floor_warped_factor_l * floor_weights[l+model.n_factors][:, r, c]
+                ceil_warped_factor_l = factors[l, c, r, ceil_warped_indices[l+model.n_factors][:, r, c]]
+                weighted_ceil_warped_factor_l = ceil_warped_factor_l * ceil_weights[l+model.n_factors][:, r, c]
+                peak2 = weighted_floor_warped_factor_l + weighted_ceil_warped_factor_l
+
+                early = factors[l, c, r, :left_landmarks[l]]
+                mid = factors[l, c, r, right_landmarks[l]:left_landmarks[l+model.n_factors]]
+                late = factors[l, c, r, right_landmarks[l+model.n_factors]:]
+                full_warped_factors_c.append(torch.cat([early, peak1, mid, peak2, late], dim=0))
+            full_warped_factors_l.append(torch.stack(full_warped_factors_c))
+        full_warped_factors.append(torch.stack(full_warped_factors_l))
+    full_warped_factors = torch.stack(full_warped_factors)
+    # full_warped_factors  # AL x C x R x T
+    return full_warped_factors
+
+
+def reverse_warp_data(model, Y):
+    model.generate_trial_peak_offset_samples()
+    avg_peak_times, left_landmarks, right_landmarks, s_new = model.compute_offsets_and_landmarks()
+    warped_times = model.compute_warped_times(s_new, left_landmarks, right_landmarks, avg_peak_times.expand_as(s_new))
+    warped_factors = compute_warped_factors(model, Y, warped_times)
+    return warped_factors
 
 
 def plot_epoch_results(input_dict, test=False):
@@ -764,7 +798,7 @@ def plot_epoch_results(input_dict, test=False):
 
 def plot_training_epoch_results(input_dict):
     print('Plotting epoch results')
-    Y, unique_regions, output_dir, epoch = input_dict['Y'], input_dict['unique_regions'], input_dict['output_dir'], input_dict['epoch']
+    Y, factor_access, unique_regions, output_dir, epoch = input_dict['Y'], input_dict['neuron_factor_access'], input_dict['unique_regions'], input_dict['output_dir'], input_dict['epoch']
     batch_grad_norms, grad_norms = input_dict['batch_grad_norms'], input_dict['grad_norms']
     model_state, optimizer_state, scheduler_state, W_CKL, a_CKL, theta, pi, epoch = load_model_checkpoint(output_dir, epoch)
     model = LikelihoodELBOModel(**input_dict['model_params'])
@@ -772,7 +806,7 @@ def plot_training_epoch_results(input_dict):
     model.load_state_dict(model_state)
     model.W_CKL, model.a_CKL, model.theta, model.pi = W_CKL, a_CKL, theta, pi
     likelihood_ground_truth_train, true_ELBO_train = input_dict['likelihood_ground_truth_train'], input_dict['true_ELBO_train']
-    plot_outputs(model, unique_regions, output_dir, 'Train', epoch, Y=Y.to(model.W_CKL.dtype))
+    plot_outputs(model, unique_regions, output_dir, 'Train', epoch, Y=Y.to(model.W_CKL.dtype), factor_access=factor_access)
     plot_grad_norms(batch_grad_norms, output_dir, 'batch', 20, False)
     plot_grad_norms(grad_norms, output_dir, 'train', 10)
     plot_losses(likelihood_ground_truth_train, output_dir, 'train', 'true_log_likelihoods', 10)

@@ -49,6 +49,7 @@ args.tau_config = 500
 args.tau_sigma = 1
 args.tau_sd = 10000
 sd_init = 0.5
+pad = 1
 args.notes = f'maskLimit{args.mask_neuron_threshold}_temp{args.temperature}_weight{args.weights}_warping{int(args.time_warp)}'
 
 if args.eval_interval > args.log_interval:
@@ -69,12 +70,13 @@ else:
 data = DataAnalyzer().initialize(configs=args.n_configs, A=args.A, L=args.L, intensity_mltply=args.intensity_mltply,
                                  intensity_bias=args.intensity_bias, time_warp=args.time_warp)
 # Training data
-Y_train, factor_access_train = load_tensors(data.sample_data(K=args.K, A=args.A, n_trials=args.n_trials))
+Y_train, factor_access_train = data.sample_data(K=args.K, A=args.A, n_trials=args.n_trials)
 print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')
 _, _, factor_assignment_onehot_train, neuron_gains_train, trial_offsets_train = to_cuda(load_tensors(data.get_sample_ground_truth()),
                                                                                         move_to_cuda=args.cuda)
-processed_inputs_train = preprocess_input_data(*to_cuda((Y_train, factor_access_train),
-                                                        move_to_cuda=args.cuda), mask_threshold=args.mask_neuron_threshold)
+processed_inputs_train = preprocess_input_data(*to_cuda(load_tensors((Y_train, factor_access_train, data.time)),
+                                                        move_to_cuda=args.cuda), pad=pad,
+                                               mask_threshold=args.mask_neuron_threshold)
 
 #DELETE
 remove_indcs = torch.concat(torch.where(factor_assignment_onehot_train == 1)).reshape(3, -1)
@@ -84,19 +86,20 @@ factor_assignment_onehot_train[remove_indcs[0], remove_indcs[1]] = 0
 neuron_gains_train[remove_indcs[0], remove_indcs[1]] = 0
 #DELETE
 
-Y_train, factor_access_train = processed_inputs_train['Y'].cpu(), processed_inputs_train['neuron_factor_access'].cpu()
-peak1_left_landmarks = data.time[[data.left_landmark1] * args.L]
-peak1_right_landmarks = data.time[[data.right_landmark1] * args.L]
-peak2_left_landmarks = data.time[[data.left_landmark2] * args.L]
-peak2_right_landmarks = data.time[[data.right_landmark2] * args.L]
+Y_train, factor_access_train, timeCourse = processed_inputs_train['Y'].cpu(), processed_inputs_train['neuron_factor_access'].cpu(), processed_inputs_train['time'].cpu()
+peak1_left_landmarks = timeCourse[[data.left_landmark1] * args.L]
+peak1_right_landmarks = timeCourse[[data.right_landmark1] * args.L]
+peak2_left_landmarks = timeCourse[[data.left_landmark2] * args.L]
+peak2_right_landmarks = timeCourse[[data.right_landmark2] * args.L]
 unique_regions = [f'region{i}' for i in range(args.A)]
 
 # initialize the model with ground truth params
 data.load_tensors()
 num_factors = data.beta.shape[0]
-model = LikelihoodELBOModel(data.time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
+data.beta = torch.cat([data.beta, torch.zeros(num_factors, 1)], dim=1)
+model = LikelihoodELBOModel(timeCourse, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
                             peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
-                            temperature=args.temperature, weights=args.weights)
+                            temperature=args.temperature, weights=args.weights, pad=pad)
 model.init_ground_truth(beta=data.beta.clone(),
                         alpha=inv_softplus_torch(data.alpha.clone()),
                         config_peak_offsets=data.config_peak_offsets.clone(),
@@ -144,7 +147,7 @@ elif args.init.lower() == 'dtw':
     cluster_dir = os.path.join(folder_path, folder_name)
     if not os.path.exists(os.path.join(cluster_dir, f'cluster_initialization.pkl')):
         initialize_clusters(Y_train, factor_access_train, args.L, args.A, cluster_dir, n_jobs=15, bandwidth=4)
-        plot_initial_clusters(folder_path, folder_name, args.L, {'Y': Y_train, 'time': data.time})
+        plot_initial_clusters(folder_path, folder_name, args.L, {'Y': Y_train, 'time': timeCourse})
     model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, cluster_dir=cluster_dir, init=the_rest)
 elif args.init.lower() == 'mom':
     model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, init=the_rest)
@@ -209,7 +212,7 @@ if __name__ == "__main__":
         'Y': Y_train,
         'neuron_factor_access': factor_access_train,
         'model_params': {
-            'time': data.time,
+            'time': timeCourse,
             'n_factors': num_factors,
             'n_areas': args.A,
             'n_configs': args.n_configs,

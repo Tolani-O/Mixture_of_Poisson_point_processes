@@ -42,6 +42,7 @@ peak1_right_landmarks = [0.12] * args.L
 peak2_left_landmarks = [0.16] * args.L
 peak2_right_landmarks = [0.27] * args.L
 dt = 0.002
+pad = 1
 args.notes = f'maskLimit{args.mask_neuron_threshold}_temp{args.temperature}_weight{args.weights}'
 
 regions = None
@@ -79,17 +80,18 @@ if Y_train is None:
     data.plot_spike_counts(folder_name)
     Y_train, bin_time, factor_access_train, unique_regions = data.sample_data(conditions=conditions, num_factors=args.L)
     save_sample(Y_train, bin_time, factor_access_train, unique_regions, folder_path, folder_name)
-processed_inputs_train = preprocess_input_data(*to_cuda(load_tensors((Y_train, factor_access_train)),
-                                                        move_to_cuda=args.cuda), mask_threshold=args.mask_neuron_threshold)
-Y_train, factor_access_train = processed_inputs_train['Y'].cpu(), processed_inputs_train['neuron_factor_access'].cpu()
+processed_inputs_train = preprocess_input_data(*to_cuda(load_tensors((Y_train, factor_access_train, bin_time)),
+                                                        move_to_cuda=args.cuda), pad=pad,
+                                               mask_threshold=args.mask_neuron_threshold)
+Y_train, factor_access_train, timeCourse = processed_inputs_train['Y'].cpu(), processed_inputs_train['neuron_factor_access'].cpu(), processed_inputs_train['time'].cpu()
 print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')
 
 args.K, T, args.n_trials, args.n_configs = Y_train.shape
 num_factors = factor_access_train.shape[-1]
 args.A = int(num_factors/args.L)
-model = LikelihoodELBOModel(bin_time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
+model = LikelihoodELBOModel(timeCourse, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
                             peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
-                            temperature=args.temperature, weights=args.weights)
+                            temperature=args.temperature, weights=args.weights, pad=pad)
 # Initialize the model
 if args.init.lower() == 'rand':
     model.init_random()
@@ -99,7 +101,7 @@ elif args.init.lower() == 'dtw':
     cluster_dir = os.path.join(folder_path, folder_name)
     if not os.path.exists(os.path.join(cluster_dir, f'cluster_initialization.pkl')):
         initialize_clusters(Y_train, factor_access_train, args.L, args.A, cluster_dir, n_jobs=15, bandwidth=4)
-        plot_initial_clusters(folder_path, folder_name, args.L)
+        plot_initial_clusters(folder_path, folder_name, args.L, {'Y': Y_train, 'time': timeCourse})
     model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, cluster_dir=cluster_dir, init=the_rest)
 elif args.init.lower() == 'mom':
     model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, init=the_rest)
@@ -154,7 +156,7 @@ if __name__ == "__main__":
         'Y': Y_train,
         'neuron_factor_access': factor_access_train,
         'model_params': {
-            'time': bin_time,
+            'time': timeCourse,
             'n_factors': num_factors,
             'n_areas': args.A,
             'n_configs': args.n_configs,

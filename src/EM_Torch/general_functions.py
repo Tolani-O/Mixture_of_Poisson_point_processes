@@ -68,14 +68,22 @@ class CustomDataset(Dataset):
         return self.Y[idx], self.neuron_factor_access[:, idx, :] # K x C x L
 
 
-def preprocess_input_data(Y, neuron_factor_access, mask_threshold=0):
+def preprocess_input_data(Y, neuron_factor_access, time, pad=0, mask_threshold=0):
     processed_inputs = {}
     # Y # K x T x R x C
     # neuron_factor_access # C x K x L
+    K, T, R, C = Y.shape
+    Y = torch.cat([Y, torch.zeros(K, pad, R, C)], dim=1)
+    time = time.unsqueeze(-1)
+    dt = time[[1]] - time[[0]]
+    for i in range(pad):
+        time = torch.cat([time, time[[-1]] + dt])
+    time = time.squeeze()
     Y_sum_t = torch.sum(Y, dim=1).permute(2, 0, 1)  # C x K x R
     Y_sum_rt = torch.sum(Y_sum_t, dim=-1)  # C x K
     empty_trials = torch.where(Y_sum_rt <= mask_threshold)
     neuron_factor_access[empty_trials[0], empty_trials[1]] = 0
+    processed_inputs['time'] = time
     processed_inputs['Y'] = Y
     processed_inputs['Y_sum_t'] = Y_sum_t
     processed_inputs['Y_sum_rt'] = Y_sum_rt

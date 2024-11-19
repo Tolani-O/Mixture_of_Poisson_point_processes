@@ -59,23 +59,28 @@ else:
 data = DataAnalyzer().initialize(configs=args.n_configs, A=args.A, L=args.L, intensity_mltply=args.intensity_mltply,
                                  intensity_bias=args.intensity_bias, time_warp=args.time_warp)
 # Training data
-Y_train, factor_access_train = load_tensors(data.sample_data(K=args.K, A=args.A, n_trials=args.n_trials))
+Y_train, factor_access_train = data.sample_data(K=args.K, A=args.A, n_trials=args.n_trials)
 print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')
 _, _, factor_assignment_onehot_train, neuron_gains_train, trial_offsets_train = to_cuda(load_tensors(data.get_sample_ground_truth()),
                                                                                         move_to_cuda=args.cuda)
-processed_inputs_train = preprocess_input_data(*to_cuda((Y_train, factor_access_train),
+processed_inputs_train = preprocess_input_data(*to_cuda(load_tensors((Y_train, factor_access_train, data.time)),
                                                         move_to_cuda=args.cuda), mask_threshold=args.mask_neuron_threshold)
 Y_train, factor_access_train = processed_inputs_train['Y'].cpu(), processed_inputs_train['neuron_factor_access'].cpu()
 peak1_left_landmarks = parser_dict['peak1_left_landmarks']
 peak1_right_landmarks = parser_dict['peak1_right_landmarks']
 peak2_left_landmarks = parser_dict['peak2_left_landmarks']
 peak2_right_landmarks = parser_dict['peak2_right_landmarks']
+Y_train, factor_access_train, timeCourse = processed_inputs_train['Y'].cpu(), processed_inputs_train['neuron_factor_access'].cpu(), processed_inputs_train['time'].cpu()
+peak1_left_landmarks = timeCourse[[data.left_landmark1] * args.L]
+peak1_right_landmarks = timeCourse[[data.right_landmark1] * args.L]
+peak2_left_landmarks = timeCourse[[data.left_landmark2] * args.L]
+peak2_right_landmarks = timeCourse[[data.right_landmark2] * args.L]
 unique_regions = [f'region{i}' for i in range(args.A)]
 
 # initialize the model with ground truth params
 data.load_tensors()
 num_factors = data.beta.shape[0]
-model = LikelihoodELBOModel(data.time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
+model = LikelihoodELBOModel(timeCourse, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
                             peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
                             temperature=args.temperature, weights=args.weights)
 model.init_ground_truth(beta=data.beta.clone(),
@@ -110,7 +115,7 @@ if args.num_epochs < 0:
     model.cuda(move_to_cuda=args.cuda)
     se_dict = compute_uncertainty(model, processed_inputs_train, output_dir, args.load_epoch)
     model.cpu()
-    plot_outputs(model, unique_regions, output_dir, 'Train', args.load_epoch, se_dict)
+    plot_outputs(model, unique_regions, output_dir, 'Train', args.load_epoch, se_dict, Y_train, factor_access_train)
     interpret_results(model, processed_inputs_train, 'output_dir', -2)
     sys.exit()
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -183,7 +188,7 @@ if __name__ == "__main__":
         'Y': Y_train,
         'neuron_factor_access': factor_access_train,
         'model_params': {
-            'time': data.time,
+            'time': timeCourse,
             'n_factors': num_factors,
             'n_areas': args.A,
             'n_configs': args.n_configs,

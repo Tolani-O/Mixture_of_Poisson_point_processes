@@ -36,7 +36,11 @@ args.tau_config = float(parser_dict['tauConfig'])
 args.tau_sigma = float(parser_dict['tauSigma'])
 args.tau_sd = float(parser_dict['tauSD'])
 args.n_trial_samples = int(parser_dict['posterior'])  # Number of samples to generate for each trial
-dt = 0.002
+peak1_left_landmarks = parser_dict['peak1_left_landmarks']
+peak1_right_landmarks = parser_dict['peak1_right_landmarks']
+peak2_left_landmarks = parser_dict['peak2_left_landmarks']
+peak2_right_landmarks = parser_dict['peak2_right_landmarks']
+dt = parser_dict['dt']
 
 if args.eval_interval > args.log_interval:
     args.log_interval = args.eval_interval
@@ -61,19 +65,15 @@ folder_name = f'sample_data_{region_ct}-regions_{args.L}-factors_{dt}_dt'
 Y_train, bin_time, factor_access_train, unique_regions = load_sample(folder_path, folder_name)
 if Y_train is None:
     raise ValueError("No training data found")
-processed_inputs_train = preprocess_input_data(*to_cuda(load_tensors((Y_train, factor_access_train)),
+processed_inputs_train = preprocess_input_data(*to_cuda(load_tensors((Y_train, factor_access_train, bin_time)),
                                                         move_to_cuda=args.cuda), mask_threshold=args.mask_neuron_threshold)
-Y_train, factor_access_train = processed_inputs_train['Y'].cpu(), processed_inputs_train['neuron_factor_access'].cpu()
-peak1_left_landmarks = parser_dict['peak1_left_landmarks']
-peak1_right_landmarks = parser_dict['peak1_right_landmarks']
-peak2_left_landmarks = parser_dict['peak2_left_landmarks']
-peak2_right_landmarks = parser_dict['peak2_right_landmarks']
+Y_train, factor_access_train, timeCourse = processed_inputs_train['Y'].cpu(), processed_inputs_train['neuron_factor_access'].cpu(), processed_inputs_train['time'].cpu()
 print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')
 
 args.K, T, args.n_trials, args.n_configs = Y_train.shape
 num_factors = factor_access_train.shape[-1]
-args.A = int(num_factors / args.L)
-model = LikelihoodELBOModel(bin_time, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
+args.A = int(num_factors/args.L)
+model = LikelihoodELBOModel(timeCourse, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
                             peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
                             temperature=args.temperature, weights=args.weights)
 output_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, f'Run_{args.load_run + 1}')
@@ -143,7 +143,7 @@ if __name__ == "__main__":
         'Y': Y_train,
         'neuron_factor_access': factor_access_train,
         'model_params': {
-            'time': bin_time,
+            'time': timeCourse,
             'n_factors': num_factors,
             'n_areas': args.A,
             'n_configs': args.n_configs,

@@ -43,12 +43,11 @@ def create_second_diff_matrix(P):
 class LikelihoodELBOModel(nn.Module):
     def __init__(self, time, n_factors, n_areas, n_configs, n_trials, n_trial_samples,
                  peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
-                 temperature=None, weights=None, pad=0):
+                 temperature=None, weights=None):
         super(LikelihoodELBOModel, self).__init__()
 
         self.device = 'cpu'
         self.is_eval = True
-        self.pad = pad
         if temperature is None:
             temperature = (1,)
         if isinstance(temperature, (int, float)):
@@ -76,7 +75,7 @@ class LikelihoodELBOModel(nn.Module):
         self.n_trial_samples = n_trial_samples
         self.n_configs = n_configs
         self.n_trials = n_trials
-        Delta2 = create_second_diff_matrix(T-pad)
+        Delta2 = create_second_diff_matrix(T)
         self.Delta2TDelta2 = torch.tensor(Delta2.T @ Delta2)  # T x T # tikhonov regularization
 
         # Storage for use in the forward pass
@@ -184,7 +183,6 @@ class LikelihoodELBOModel(nn.Module):
             with open(cluster_dir, 'rb') as f:
                 data = pickle.load(f)
             W_CKL, beta = data['neuron_factor_assignment'], data['beta']
-            beta = torch.cat([beta, torch.zeros(self.n_factors, self.time.shape[0]-beta.shape[-1], dtype=torch.float64)], dim=1) # temporary
             filter = W_CKL
         # NOTE: Empirical average and variance of spike counts are for NB,not for gamma
         spike_counts = torch.einsum('ktrc,ckl->ckl', Y, filter)
@@ -563,8 +561,7 @@ class LikelihoodELBOModel(nn.Module):
         Sigma = ltri_matrix @ ltri_matrix.t()
         inv_Sigma = torch.linalg.inv(Sigma)
         sigma_Penalty = -tau_sigma * (1/(torch.prod(torch.tensor(Sigma.shape))-Sigma.shape[0])) * (torch.sum(torch.abs(inv_Sigma)) - torch.sum(torch.abs(torch.diag(inv_Sigma))))
-        end = len(self.time) - self.pad
-        factors = torch.softmax(self.unnormalized_log_factors()[:, :end], dim=-1)
+        factors = torch.softmax(self.unnormalized_log_factors(), dim=-1)
         beta_s2_penalty = -tau_beta * (1/torch.prod(torch.tensor(factors.shape))) * torch.sum((factors @ self.Delta2TDelta2) * factors)
         penalty_term = config_Penalty + sigma_Penalty + beta_s2_penalty + proposal_sd_penalty
         return penalty_term

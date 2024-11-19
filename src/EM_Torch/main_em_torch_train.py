@@ -49,7 +49,6 @@ args.tau_config = 500
 args.tau_sigma = 1
 args.tau_sd = 10000
 sd_init = 0.5
-pad = 1
 args.notes = f'maskLimit{args.mask_neuron_threshold}_temp{args.temperature}_weight{args.weights}_warping{int(args.time_warp)}'
 
 if args.eval_interval > args.log_interval:
@@ -75,8 +74,7 @@ print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_acces
 _, _, factor_assignment_onehot_train, neuron_gains_train, trial_offsets_train = to_cuda(load_tensors(data.get_sample_ground_truth()),
                                                                                         move_to_cuda=args.cuda)
 processed_inputs_train = preprocess_input_data(*to_cuda(load_tensors((Y_train, factor_access_train, data.time)),
-                                                        move_to_cuda=args.cuda), pad=pad,
-                                               mask_threshold=args.mask_neuron_threshold)
+                                                        move_to_cuda=args.cuda), mask_threshold=args.mask_neuron_threshold)
 
 #DELETE
 remove_indcs = torch.concat(torch.where(factor_assignment_onehot_train == 1)).reshape(3, -1)
@@ -96,10 +94,9 @@ unique_regions = [f'region{i}' for i in range(args.A)]
 # initialize the model with ground truth params
 data.load_tensors()
 num_factors = data.beta.shape[0]
-data.beta = torch.cat([data.beta, torch.zeros(num_factors, 1)], dim=1)
 model = LikelihoodELBOModel(timeCourse, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
                             peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
-                            temperature=args.temperature, weights=args.weights, pad=pad)
+                            temperature=args.temperature, weights=args.weights)
 model.init_ground_truth(beta=data.beta.clone(),
                         alpha=inv_softplus_torch(data.alpha.clone()),
                         config_peak_offsets=data.config_peak_offsets.clone(),

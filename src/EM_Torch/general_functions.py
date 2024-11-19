@@ -752,14 +752,15 @@ def compute_uncertainty(model, processed_inputs, output_dir, epoch):
 
 def compute_warped_factors(model, data, warped_times):
     factors = torch.einsum('ktrc,ckl->lcrt', data, model.W_CKL)
-    # warped_indices  # 2AL x len(landmark_spread) x R X C
-    warped_indices = [warped_times[i].squeeze()/model.dt for i in range(len(warped_times))]
-    floor_warped_indices = [torch.floor(warped_indices[i]).int() for i in range(len(warped_times))]
-    ceil_warped_indices = [torch.ceil(warped_indices[i]).int() for i in range(len(warped_times))]
-    ceil_weights = [warped_indices[i] - floor_warped_indices[i] for i in range(len(warped_times))]
-    floor_weights = [1 - ceil_weights[i] for i in range(len(warped_times))]
-    left_landmarks = torch.cat([model.peak1_left_landmarks, model.peak2_left_landmarks])
-    right_landmarks = torch.cat([model.peak1_right_landmarks, model.peak2_right_landmarks])
+    warped_indices = warped_times / model.dt
+    floor_warped_indices = torch.floor(warped_indices).int()
+    ceil_warped_indices = torch.ceil(warped_indices).int()
+    ceil_weights = warped_indices - floor_warped_indices
+    floor_weights = 1 - ceil_weights
+    spike_train_start_offset = torch.searchsorted(model.time, 0, side='left')
+    left_landmarks_int = torch.cat([model.peak1_left_landmarks, model.peak2_left_landmarks]) + spike_train_start_offset
+    right_landmarks_int = torch.cat([model.peak1_right_landmarks, model.peak2_right_landmarks]) + spike_train_start_offset
+    landmark_speads = right_landmarks_int - left_landmarks_int
     full_warped_factors = []
     L, C, R, T = factors.shape
     for l in range(L):
@@ -767,21 +768,23 @@ def compute_warped_factors(model, data, warped_times):
         for c in range(C):
             full_warped_factors_c = []
             for r in range(R):
-                floor_warped_factor_l = factors[l, c, r, floor_warped_indices[l][:, r, c]]
-                weighted_floor_warped_factor_l = floor_warped_factor_l * floor_weights[l][:, r, c]
-                ceil_warped_factor_l = factors[l, c, r, ceil_warped_indices[l][:, r, c]]
-                weighted_ceil_warped_factor_l = ceil_warped_factor_l * ceil_weights[l][:, r, c]
+                floor_warped_factor_l = factors[l, c, r, floor_warped_indices[l, :, 0, r, c]]
+                weighted_floor_warped_factor_l = floor_warped_factor_l * floor_weights[l, :, 0, r, c]
+                ceil_warped_factor_l = factors[l, c, r, ceil_warped_indices[l, :, 0, r, c]]
+                weighted_ceil_warped_factor_l = ceil_warped_factor_l * ceil_weights[l, :, 0, r, c]
                 peak1 = weighted_floor_warped_factor_l + weighted_ceil_warped_factor_l
 
-                floor_warped_factor_l = factors[l, c, r, floor_warped_indices[l+model.n_factors][:, r, c]]
-                weighted_floor_warped_factor_l = floor_warped_factor_l * floor_weights[l+model.n_factors][:, r, c]
-                ceil_warped_factor_l = factors[l, c, r, ceil_warped_indices[l+model.n_factors][:, r, c]]
-                weighted_ceil_warped_factor_l = ceil_warped_factor_l * ceil_weights[l+model.n_factors][:, r, c]
+                floor_warped_factor_l = factors[l, c, r, floor_warped_indices[l + model.n_factors, :, 0, r, c]]
+                weighted_floor_warped_factor_l = floor_warped_factor_l * floor_weights[l + model.n_factors, :, 0, r, c]
+                ceil_warped_factor_l = factors[l, c, r, ceil_warped_indices[l + model.n_factors, :, 0, r, c]]
+                weighted_ceil_warped_factor_l = ceil_warped_factor_l * ceil_weights[l + model.n_factors, :, 0, r, c]
                 peak2 = weighted_floor_warped_factor_l + weighted_ceil_warped_factor_l
 
-                early = factors[l, c, r, :left_landmarks[l]]
-                mid = factors[l, c, r, right_landmarks[l]:left_landmarks[l+model.n_factors]]
-                late = factors[l, c, r, right_landmarks[l+model.n_factors]:]
+                early = factors[l, c, r, :left_landmarks_int[l]]
+                peak1 = peak1[:landmark_speads[l]]
+                mid = factors[l, c, r, right_landmarks_int[l]:left_landmarks_int[l + model.n_factors]]
+                peak2 = peak2[:landmark_speads[l + model.n_factors]]
+                late = factors[l, c, r, right_landmarks_int[l + model.n_factors]:]
                 full_warped_factors_c.append(torch.cat([early, peak1, mid, peak2, late], dim=0))
             full_warped_factors_l.append(torch.stack(full_warped_factors_c))
         full_warped_factors.append(torch.stack(full_warped_factors_l))

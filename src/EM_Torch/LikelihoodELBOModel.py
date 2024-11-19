@@ -321,10 +321,7 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def warp_all_latent_factors_for_all_trials(self):
-        avg_peak_times, left_landmarks, right_landmarks, s_new = self.compute_offsets_and_landmarks()
-        warped_times = self.compute_warped_times(avg_peak_times, left_landmarks, right_landmarks, s_new)
-        warped_factors = self.compute_warped_factors(warped_times)
-        return warped_factors
+        return self.compute_warped_factors(self.compute_warped_times(*self.compute_offsets_and_landmarks()))
 
 
     def compute_offsets_and_landmarks(self):
@@ -351,64 +348,58 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def compute_warped_times(self, avg_peak_times, left_landmarks, right_landmarks, trial_peak_times):
+        # landmark_speads # T
         spike_train_start_offset = torch.searchsorted(self.time, 0, side='left')
         left_landmarks_int = torch.cat([self.peak1_left_landmarks, self.peak2_left_landmarks]) + spike_train_start_offset
         right_landmarks_int = torch.cat([self.peak1_right_landmarks, self.peak2_right_landmarks]) + spike_train_start_offset
         landmark_speads = right_landmarks_int - left_landmarks_int
-        left_shifted_time = [self.time[left_landmarks_int[i]:right_landmarks_int[i]] - self.time[left_landmarks_int[i]] for i in range(landmark_speads.shape[0])]
-        left_shifted_peak_times = trial_peak_times - left_landmarks
-        right_shifted_peak_times = trial_peak_times - right_landmarks
+        max_landmark_spread = landmark_speads.max()
+        # shifted_peak_times # 2AL x 1 x N x R x C
+        left_shifted_peak_times = (trial_peak_times - left_landmarks).permute(3, 0, 1, 2).unsqueeze(1)
+        right_shifted_peak_times = (trial_peak_times - right_landmarks).permute(3, 0, 1, 2).unsqueeze(1)
+        # shifted_peak_times # 2AL x max_landmark_spread x N x R x C
+        left_shifted_peak_times = left_shifted_peak_times.expand(-1, max_landmark_spread, -1, -1, -1)
+        left_landmarks = left_landmarks.permute(3, 0, 1, 2).unsqueeze(1).expand_as(left_shifted_peak_times)
+        right_landmarks = right_landmarks.permute(3, 0, 1, 2).unsqueeze(1).expand_as(left_shifted_peak_times)
+        avg_peak_times = avg_peak_times.permute(3, 0, 1, 2).unsqueeze(1).expand_as(left_shifted_peak_times)
         left_slope = (avg_peak_times - left_landmarks) / left_shifted_peak_times
         right_slope = (avg_peak_times - right_landmarks) / right_shifted_peak_times
-        warped_times = [torch.stack([torch.zeros(left_shifted_peak_times.shape[:3], device=self.device)] * left_shifted_time[i].shape[0]) for i in range(landmark_speads.shape[0])]
-        max_landmark_spread = landmark_speads.max()
-        for i in range(max_landmark_spread):
-            for j in range(landmark_speads.shape[0]):
-                if i >= landmark_speads[j]: continue
-                lst = left_shifted_time[j][i]
-                lspt = left_shifted_peak_times[:, :, :, j]
-                apt = avg_peak_times[:, :, :, j]
-                ls = left_slope[:, :, :, j]
-                rs = right_slope[:, :, :, j]
-                ll = left_landmarks[:, :, :, j]
-                warped_times[j][i] = torch.where(lst < lspt, (lst * ls) + ll, ((lst - lspt) * rs) + apt)
-        # warped_times  # 2AL x len(landmark_spread) x N x R X C
+        # left_shifted_time # 2AL x max_landmark_spread x N x R x C
+        left_shifted_time = torch.stack([torch.nn.functional.pad(self.time[left_landmarks_int[i]:right_landmarks_int[i]] - self.time[left_landmarks_int[i]],
+                                                     (0, max_landmark_spread - landmark_speads[i]),
+                                                     value=self.time[right_landmarks_int[i]] - self.time[left_landmarks_int[i]])
+                             for i in range(landmark_speads.shape[0])]).unsqueeze(2).unsqueeze(3).unsqueeze(4).expand_as(left_shifted_peak_times)
+        slope_mask = (left_shifted_time < left_shifted_peak_times).int()
+        # warped_times # 2AL x max_landmark_spread x N x R x C
+        warped_times = slope_mask * (left_shifted_time * left_slope + left_landmarks) + (1 - slope_mask) * ((left_shifted_time - left_shifted_peak_times) * right_slope + avg_peak_times)
         return warped_times
 
 
     def compute_warped_factors(self, warped_times):
-        factors = torch.exp(self.unnormalized_log_factors())
+        factors = torch.cat([torch.exp(self.unnormalized_log_factors())] * 2, dim=0)
         # warped_time  # 2AL x len(landmark_spread) x N x R X C
-        warped_indices = [warped_times[i]/self.dt for i in range(len(warped_times))]
-        floor_warped_indices = [torch.floor(warped_indices[i]).int() for i in range(len(warped_times))]
-        ceil_warped_indices = [torch.ceil(warped_indices[i]).int() for i in range(len(warped_times))]
-        ceil_weights = [warped_indices[i] - floor_warped_indices[i] for i in range(len(warped_times))]
-        floor_weights = [1 - ceil_weights[i] for i in range(len(warped_times))]
-        left_landmarks = torch.cat([self.peak1_left_landmarks, self.peak2_left_landmarks])
-        right_landmarks = torch.cat([self.peak1_right_landmarks, self.peak2_right_landmarks])
-        full_warped_factors = []
-        for l in range(self.n_factors):
-            floor_warped_factor_l = factors[l, floor_warped_indices[l]]
-            weighted_floor_warped_factor_l = floor_warped_factor_l * floor_weights[l]
-            ceil_warped_factor_l = factors[l, ceil_warped_indices[l]]
-            weighted_ceil_warped_factor_l = ceil_warped_factor_l * ceil_weights[l]
-            peak1 = weighted_floor_warped_factor_l + weighted_ceil_warped_factor_l
-
-            floor_warped_factor_l = factors[l, floor_warped_indices[l+self.n_factors]]
-            weighted_floor_warped_factor_l = floor_warped_factor_l * floor_weights[l+self.n_factors]
-            ceil_warped_factor_l = factors[l, ceil_warped_indices[l+self.n_factors]]
-            weighted_ceil_warped_factor_l = ceil_warped_factor_l * ceil_weights[l+self.n_factors]
-            peak2 = weighted_floor_warped_factor_l + weighted_ceil_warped_factor_l
-
-            early = factors[l, :left_landmarks[l]]
-            early = early.unsqueeze(1).unsqueeze(2).unsqueeze(3).expand(early.shape[0], *peak1.shape[1:])
-            mid = factors[l, right_landmarks[l]:left_landmarks[l+self.n_factors]]
-            mid = mid.unsqueeze(1).unsqueeze(2).unsqueeze(3).expand(mid.shape[0], *peak1.shape[1:])
-            late = factors[l, right_landmarks[l+self.n_factors]:]
-            late = late.unsqueeze(1).unsqueeze(2).unsqueeze(3).expand(late.shape[0], *peak1.shape[1:])
-            full_warped_factors.append(torch.cat([early, peak1, mid, peak2, late], dim=0))
-        full_warped_factors = torch.stack(full_warped_factors)
-        # full_warped_factors  # AL x T x N x R x C
+        warped_indices = warped_times / self.dt
+        floor_warped_indices = torch.floor(warped_indices).int()
+        ceil_warped_indices = torch.ceil(warped_indices).int()
+        ceil_weights = warped_indices - floor_warped_indices
+        floor_weights = 1 - ceil_weights
+        floor_warped_factor = torch.stack([factors[i, floor_warped_indices[i]] for i in range(2*self.n_factors)])
+        weighted_floor_warped_factor = floor_warped_factor * floor_weights
+        ceil_warped_factor = torch.stack([factors[i, ceil_warped_indices[i]] for i in range(2*self.n_factors)])
+        weighted_ceil_warped_factor = ceil_warped_factor * ceil_weights
+        peaks = weighted_floor_warped_factor + weighted_ceil_warped_factor
+        factors = torch.exp(self.unnormalized_log_factors())
+        spike_train_start_offset = torch.searchsorted(self.time, 0, side='left')
+        left_landmarks_int = torch.cat([self.peak1_left_landmarks, self.peak2_left_landmarks]) + spike_train_start_offset
+        right_landmarks_int = torch.cat([self.peak1_right_landmarks, self.peak2_right_landmarks]) + spike_train_start_offset
+        landmark_speads = right_landmarks_int - left_landmarks_int
+        early = [factors[l, :left_landmarks_int[l]].unsqueeze(1).unsqueeze(2).unsqueeze(3).expand(-1, *peaks.shape[2:]) for l in range(self.n_factors)]
+        peak1 = [peaks[l, :landmark_speads[l]] for l in range(self.n_factors)]
+        mid = [factors[l, right_landmarks_int[l]:left_landmarks_int[l+self.n_factors]].unsqueeze(1).unsqueeze(2).unsqueeze(3).expand(-1, *peaks.shape[2:]) for l in range(self.n_factors)]
+        peak2 = [peaks[l+self.n_factors, :landmark_speads[l+self.n_factors]] for l in range(self.n_factors)]
+        late = [factors[l, right_landmarks_int[l+self.n_factors]:].unsqueeze(1).unsqueeze(2).unsqueeze(3).expand(-1, *peaks.shape[2:]) for l in range(self.n_factors)]
+        # full_warped_factors # AL x T x N x R x C
+        full_warped_factors = torch.stack([torch.cat([early[l], peak1[l], mid[l], peak2[l], late[l]], dim=0) for l in range(self.n_factors)])
         return full_warped_factors
 
 

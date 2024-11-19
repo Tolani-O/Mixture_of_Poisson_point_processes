@@ -339,17 +339,23 @@ class LikelihoodELBOModel(nn.Module):
         # self.config_peak_offsets  # C x 2AL
         offsets = self.trial_peak_offset_proposal_samples + self.config_peak_offsets.unsqueeze(0).unsqueeze(1)
         s_new = avg_peak_times + offsets
-        left_landmarks = (self.time[torch.cat([self.peak1_left_landmarks, self.peak2_left_landmarks])]).unsqueeze(0).unsqueeze(1).unsqueeze(2)
-        right_landmarks = (self.time[torch.cat([self.peak1_right_landmarks, self.peak2_right_landmarks])]).unsqueeze(0).unsqueeze(1).unsqueeze(2)
-        s_new = torch.where(s_new <= left_landmarks, left_landmarks, s_new)
-        s_new = torch.where(s_new >= right_landmarks, right_landmarks, s_new)
+        left_landmarks_int = torch.cat([self.peak1_left_landmarks, self.peak2_left_landmarks]).unsqueeze(0).unsqueeze(1).unsqueeze(2)
+        right_landmarks_int = torch.cat([self.peak1_right_landmarks, self.peak2_right_landmarks]).unsqueeze(0).unsqueeze(1).unsqueeze(2)
+        left_landmarks = self.time[left_landmarks_int]
+        right_landmarks = self.time[right_landmarks_int]
+        s_new = torch.where(s_new <= left_landmarks, self.time[left_landmarks_int+1], s_new)
+        s_new = torch.where(s_new >= right_landmarks, self.time[right_landmarks_int-1], s_new)
+        avg_peak_times = torch.where(avg_peak_times <= left_landmarks, self.time[left_landmarks_int+1], avg_peak_times)
+        avg_peak_times = torch.where(avg_peak_times >= right_landmarks, self.time[right_landmarks_int-1], avg_peak_times)
         return avg_peak_times, left_landmarks, right_landmarks, s_new
 
 
     def compute_warped_times(self, avg_peak_times, left_landmarks, right_landmarks, trial_peak_times):
-        landmark_speads = ((right_landmarks - left_landmarks).squeeze()/self.dt).round().int()
         spike_train_start_offset = torch.searchsorted(self.time, 0, side='left')
-        left_shifted_time = [self.time[spike_train_start_offset:(landmark_speads[i] + spike_train_start_offset)] for i in range(landmark_speads.shape[0])]
+        left_landmarks_int = torch.cat([self.peak1_left_landmarks, self.peak2_left_landmarks]) + spike_train_start_offset
+        right_landmarks_int = torch.cat([self.peak1_right_landmarks, self.peak2_right_landmarks]) + spike_train_start_offset
+        landmark_speads = right_landmarks_int - left_landmarks_int
+        left_shifted_time = [self.time[left_landmarks_int[i]:right_landmarks_int[i]] - self.time[left_landmarks_int[i]] for i in range(landmark_speads.shape[0])]
         left_shifted_peak_times = trial_peak_times - left_landmarks
         right_shifted_peak_times = trial_peak_times - right_landmarks
         left_slope = (avg_peak_times - left_landmarks) / left_shifted_peak_times

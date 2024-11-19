@@ -264,7 +264,7 @@ def parse_folder_name(folder_name, parser_key, outputs_folder, load_run):
     return parsed_values
 
 
-def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None, Y=None, factor_access=None, warp_data=True):
+def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None, Y=None, factor_access=None, warp_data=True, mismatch=False):
 
     stderr = se_dict is not None
     plot_data = Y is not None
@@ -329,6 +329,8 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
             W_L = np.round((torch.sum(model.W_CKL, dim=(0, 1))/model.n_configs).numpy(), 1)
         beta = model.unnormalized_log_factors()
         latent_factors = F.softmax(beta, dim=-1).numpy()
+        upper_limit = np.max(latent_factors) + 0.005
+        lower_limit = -5e-4
         if plot_data:
             neuron_factor_assignment, neuron_firing_rates = model.infer_latent_variables({'neuron_factor_access': factor_access})
             K, T, R, C = Y.shape
@@ -338,22 +340,32 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
                 scaled_data = reverse_warp_data(model, data)
             else:
                 scaled_data = torch.einsum('ktrc,ckl->lcrt', data, model.W_CKL)
-            scaled_data = scaled_data.sum(dim=(1, 2))/(R * model.W_CKL.sum(dim=(0, 1)).unsqueeze(-1))
+            scaled_data = scaled_data.sum(dim=(1, 2))/(R * model.W_CKL.sum(dim=(0, 1)).unsqueeze(-1)).numpy()
+            if mismatch:
+                diff = scaled_data - latent_factors
+                lower_limit = -0.001
         if stderr:
             softmax_grad = np.abs(latent_factors * (1 - latent_factors))
             latent_factors_se = softmax_grad * beta_se
             factor_ucl = latent_factors + latent_factors_se
             factor_lcl = latent_factors - latent_factors_se
-        upper_limit = np.max(latent_factors) + 0.005
         plt.figure(figsize=(model.n_areas*10, int(model.n_factors/model.n_areas)*5))
         L = np.arange(model.n_factors).reshape(model.n_areas, -1).T.flatten()
         c = 0
         factors_per_area = int(model.n_factors/model.n_areas)
         for l in L:
             plt.subplot(factors_per_area, model.n_areas, c + 1)
+            plt.vlines(x=model.time[torch.tensor([
+                model.peak1_left_landmarks[l], model.peak1_right_landmarks[l],
+                model.peak2_left_landmarks[l], model.peak2_right_landmarks[l]])],
+                       ymin=0, ymax=upper_limit,
+                       color='grey', linestyle='--', alpha=0.5)
+            plt.hlines(y=0, xmin=0, xmax=model.time[-1], color='white', linestyle='-', linewidth=2, alpha=0.5)
             plt.plot(model.time, latent_factors[l, :], alpha=np.max([pi[l], 0.5]), linewidth=np.exp(1.5*pi[l]))
             if plot_data:
                 plt.plot(model.time, scaled_data[l, :], alpha=np.max([pi[l], 0.5]), linewidth=1, linestyle='--')
+                if mismatch:
+                    plt.plot(model.time, diff[l, :], alpha=np.max([pi[l], 0.5]), linewidth=1, linestyle='-.')
             if stderr:
                 plt.fill_between(model.time, factor_ucl[l, :], factor_lcl[l, :], color='grey', alpha=0.3, label='Standard Error')
                 plt.plot(model.time, factor_ucl[l, :], linestyle='--', color='black', alpha=0.07)
@@ -361,16 +373,11 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
                 plt.legend()
             plt.xlabel('Intensity')
             plt.ylabel('Trial time course (ms)')
-            plt.vlines(x=model.time[torch.tensor([
-                model.peak1_left_landmarks[l], model.peak1_right_landmarks[l],
-                model.peak2_left_landmarks[l], model.peak2_right_landmarks[l]])],
-                       ymin=0, ymax=upper_limit,
-                       color='grey', linestyle='--', alpha=0.5)
             plt.title(f'Factor {(l%factors_per_area)+1}, '
                       f'Area {unique_regions[l//factors_per_area]}, '
                       f'Membership: {pi[l]:.2f}, '
                       f'Count: {W_L[l]:.1f}', fontsize=20)
-            plt.ylim(bottom=-5e-4, top=upper_limit)
+            plt.ylim(bottom=lower_limit, top=upper_limit)
             c += 1
         plt.tight_layout()
         plt.savefig(os.path.join(beta_dir, f'LatentFactors_{epoch}.png'))

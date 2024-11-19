@@ -267,7 +267,7 @@ def parse_folder_name(folder_name, parser_key, outputs_folder, load_run):
 def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None, Y=None, factor_access=None, warp_data=True, mismatch=False):
 
     stderr = se_dict is not None
-    plot_data = Y is not None
+    plot_data = (Y is not None) and (model.W_CKL is not None)
     output_dir = os.path.join(output_dir, folder)
     os.makedirs(output_dir, exist_ok=True)
     beta_dir = os.path.join(output_dir, 'beta')

@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import pickle
+torch.set_default_tensor_type(torch.DoubleTensor)
 
 def create_precision_matrix(P):
     Omega = np.zeros((P, P))
@@ -98,32 +99,32 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def init_random(self):
-        self.beta = nn.Parameter(torch.log(torch.rand(self.n_factors, self.time.shape[0]-1, dtype=torch.float64)))
-        self.alpha = nn.Parameter(torch.rand(self.n_factors, dtype=torch.float64))
+        self.beta = nn.Parameter(torch.log(torch.rand(self.n_factors, self.time.shape[0]-1)))
+        self.alpha = nn.Parameter(torch.rand(self.n_factors))
         n_dims = 2 * self.n_factors
         num_elements = n_dims * (n_dims - 1) // 2
-        self.config_peak_offsets = nn.Parameter(torch.randn(self.n_configs, n_dims, dtype=torch.float64))
-        self.trial_peak_offset_covar_ltri_diag = nn.Parameter(torch.rand(n_dims, dtype=torch.float64)+1)
-        self.trial_peak_offset_covar_ltri_offdiag = nn.Parameter(torch.randn(num_elements, dtype=torch.float64))
-        self.trial_peak_offset_proposal_means = nn.Parameter(torch.randn(self.n_trials, self.n_configs, n_dims, dtype=torch.float64))
-        self.trial_peak_offset_proposal_sds = nn.Parameter(torch.rand(self.n_trials, self.n_configs, n_dims, dtype=torch.float64) + 1)
-        self.pi = F.softmax(torch.randn(self.n_areas, self.n_factors // self.n_areas, dtype=torch.float64), dim=1).flatten()
-        self.theta = torch.rand(self.n_factors, dtype=torch.float64)
+        self.config_peak_offsets = nn.Parameter(torch.randn(self.n_configs, n_dims))
+        self.trial_peak_offset_covar_ltri_diag = nn.Parameter(torch.rand(n_dims)+1)
+        self.trial_peak_offset_covar_ltri_offdiag = nn.Parameter(torch.randn(num_elements))
+        self.trial_peak_offset_proposal_means = nn.Parameter(torch.randn(self.n_trials, self.n_configs, n_dims))
+        self.trial_peak_offset_proposal_sds = nn.Parameter(torch.rand(self.n_trials, self.n_configs, n_dims) + 1)
+        self.pi = F.softmax(torch.randn(self.n_areas, self.n_factors // self.n_areas), dim=1).flatten()
+        self.theta = torch.rand(self.n_factors)
         self.standard_init()
 
 
     def init_zero(self):
-        self.beta = nn.Parameter(torch.zeros(self.n_factors, self.time.shape[0]-1, dtype=torch.float64))
-        self.alpha = nn.Parameter(torch.ones(self.n_factors, dtype=torch.float64))
+        self.beta = nn.Parameter(torch.zeros(self.n_factors, self.time.shape[0]-1))
+        self.alpha = nn.Parameter(torch.ones(self.n_factors))
         n_dims = 2 * self.n_factors
         num_elements = n_dims * (n_dims - 1) // 2
-        self.config_peak_offsets = nn.Parameter(torch.zeros(self.n_configs, n_dims, dtype=torch.float64))
-        self.trial_peak_offset_covar_ltri_diag = nn.Parameter(torch.ones(n_dims, dtype=torch.float64))
-        self.trial_peak_offset_covar_ltri_offdiag = nn.Parameter(torch.zeros(num_elements, dtype=torch.float64))
-        self.trial_peak_offset_proposal_means = nn.Parameter(torch.zeros(self.n_trials, self.n_configs, n_dims, dtype=torch.float64))
-        self.trial_peak_offset_proposal_sds = nn.Parameter(torch.ones(self.n_trials, self.n_configs, n_dims, dtype=torch.float64))
-        self.pi = F.softmax(torch.zeros(self.n_areas, self.n_factors // self.n_areas, dtype=torch.float64), dim=1).flatten()
-        self.theta = torch.ones(self.n_factors, dtype=torch.float64)
+        self.config_peak_offsets = nn.Parameter(torch.zeros(self.n_configs, n_dims))
+        self.trial_peak_offset_covar_ltri_diag = nn.Parameter(torch.ones(n_dims))
+        self.trial_peak_offset_covar_ltri_offdiag = nn.Parameter(torch.zeros(num_elements))
+        self.trial_peak_offset_proposal_means = nn.Parameter(torch.zeros(self.n_trials, self.n_configs, n_dims))
+        self.trial_peak_offset_proposal_sds = nn.Parameter(torch.ones(self.n_trials, self.n_configs, n_dims))
+        self.pi = F.softmax(torch.zeros(self.n_areas, self.n_factors // self.n_areas), dim=1).flatten()
+        self.theta = torch.ones(self.n_factors)
         self.standard_init()
 
 
@@ -155,8 +156,7 @@ class LikelihoodELBOModel(nn.Module):
         if trial_peak_offset_proposal_means is not None:
             self.trial_peak_offset_proposal_means = nn.Parameter(trial_peak_offset_proposal_means)
         if sd_init is not None:
-            self.trial_peak_offset_proposal_sds = nn.Parameter(sd_init * torch.ones(self.n_trials, self.n_configs, n_dims,
-                                                                                    dtype=torch.float64, device=self.device))
+            self.trial_peak_offset_proposal_sds = nn.Parameter(sd_init * torch.ones(self.n_trials, self.n_configs, n_dims, device=self.device))
         if config_peak_offsets is not None:
             self.config_peak_offsets = nn.Parameter(config_peak_offsets)
         if trial_peak_offset_covar_ltri is not None:
@@ -260,7 +260,7 @@ class LikelihoodELBOModel(nn.Module):
         if device is None:
             device = self.device
         n_dims = 2 * self.n_factors
-        ltri_matrix = torch.zeros(n_dims, n_dims, dtype=torch.float64, device=device)
+        ltri_matrix = torch.zeros(n_dims, n_dims, device=device)
         ltri_matrix[torch.arange(n_dims), torch.arange(n_dims)] = self.trial_peak_offset_covar_ltri_diag
         indices = torch.tril_indices(row=n_dims, col=n_dims, offset=-1)
         ltri_matrix[indices[0], indices[1]] = self.trial_peak_offset_covar_ltri_offdiag
@@ -269,7 +269,7 @@ class LikelihoodELBOModel(nn.Module):
 
     def unnormalized_log_factors(self):
         # return self.beta - self.beta[:, 0].unsqueeze(1).expand_as(self.beta)
-        return torch.cat([torch.zeros(self.n_factors, 1, device=self.device, dtype=torch.float64), self.beta], dim=1)
+        return torch.cat([torch.zeros(self.n_factors, 1, device=self.device), self.beta], dim=1)
 
 
     def update_params(self, Y_sum_rt_plus_alpha, neuron_factor_access, R):
@@ -312,9 +312,9 @@ class LikelihoodELBOModel(nn.Module):
             self.trial_peak_offset_proposal_samples = self.trial_peak_offset_proposal_means.unsqueeze(0)
         else:
             gaussian_sample = torch.concat([torch.randn(self.n_trial_samples, self.n_trials, self.n_configs, 2 * self.n_factors,
-                                                        device=self.device, dtype=torch.float64),
+                                                        device=self.device),
                                             torch.zeros(1, self.n_trials, self.n_configs, 2 * self.n_factors,
-                                                        device=self.device, dtype=torch.float64)], dim=0)
+                                                        device=self.device)], dim=0)
             # trial_peak_offset_proposal_samples 1+N x R x C x 2AL
             self.trial_peak_offset_proposal_samples = (self.trial_peak_offset_proposal_means.unsqueeze(0) +
                                                        gaussian_sample * self.trial_peak_offset_proposal_sds.unsqueeze(0))

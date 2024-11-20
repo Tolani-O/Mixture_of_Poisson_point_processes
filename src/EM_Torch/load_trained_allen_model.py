@@ -115,6 +115,7 @@ params = {
     'peak1_right_landmarks': peak1_right_landmarks,
     'peak2_left_landmarks': peak2_left_landmarks,
     'peak2_right_landmarks': peak2_right_landmarks,
+    'dt': dt
 }
 create_relevant_files(output_dir, output_str, params=params)
 plot_outputs(model, unique_regions, output_dir, 'Train', -1, Y=Y_train, factor_access=factor_access_train)

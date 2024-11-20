@@ -272,6 +272,8 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
     os.makedirs(output_dir, exist_ok=True)
     beta_dir = os.path.join(output_dir, 'beta')
     os.makedirs(beta_dir, exist_ok=True)
+    warp_time_dir = os.path.join(output_dir, 'warped_times')
+    os.makedirs(warp_time_dir, exist_ok=True)
     log_beta_dir = os.path.join(output_dir, 'log_beta')
     os.makedirs(log_beta_dir, exist_ok=True)
     alpha_dir = os.path.join(output_dir, 'alpha')
@@ -382,6 +384,39 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.tight_layout()
         plt.savefig(os.path.join(beta_dir, f'LatentFactors_{epoch}.png'))
         plt.close()
+
+        model.generate_trial_peak_offset_samples()
+        avg_peak_times, left_landmarks, right_landmarks, s_new = model.compute_offsets_and_landmarks()
+        warped_times = model.compute_warped_times(avg_peak_times, left_landmarks, right_landmarks, s_new)
+        warped_times = warped_times.squeeze()
+        avg_peak_times = avg_peak_times.squeeze()
+        spike_train_start_offset = torch.searchsorted(model.time, 0, side='left')
+        left_landmarks_int = torch.cat([model.peak1_left_landmarks, model.peak2_left_landmarks]) + spike_train_start_offset
+        right_landmarks_int = torch.cat([model.peak1_right_landmarks, model.peak2_right_landmarks]) + spike_train_start_offset
+        landmark_speads = right_landmarks_int - left_landmarks_int + 1
+        plt.figure(figsize=(model.n_areas * 15, int(model.n_factors / model.n_areas) * 5))
+        c = 0
+        for l in L:
+            for p in range(2):
+                i = l + p * model.n_factors
+                plt.subplot(factors_per_area, 2 * model.n_areas, c + 1)
+                time_course = model.time[left_landmarks_int[i]:(right_landmarks_int[i]+1)]
+                warped_times_l = torch.cat(list(warped_times[i, :landmark_speads[i]].permute(1, 2, 0)), dim=0)
+                for xx in warped_times_l:
+                    plt.plot(time_course, xx, color='grey', alpha=0.2)
+                plt.plot(time_course, time_course, color='black')
+                plt.vlines(x=avg_peak_times[i], ymin=time_course[0], ymax=time_course[-1], color='grey', linestyle='--', alpha=0.5)
+                plt.hlines(y=avg_peak_times[i], xmin=time_course[0], xmax=time_course[-1], color='grey', linestyle='--', alpha=0.5)
+                plt.xlabel('Warped time')
+                plt.ylabel('Time (ms)')
+                plt.title(f'Factor {(l % factors_per_area) + 1}, '
+                          f'Area {unique_regions[l // factors_per_area]}, '
+                          f'Peak {p + 1} warp', fontsize=20)
+                c += 1
+        plt.tight_layout()
+        plt.savefig(os.path.join(warp_time_dir, f'warped_times_{epoch}.png'))
+        plt.close()
+
 
         alpha = F.softplus(model.alpha).numpy()
         plt.figure(figsize=(10, 10))
@@ -757,10 +792,9 @@ def compute_warped_factors(model, data, warped_times):
     ceil_warped_indices = torch.ceil(warped_indices).int()
     ceil_weights = warped_indices - floor_warped_indices
     floor_weights = 1 - ceil_weights
-    spike_train_start_offset = torch.searchsorted(model.time, 0, side='left')
-    left_landmarks_int = torch.cat([model.peak1_left_landmarks, model.peak2_left_landmarks]) + spike_train_start_offset
-    right_landmarks_int = torch.cat([model.peak1_right_landmarks, model.peak2_right_landmarks]) + spike_train_start_offset
-    landmark_speads = right_landmarks_int - left_landmarks_int
+    left_landmarks_int = torch.cat([model.peak1_left_landmarks, model.peak2_left_landmarks])
+    right_landmarks_int = torch.cat([model.peak1_right_landmarks, model.peak2_right_landmarks])
+    landmark_speads = right_landmarks_int - left_landmarks_int + 1
     full_warped_factors = []
     L, C, R, T = factors.shape
     for l in range(L):
@@ -782,9 +816,9 @@ def compute_warped_factors(model, data, warped_times):
 
                 early = factors[l, c, r, :left_landmarks_int[l]]
                 peak1 = peak1[:landmark_speads[l]]
-                mid = factors[l, c, r, right_landmarks_int[l]:left_landmarks_int[l + model.n_factors]]
+                mid = factors[l, c, r, (right_landmarks_int[l]+1):left_landmarks_int[l + model.n_factors]]
                 peak2 = peak2[:landmark_speads[l + model.n_factors]]
-                late = factors[l, c, r, right_landmarks_int[l + model.n_factors]:]
+                late = factors[l, c, r, (right_landmarks_int[l + model.n_factors]+1):]
                 full_warped_factors_c.append(torch.cat([early, peak1, mid, peak2, late], dim=0))
             full_warped_factors_l.append(torch.stack(full_warped_factors_c))
         full_warped_factors.append(torch.stack(full_warped_factors_l))

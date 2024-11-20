@@ -376,12 +376,12 @@ class LikelihoodELBOModel(nn.Module):
     def compute_warped_factors(self, warped_times):
         factors = torch.cat([torch.exp(self.unnormalized_log_factors())] * 2, dim=0)
         # warped_time  # 2AL x len(landmark_spread) x N x R X C
-        dp = len(str(self.dt.item()).split('.')[1])
-        warped_indices = (warped_times / self.dt).round(decimals=dp)
-        floor_warped_indices = torch.floor(warped_indices).int()
-        ceil_warped_indices = torch.ceil(warped_indices).int()
-        ceil_weights = (warped_indices - floor_warped_indices).round(decimals=dp)
-        floor_weights = (1 - ceil_weights).round(decimals=dp)
+        r0und = self.dt / (10 * int(str(self.dt.item())[-1]))
+        warped_indices = (warped_times / self.dt) + r0und  # could be round but its not differentiable
+        floor_warped_indices = warped_indices.int()  # could be torch.floor but for non-negative numbers it is the same
+        ceil_warped_indices = (warped_indices+1).int()  # could be torch.ceil but for non-negative numbers it is the same
+        ceil_weights = warped_indices - floor_warped_indices
+        floor_weights = 1 - ceil_weights
         floor_warped_factor = torch.stack([factors[i, floor_warped_indices[i]] for i in range(2*self.n_factors)])
         weighted_floor_warped_factor = floor_warped_factor * floor_weights
         ceil_warped_factor = torch.stack([factors[i, ceil_warped_indices[i]] for i in range(2*self.n_factors)])

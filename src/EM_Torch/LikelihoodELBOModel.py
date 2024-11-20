@@ -58,15 +58,15 @@ class LikelihoodELBOModel(nn.Module):
             weights = [weights] * len(temperature)
         assert len(temperature) == len(weights), "Temperature and weights must be the same length"
         self.temperature = torch.tensor(temperature)
-        self.weights = torch.tensor(weights, dtype=torch.float)
+        self.weights = torch.tensor(weights, dtype=torch.float64)
         self.time = torch.tensor(time)
         self.dt = torch.round(time[1] - time[0], decimals=3)
         T = time.shape[0]
-        self.peak1_left_landmarks = torch.searchsorted(self.time, torch.tensor(peak1_left_landmarks), side='left')-1
+        self.peak1_left_landmarks = torch.searchsorted(self.time, torch.tensor(peak1_left_landmarks), side='left')
         self.peak1_left_landmarks = torch.cat([self.peak1_left_landmarks] * n_areas)
         self.peak1_right_landmarks = torch.searchsorted(self.time, torch.tensor(peak1_right_landmarks), side='left')
         self.peak1_right_landmarks = torch.cat([self.peak1_right_landmarks] * n_areas)
-        self.peak2_left_landmarks = torch.searchsorted(self.time, torch.tensor(peak2_left_landmarks), side='left')-1
+        self.peak2_left_landmarks = torch.searchsorted(self.time, torch.tensor(peak2_left_landmarks), side='left')
         self.peak2_left_landmarks = torch.cat([self.peak2_left_landmarks] * n_areas)
         self.peak2_right_landmarks = torch.searchsorted(self.time, torch.tensor(peak2_right_landmarks), side='left')
         self.peak2_right_landmarks = torch.cat([self.peak2_right_landmarks] * n_areas)
@@ -364,10 +364,9 @@ class LikelihoodELBOModel(nn.Module):
         left_slope = (avg_peak_times - left_landmarks) / left_shifted_peak_times
         right_slope = (avg_peak_times - right_landmarks) / right_shifted_peak_times
         # left_shifted_time # 2AL x max_landmark_spread x N x R x C
-        left_shifted_time = torch.stack([torch.nn.functional.pad(self.time[left_landmarks_int[i]:(right_landmarks_int[i]+1)] - self.time[left_landmarks_int[i]],
-                                                     (0, max_landmark_spread - landmark_speads[i]),
-                                                     value=self.time[right_landmarks_int[i]] - self.time[left_landmarks_int[i]])
-                             for i in range(landmark_speads.shape[0])]).unsqueeze(2).unsqueeze(3).unsqueeze(4).expand_as(left_shifted_peak_times)
+        left_shifted_time = torch.stack([torch.nn.functional.pad(self.time[:landmark_speads[i]], (0, max_landmark_spread - landmark_speads[i]),
+                                                                 value=self.time[landmark_speads[i]-1])
+                                         for i in range(landmark_speads.shape[0])]).unsqueeze(2).unsqueeze(3).unsqueeze(4).expand_as(left_shifted_peak_times)
         slope_mask = (left_shifted_time <= left_shifted_peak_times).int()
         # warped_times # 2AL x max_landmark_spread x N x R x C
         warped_times = slope_mask * (left_shifted_time * left_slope + left_landmarks) + (1 - slope_mask) * ((left_shifted_time - left_shifted_peak_times) * right_slope + avg_peak_times)
@@ -377,11 +376,12 @@ class LikelihoodELBOModel(nn.Module):
     def compute_warped_factors(self, warped_times):
         factors = torch.cat([torch.exp(self.unnormalized_log_factors())] * 2, dim=0)
         # warped_time  # 2AL x len(landmark_spread) x N x R X C
-        warped_indices = warped_times / self.dt
+        dp = len(str(self.dt.item()).split('.')[1])
+        warped_indices = (warped_times / self.dt).round(decimals=dp)
         floor_warped_indices = torch.floor(warped_indices).int()
         ceil_warped_indices = torch.ceil(warped_indices).int()
-        ceil_weights = warped_indices - floor_warped_indices
-        floor_weights = 1 - ceil_weights
+        ceil_weights = (warped_indices - floor_warped_indices).round(decimals=dp)
+        floor_weights = (1 - ceil_weights).round(decimals=dp)
         floor_warped_factor = torch.stack([factors[i, floor_warped_indices[i]] for i in range(2*self.n_factors)])
         weighted_floor_warped_factor = floor_warped_factor * floor_weights
         ceil_warped_factor = torch.stack([factors[i, ceil_warped_indices[i]] for i in range(2*self.n_factors)])

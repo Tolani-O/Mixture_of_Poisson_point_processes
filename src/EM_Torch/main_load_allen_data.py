@@ -79,7 +79,7 @@ if Y_train is None:
     data.plot_spike_counts(folder_name)
     Y_train, bin_time, factor_access_train, unique_regions = data.sample_data(conditions=conditions, num_factors=args.L)
     save_sample(Y_train, bin_time, factor_access_train, unique_regions, folder_path, folder_name)
-processed_inputs_train = preprocess_input_data(*to_cuda(load_tensors((Y_train, factor_access_train, bin_time)),
+processed_inputs_train = preprocess_input_data(*to_cuda(load_tensors((Y_train, factor_access_train, dt)),
                                                         move_to_cuda=args.cuda), mask_threshold=args.mask_neuron_threshold)
 Y_train, factor_access_train, timeCourse = processed_inputs_train['Y'].cpu(), processed_inputs_train['neuron_factor_access'].cpu(), processed_inputs_train['time'].cpu()
 print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')

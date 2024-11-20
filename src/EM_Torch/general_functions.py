@@ -68,7 +68,7 @@ class CustomDataset(Dataset):
         return self.Y[idx], self.neuron_factor_access[:, idx, :] # K x C x L
 
 
-def preprocess_input_data(Y, neuron_factor_access, time, mask_threshold=0):
+def preprocess_input_data(Y, neuron_factor_access, dt, mask_threshold=0):
     processed_inputs = {}
     # Y # K x T x R x C
     # neuron_factor_access # C x K x L
@@ -76,6 +76,7 @@ def preprocess_input_data(Y, neuron_factor_access, time, mask_threshold=0):
     Y_sum_rt = torch.sum(Y_sum_t, dim=-1)  # C x K
     empty_trials = torch.where(Y_sum_rt <= mask_threshold)
     neuron_factor_access[empty_trials[0], empty_trials[1]] = 0
+    time = torch.arange(Y.shape[1], device=Y.device) * dt
     processed_inputs['time'] = time
     processed_inputs['Y'] = Y
     processed_inputs['Y_sum_t'] = Y_sum_t
@@ -416,7 +417,6 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.tight_layout()
         plt.savefig(os.path.join(warp_time_dir, f'warped_times_{epoch}.png'))
         plt.close()
-
 
         alpha = F.softplus(model.alpha).numpy()
         plt.figure(figsize=(10, 10))

@@ -391,9 +391,8 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         warped_times = model.compute_warped_times(avg_peak_times, left_landmarks, right_landmarks, s_new)
         warped_times = warped_times.squeeze()
         avg_peak_times = avg_peak_times.squeeze()
-        spike_train_start_offset = torch.searchsorted(model.time, 0, side='left')
-        left_landmarks_int = torch.cat([model.peak1_left_landmarks, model.peak2_left_landmarks]) + spike_train_start_offset
-        right_landmarks_int = torch.cat([model.peak1_right_landmarks, model.peak2_right_landmarks]) + spike_train_start_offset
+        left_landmarks_int = torch.cat([model.peak1_left_landmarks, model.peak2_left_landmarks])
+        right_landmarks_int = torch.cat([model.peak1_right_landmarks, model.peak2_right_landmarks])
         landmark_speads = right_landmarks_int - left_landmarks_int + 1
         plt.figure(figsize=(model.n_areas * 15, int(model.n_factors / model.n_areas) * 5))
         c = 0
@@ -401,13 +400,16 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
             for p in range(2):
                 i = l + p * model.n_factors
                 plt.subplot(factors_per_area, 2 * model.n_areas, c + 1)
-                time_course = model.time[left_landmarks_int[i]:(right_landmarks_int[i]+1)]
+                time_course = model.time[left_landmarks_int[i]:(right_landmarks_int[i]+1)].numpy()
                 warped_times_l = torch.cat(list(warped_times[i, :landmark_speads[i]].permute(1, 2, 0)), dim=0)
+                latent_factors_l = latent_factors[l, left_landmarks_int[i]:(right_landmarks_int[i]+1)]
+                lf_max, lf_min = latent_factors_l.max(), latent_factors_l.min()
+                latent_factors_l = time_course[0] + (latent_factors_l - lf_min) * (time_course[-1] * (4/5) - time_course[0]) / (lf_max - lf_min)
+                plt.plot(time_course, latent_factors_l, color='blue', linestyle='--', alpha=0.3)
                 for xx in warped_times_l:
                     plt.plot(time_course, xx, color='grey', alpha=0.2)
                 plt.plot(time_course, time_course, color='black')
                 plt.vlines(x=avg_peak_times[i], ymin=time_course[0], ymax=time_course[-1], color='grey', linestyle='--', alpha=0.5)
-                plt.hlines(y=avg_peak_times[i], xmin=time_course[0], xmax=time_course[-1], color='grey', linestyle='--', alpha=0.5)
                 plt.xlabel('Warped time')
                 plt.ylabel('Time (ms)')
                 plt.title(f'Factor {(l % factors_per_area) + 1}, '

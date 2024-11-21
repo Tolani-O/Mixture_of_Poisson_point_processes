@@ -389,7 +389,8 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         model.generate_trial_peak_offset_samples()
         avg_peak_times, left_landmarks, right_landmarks, s_new = model.compute_offsets_and_landmarks()
         warped_times = model.compute_warped_times(avg_peak_times, left_landmarks, right_landmarks, s_new)
-        warped_times = warped_times.squeeze()
+        warped_times = warped_times.squeeze().reshape(*warped_times.shape[:2], -1).permute(0, 2, 1)
+        proposal_means = model.trial_peak_offset_proposal_means.permute(2, 0, 1).reshape(warped_times.shape[0], -1)
         avg_peak_times = avg_peak_times.squeeze()
         left_landmarks_int = torch.cat([model.peak1_left_landmarks, model.peak2_left_landmarks])
         right_landmarks_int = torch.cat([model.peak1_right_landmarks, model.peak2_right_landmarks])
@@ -400,18 +401,27 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
             for p in range(2):
                 i = l + p * model.n_factors
                 plt.subplot(factors_per_area, 2 * model.n_areas, c + 1)
+                ax1 = plt.gca()
+                ax2 = ax1.twinx()
                 time_course = model.time[left_landmarks_int[i]:(right_landmarks_int[i]+1)].numpy()
-                warped_times_l = torch.cat(list(warped_times[i, :landmark_speads[i]].permute(1, 2, 0)), dim=0)
+                warped_times_l = warped_times[i, :, :landmark_speads[i]]
+                counts, bin_edges = np.histogram(proposal_means[i], bins=30)
+                total_count = np.sum(counts)
+                proposal_means_l = counts / total_count
                 latent_factors_l = latent_factors[l, left_landmarks_int[i]:(right_landmarks_int[i]+1)]
                 lf_max, lf_min = latent_factors_l.max(), latent_factors_l.min()
                 latent_factors_l = time_course[0] + (latent_factors_l - lf_min) * (time_course[-1] * (4/5) - time_course[0]) / (lf_max - lf_min)
-                plt.plot(time_course, latent_factors_l, color='blue', linestyle='--', alpha=0.3)
-                for xx in warped_times_l:
-                    plt.plot(time_course, xx, color='grey', alpha=0.2)
-                plt.plot(time_course, time_course, color='black')
-                plt.vlines(x=avg_peak_times[i], ymin=time_course[0], ymax=time_course[-1], color='grey', linestyle='--', alpha=0.5)
+                ax2.bar(bin_edges[:-1], proposal_means_l, width=np.diff(bin_edges), edgecolor='black', align='edge', alpha=0.1)
+                # for xx in warped_times_l:
+                #     ax1.plot(time_course, xx, color='grey', alpha=0.2)
+                # ax1.plot(time_course, time_course, color='black')
+                # ax1.plot(time_course, latent_factors_l, color='blue', linestyle='--', alpha=0.3)
+                ax1.vlines(x=avg_peak_times[i], ymin=time_course[0], ymax=time_course[-1], color='grey', linestyle='--', alpha=0.5)
                 plt.xlabel('Warped time')
-                plt.ylabel('Time (ms)')
+                ax1.set_ylabel('Time (ms)')
+                ax1.grid(False)
+                ax2.set_ylabel('Trial peak time proportions')
+                ax2.grid(False)
                 plt.title(f'Factor {(l % factors_per_area) + 1}, '
                           f'Area {unique_regions[l // factors_per_area]}, '
                           f'Peak {p + 1} warp', fontsize=20)

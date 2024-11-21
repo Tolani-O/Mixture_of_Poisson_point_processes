@@ -287,8 +287,8 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
     os.makedirs(configoffset_dir, exist_ok=True)
     ltri_dir = os.path.join(output_dir, 'ltri')
     os.makedirs(ltri_dir, exist_ok=True)
-    sigma_dir = os.path.join(output_dir, 'sigma')
-    os.makedirs(sigma_dir, exist_ok=True)
+    corr_dir = os.path.join(output_dir, 'corr')
+    os.makedirs(corr_dir, exist_ok=True)
     proposal_means_dir = os.path.join(output_dir, 'proposal_means')
     os.makedirs(proposal_means_dir, exist_ok=True)
     trial_sd_dir = os.path.join(output_dir, 'trial_SDs')
@@ -390,7 +390,6 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         avg_peak_times, left_landmarks, right_landmarks, s_new = model.compute_offsets_and_landmarks()
         warped_times = model.compute_warped_times(avg_peak_times, left_landmarks, right_landmarks, s_new)
         warped_times = warped_times.squeeze().reshape(*warped_times.shape[:2], -1).permute(0, 2, 1)
-        proposal_means = model.trial_peak_offset_proposal_means.permute(2, 0, 1).reshape(warped_times.shape[0], -1)
         avg_peak_times = avg_peak_times.squeeze()
         left_landmarks_int = torch.cat([model.peak1_left_landmarks, model.peak2_left_landmarks])
         right_landmarks_int = torch.cat([model.peak1_right_landmarks, model.peak2_right_landmarks])
@@ -401,33 +400,59 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
             for p in range(2):
                 i = l + p * model.n_factors
                 plt.subplot(factors_per_area, 2 * model.n_areas, c + 1)
-                ax1 = plt.gca()
-                ax2 = ax1.twinx()
                 time_course = model.time[left_landmarks_int[i]:(right_landmarks_int[i]+1)].numpy()
                 warped_times_l = warped_times[i, :, :landmark_speads[i]]
-                counts, bin_edges = np.histogram(proposal_means[i], bins=30)
-                total_count = np.sum(counts)
-                proposal_means_l = counts / total_count
                 latent_factors_l = latent_factors[l, left_landmarks_int[i]:(right_landmarks_int[i]+1)]
                 lf_max, lf_min = latent_factors_l.max(), latent_factors_l.min()
                 latent_factors_l = time_course[0] + (latent_factors_l - lf_min) * (time_course[-1] * (4/5) - time_course[0]) / (lf_max - lf_min)
-                ax2.bar(bin_edges[:-1], proposal_means_l, width=np.diff(bin_edges), edgecolor='black', align='edge', alpha=0.1)
-                # for xx in warped_times_l:
-                #     ax1.plot(time_course, xx, color='grey', alpha=0.2)
-                # ax1.plot(time_course, time_course, color='black')
-                # ax1.plot(time_course, latent_factors_l, color='blue', linestyle='--', alpha=0.3)
-                ax1.vlines(x=avg_peak_times[i], ymin=time_course[0], ymax=time_course[-1], color='grey', linestyle='--', alpha=0.5)
+                for xx in warped_times_l:
+                    plt.plot(time_course, xx, color='grey', alpha=0.2)
+                plt.plot(time_course, time_course, color='black')
+                plt.plot(time_course, latent_factors_l, color='blue', linestyle='--', alpha=0.3)
+                plt.vlines(x=avg_peak_times[i], ymin=time_course[0], ymax=time_course[-1], color='grey', linestyle='--', alpha=0.5)
                 plt.xlabel('Warped time')
-                ax1.set_ylabel('Time (ms)')
-                ax1.grid(False)
-                ax2.set_ylabel('Trial peak time proportions')
-                ax2.grid(False)
+                plt.ylabel('Time (ms)')
                 plt.title(f'Factor {(l % factors_per_area) + 1}, '
                           f'Area {unique_regions[l // factors_per_area]}, '
                           f'Peak {p + 1} warp', fontsize=20)
                 c += 1
         plt.tight_layout()
         plt.savefig(os.path.join(warp_time_dir, f'warped_times_{epoch}.png'))
+        plt.close()
+
+        proposal_means = model.trial_peak_offset_proposal_means.permute(2, 0, 1).reshape(warped_times.shape[0], -1)
+        plt.figure(figsize=(model.n_areas * 15, int(model.n_factors / model.n_areas) * 5))
+        c = 0
+        xlimit = proposal_means.abs().max().item()
+        for l in L:
+            for p in range(2):
+                i = l + p * model.n_factors
+                plt.subplot(factors_per_area, 2 * model.n_areas, c + 1)
+                counts, bin_edges = np.histogram(proposal_means[i], bins=30)
+                plt.bar(bin_edges[:-1], counts, width=np.diff(bin_edges), edgecolor='black', align='edge', alpha=0.7)
+                plt.xlabel('Trial peak times')
+                plt.ylabel('Frequency')
+                plt.xlim(left=-xlimit, right=xlimit)
+                plt.ylim(bottom=-1e-5, top=100)
+                plt.title(f'Factor {(l % factors_per_area) + 1}, '
+                          f'Area {unique_regions[l // factors_per_area]}, '
+                          f'Peak {p + 1} offsets', fontsize=20)
+                c += 1
+        plt.tight_layout()
+        plt.savefig(os.path.join(proposal_means_dir, f'proposal_means_{epoch}.png'))
+        plt.close()
+
+        covariance = (model.ltri_matix('cpu') @ model.ltri_matix('cpu').t()).numpy()
+        correlation = covariance / np.sqrt(np.outer(np.diag(covariance), np.diag(covariance)))
+        plt.figure(figsize=(10, 10))
+        factors_per_area = model.n_factors // model.n_areas
+        ax = sns.heatmap(correlation, annot=False, cmap="seismic", center=0, vmin=-1, vmax=1,
+                         xticklabels=factors_per_area, yticklabels=factors_per_area)
+        for i in range(factors_per_area, correlation.shape[0], factors_per_area):
+            ax.axvline(i, color='black', linestyle='-', linewidth=0.5)
+            ax.axhline(i, color='black', linestyle='-', linewidth=0.5)
+        plt.title('Peak time correlation matrix')
+        plt.savefig(os.path.join(corr_dir, f'corr_{epoch}.png'))
         plt.close()
 
         alpha = F.softplus(model.alpha).numpy()
@@ -462,19 +487,6 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.plot(ltri, label='Ltri')
         plt.title('Ltri')
         plt.savefig(os.path.join(ltri_dir, f'ltri_{epoch}.png'))
-        plt.close()
-
-        Sigma = (model.ltri_matix('cpu') @ model.ltri_matix('cpu').t()).flatten().numpy()
-        plt.figure(figsize=(10, 10))
-        plt.plot(Sigma, label='Sigma')
-        plt.title('Sigma')
-        plt.savefig(os.path.join(sigma_dir, f'Sigma_{epoch}.png'))
-
-        proposal_offsets = model.trial_peak_offset_proposal_means.flatten().numpy()
-        plt.figure(figsize=(10, 10))
-        plt.plot(proposal_offsets, label='Trial means Proposals')
-        plt.title('Trial means Proposals')
-        plt.savefig(os.path.join(proposal_means_dir, f'proposal_means_{epoch}.png'))
         plt.close()
 
         trial_SDs = model.trial_peak_offset_proposal_sds.flatten().numpy()

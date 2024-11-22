@@ -302,8 +302,8 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
             beta_se = torch.cat([torch.zeros(L, 1), se_dict['beta']], dim=1).numpy() * 1.96
             for landmarks in [model.peak1_left_landmarks, model.peak2_left_landmarks,
                               model.peak1_right_landmarks, model.peak2_right_landmarks]:
-                beta_se[range(15), landmarks] = (beta_se[range(15), landmarks - 1] +
-                                                 beta_se[range(15), landmarks + 1]) / 2
+                beta_se[range(L), landmarks] = (beta_se[range(L), landmarks - 1] +
+                                                 beta_se[range(L), landmarks + 1]) / 2
             beta_se = np.where(beta_se == 0, (np.roll(beta_se, 1, axis=1) + np.roll(beta_se, -1, axis=1)) / 2, beta_se)
             beta_ucl = beta + beta_se
             beta_lcl = beta - beta_se
@@ -390,33 +390,36 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
 
         avg_peak_times, left_landmarks, right_landmarks, s_new = model.compute_offsets_and_landmarks()
         warped_times = model.compute_warped_times(avg_peak_times, left_landmarks, right_landmarks, s_new)
-        warped_times = warped_times.squeeze().reshape(*warped_times.shape[:2], -1).permute(0, 2, 1)
+        warped_times = warped_times.squeeze().reshape(*warped_times.shape[:2], -1)
         avg_peak_times = avg_peak_times.squeeze()
         left_landmarks_int = torch.cat([model.peak1_left_landmarks, model.peak2_left_landmarks])
         right_landmarks_int = torch.cat([model.peak1_right_landmarks, model.peak2_right_landmarks])
         landmark_speads = right_landmarks_int - left_landmarks_int + 1
-        plt.figure(figsize=(model.n_areas * 15, int(model.n_factors / model.n_areas) * 5))
+        expended_time = model.time.unsqueeze(-1).expand(-1, warped_times.shape[-1])
+        plt.figure(figsize=(model.n_areas * 10, int(model.n_factors / model.n_areas) * 5))
         c = 0
         for l in L:
-            for p in range(2):
-                i = l + p * model.n_factors
-                plt.subplot(factors_per_area, 2 * model.n_areas, c + 1)
-                time_course = model.time[left_landmarks_int[i]:(right_landmarks_int[i]+1)].numpy()
-                warped_times_l = warped_times[i, :, :landmark_speads[i]]
-                latent_factors_l = latent_factors[l, left_landmarks_int[i]:(right_landmarks_int[i]+1)]
-                lf_max, lf_min = latent_factors_l.max(), latent_factors_l.min()
-                latent_factors_l = time_course[0] + (latent_factors_l - lf_min) * (time_course[-1] * (4/5) - time_course[0]) / (lf_max - lf_min)
-                for xx in warped_times_l:
-                    plt.plot(time_course, xx, color='grey', alpha=0.2)
-                plt.plot(time_course, time_course, color='black')
-                plt.plot(time_course, latent_factors_l, color='blue', linestyle='--', alpha=0.3)
-                plt.vlines(x=avg_peak_times[i], ymin=time_course[0], ymax=time_course[-1], color='grey', linestyle='--', alpha=0.5)
-                plt.xlabel('Warped time')
-                plt.ylabel('Time (ms)')
-                plt.title(f'Factor {(l % factors_per_area) + 1}, '
-                          f'Area {unique_regions[l // factors_per_area]}, '
-                          f'Peak {p + 1} warp', fontsize=20)
-                c += 1
+            plt.subplot(factors_per_area, model.n_areas, c + 1)
+            warped_times_l = torch.concat([expended_time[:left_landmarks_int[l]],
+                                           warped_times[l, :landmark_speads[l]],
+                                           expended_time[(right_landmarks_int[l]+1):left_landmarks_int[l+model.n_factors]],
+                                           warped_times[l+model.n_factors, :landmark_speads[l+model.n_factors]],
+                                           expended_time[(right_landmarks_int[l+model.n_factors]+1):]],
+                                          dim=0).t().numpy()
+            latent_factors_l = latent_factors[l]
+            lf_max, lf_min = latent_factors_l.max(), latent_factors_l.min()
+            latent_factors_l = (latent_factors_l - lf_min) * (model.time[-1].item() * (4/5)) / (lf_max - lf_min)
+            for xx in warped_times_l:
+                plt.plot(model.time, xx, color='grey', alpha=0.2)
+            plt.plot(model.time, model.time, color='black')
+            plt.plot(model.time, latent_factors_l, color='blue', linestyle='--', alpha=0.3)
+            plt.vlines(x=[avg_peak_times[l], avg_peak_times[l+model.n_factors]], ymin=0, ymax=model.time[-1], color='grey', linestyle='--', alpha=0.5)
+            plt.xlabel('Warped time')
+            plt.ylabel('Time (ms)')
+            plt.title(f'Factor {(l % factors_per_area) + 1}, '
+                      f'Area {unique_regions[l // factors_per_area]}, '
+                      f'warp', fontsize=20)
+            c += 1
         plt.tight_layout()
         plt.savefig(os.path.join(warp_time_dir, f'warped_times_{epoch}.png'))
         plt.close()
@@ -918,23 +921,23 @@ def interpret_results(model, unique_regions, factors_of_interest, output_dir, ep
     plt.savefig(os.path.join(inference_dir, f'Average_Peak_Times_{epoch}.png'))
     plt.close()
 
-    peak_times_of_interest = peak_times_of_interest.reshape(peak_times_of_interest.shape[0], -1)
-    peak_times_of_interest = peak_times_of_interest.reshape(2, -1, peak_times_of_interest.shape[-1]).permute(0, 2, 1)
+    peak_times_of_interest = peak_times_of_interest.permute(1, 0, 2)
     colors = cm.get_cmap('tab20b', len(unique_regions))
-    plt.figure(figsize=(10, 6))
-    for i in range(2):
-        peak_times_df = pd.DataFrame(peak_times_of_interest[i], columns=unique_regions, index=range(1, peak_times_of_interest.shape[1] + 1))
-        peak_times_df = peak_times_df * scale
-        plt.subplot(1, 2, i + 1)
-        for j, reg in enumerate(peak_times_df.columns):
-            plt.plot(peak_times_df[reg], peak_times_df.index, '.', color=colors(j), label=reg)
-        plt.xlabel('Peak Time (ms)')
-        plt.title(f'Peak {i + 1} Times')
-        if i == 0:
-            plt.ylabel('Trial')
+    plt.figure(figsize=(40, 15))
+    for c in range(model.n_configs):
+        plt.subplot(5, 8, c + 1)
+        for a in range(2 * model.n_areas):
+            if (peak_times_of_interest[c, a].round(decimals=4) / peak_times_of_interest[c, a].round(decimals=4)[0]).sum().item() == peak_times_of_interest.shape[-1]:
+                continue
+            for t in range(model.n_trials):
+                if c == 0 and t == 0 and a // model.n_areas == 0:
+                    plt.plot(peak_times_of_interest[c, a, t], t, '.', color=colors(a % model.n_areas), label=unique_regions[a % model.n_areas])
+                else:
+                    plt.plot(peak_times_of_interest[c, a, t], t, '.', color=colors(a % model.n_areas))
+        if c == 0:
             plt.legend()
-        else:
-            plt.yticks([])
+        plt.xlabel('Peak Time (ms)')
+        plt.ylabel('Config Trial')
         plt.tight_layout()
     plt.savefig(os.path.join(inference_dir, f'Trial_Peak_Times_{epoch}.png'))
     plt.close()

@@ -12,11 +12,10 @@ import time
 import torch
 import torch.nn.functional as F
 import threading
-from ast import literal_eval
 outputs_folder = 'outputs'
 
 args = get_parser().parse_args()
-parser_key = ['ID', 'A', 'L', 'tauBeta', 'tauConfig', 'tauSigma', 'tauSD', 'posterior', 'iters', 'lr', 'maskLimit', 'temp', 'weight']
+parser_key = ['ID', 'A', 'L', 'tauBeta', 'tauConfig', 'tauSigma', 'tauSD', 'posterior', 'iters', 'lr', 'maskLimit']
 # args.folder_name = ''
 # args.load_run = 0
 # args.num_epochs = 0
@@ -28,8 +27,6 @@ args.L = int(parser_dict['L'])  # L
 args.log_interval = 500
 args.eval_interval = 500
 args.lr = float(parser_dict['lr'])
-args.temperature = literal_eval(parser_dict['temp'])
-args.weights = literal_eval(parser_dict['weight'])
 args.mask_neuron_threshold = int(parser_dict['maskLimit'])
 if args.num_epochs >= 0:
     args.num_epochs = int(parser_dict['iters'])

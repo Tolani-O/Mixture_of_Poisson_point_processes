@@ -12,11 +12,10 @@ import time
 import torch
 import torch.nn.functional as F
 import threading
-from ast import literal_eval
 outputs_folder = 'outputs'
 
 args = get_parser().parse_args()
-parser_key = ['ID', 'K', 'A', 'C', 'L', 'R', 'tauBeta', 'tauConfig', 'tauSigma', 'tauSD', 'posterior', 'iters', 'lr', 'temp', 'weight', 'maskLimit', 'warping']
+parser_key = ['ID', 'K', 'A', 'C', 'L', 'R', 'tauBeta', 'tauConfig', 'tauSigma', 'tauSD', 'posterior', 'iters', 'lr', 'maskLimit', 'warping']
 # args.folder_name = ''
 parser_dict = parse_folder_name(args.folder_name, parser_key, outputs_folder, args.load_run)
 
@@ -29,8 +28,6 @@ args.L = int(parser_dict['L'])  # L
 args.log_interval = 500
 args.eval_interval = 500
 args.lr = float(parser_dict['lr'])
-args.temperature = literal_eval(parser_dict['temp'])
-args.weights = literal_eval(parser_dict['weight'])
 args.mask_neuron_threshold = int(parser_dict['maskLimit'])
 args.time_warp = bool(int(parser_dict['warping']))
 if args.num_epochs >= 0:
@@ -111,12 +108,15 @@ model_state, optimizer_state, scheduler_state, W_CKL, a_CKL, theta, pi, args.loa
 model.init_zero()
 model.load_state_dict(model_state)
 model.W_CKL, model.a_CKL, model.theta, model.pi = W_CKL, a_CKL, theta, pi
+folder_name = f'{args.data_seed}-seed_{args.A}-regions_{args.L}-factors'
+folder_path = os.path.join(os.getcwd(), outputs_folder, 'metadata')
 if args.num_epochs < 0:
     model.cuda(move_to_cuda=args.cuda)
     se_dict = compute_uncertainty(model, processed_inputs_train, output_dir, args.load_epoch)
     model.cpu()
+    plot_data_dispersion(Y_train, factor_access_train, args.A, folder_path, folder_name, unique_regions, model.W_CKL)
     plot_outputs(model, unique_regions, output_dir, 'Train', args.load_epoch, se_dict, Y_train, factor_access_train)
-    interpret_results(model, processed_inputs_train, 'output_dir', -2)
+    interpret_results(model, unique_regions, [2, 1, 3], output_dir, args.load_epoch)
     sys.exit()
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 optimizer.load_state_dict(optimizer_state)
@@ -148,8 +148,6 @@ params = {
 }
 create_relevant_files(output_dir, output_str, params=params, ground_truth=True)
 plot_outputs(model, unique_regions, output_dir, 'Train', -1, Y=Y_train, factor_access=factor_access_train)
-folder_name = f'{args.data_seed}-seed_{args.A}-regions_{args.L}-factors'
-folder_path = os.path.join(os.getcwd(), outputs_folder, 'metadata')
 plot_data_dispersion(Y_train, factor_access_train, args.A, folder_path, folder_name, unique_regions, model.W_CKL)
 data.cuda(args.cuda)
 print(f'folder_name: {args.folder_name}\n\n')

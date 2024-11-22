@@ -16,8 +16,10 @@ from ast import literal_eval
 outputs_folder = 'outputs'
 
 args = get_parser().parse_args()
-parser_key = ['ID', 'A', 'L', 'tauBeta', 'tauConfig', 'tauSigma', 'tauSD', 'posterior', 'iters', 'lr', 'temp', 'weight', 'maskLimit']
+parser_key = ['ID', 'A', 'L', 'tauBeta', 'tauConfig', 'tauSigma', 'tauSD', 'posterior', 'iters', 'lr', 'maskLimit', 'temp', 'weight']
 # args.folder_name = ''
+# args.load_run = 0
+# args.num_epochs = 0
 parser_dict = parse_folder_name(args.folder_name, parser_key, outputs_folder, args.load_run)
 
 args.data_seed = int(parser_dict['ID'])
@@ -65,7 +67,7 @@ folder_name = f'sample_data_{region_ct}-regions_{args.L}-factors_{dt}_dt'
 Y_train, bin_time, factor_access_train, unique_regions = load_sample(folder_path, folder_name)
 if Y_train is None:
     raise ValueError("No training data found")
-processed_inputs_train = preprocess_input_data(*to_cuda(load_tensors((Y_train, factor_access_train, bin_time)),
+processed_inputs_train = preprocess_input_data(*to_cuda(load_tensors((Y_train, factor_access_train, dt)),
                                                         move_to_cuda=args.cuda), mask_threshold=args.mask_neuron_threshold)
 Y_train, factor_access_train, timeCourse = processed_inputs_train['Y'].cpu(), processed_inputs_train['neuron_factor_access'].cpu(), processed_inputs_train['time'].cpu()
 print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')
@@ -88,8 +90,9 @@ if args.num_epochs < 0:
     model.cuda(move_to_cuda=args.cuda)
     se_dict = compute_uncertainty(model, processed_inputs_train, output_dir, args.load_epoch)
     model.cpu()
+    plot_data_dispersion(Y_train, factor_access_train, args.A, folder_path, folder_name, unique_regions, model.W_CKL)
     plot_outputs(model, unique_regions, output_dir, 'Train', args.load_epoch, se_dict, Y_train, factor_access_train)
-    interpret_results(model, processed_inputs_train, 'output_dir', -2)
+    interpret_results(model, unique_regions, [2, 1, 3], output_dir, args.load_epoch)
     sys.exit()
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 optimizer.load_state_dict(optimizer_state)

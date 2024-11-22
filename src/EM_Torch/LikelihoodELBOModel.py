@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import pickle
-torch.set_default_tensor_type(torch.DoubleTensor)
+torch.set_default_dtype(torch.float64)
 
 def create_precision_matrix(P):
     Omega = np.zeros((P, P))
@@ -334,6 +334,7 @@ class LikelihoodELBOModel(nn.Module):
         avg_peak_times = torch.cat([avg_peak1_times, avg_peak2_times]).unsqueeze(0).unsqueeze(1).unsqueeze(2)
         # self.trial_peak_offset_proposal_samples # N x R x C x 2AL
         # self.config_peak_offsets  # C x 2AL
+        self.generate_trial_peak_offset_samples()
         offsets = self.trial_peak_offset_proposal_samples + self.config_peak_offsets.unsqueeze(0).unsqueeze(1)
         s_new = avg_peak_times + offsets
         left_landmarks_int = torch.cat([self.peak1_left_landmarks, self.peak2_left_landmarks]).unsqueeze(0).unsqueeze(1).unsqueeze(2)
@@ -341,9 +342,10 @@ class LikelihoodELBOModel(nn.Module):
         left_landmarks = self.time[left_landmarks_int]
         right_landmarks = self.time[right_landmarks_int]
         peak_midpoint = ((left_landmarks + right_landmarks) / 2).expand_as(s_new)
-        s_new = (F.sigmoid(s_new - peak_midpoint) - 0.5) * (right_landmarks - left_landmarks) + peak_midpoint
-        peak_midpoint = (left_landmarks + right_landmarks) / 2
-        avg_peak_times = (F.sigmoid(avg_peak_times - peak_midpoint) - 0.5) * (right_landmarks - left_landmarks) + peak_midpoint
+        half_range = (right_landmarks - left_landmarks) / 2
+        s_new = F.tanh(s_new - peak_midpoint) * half_range + peak_midpoint
+        avg_peak_times = torch.max(torch.stack([avg_peak_times, self.time[left_landmarks_int + 1]], dim=0), dim=0).values
+        avg_peak_times = torch.min(torch.stack([avg_peak_times, self.time[right_landmarks_int - 1]], dim=0), dim=0).values
         return avg_peak_times, left_landmarks, right_landmarks, s_new
 
 
@@ -402,7 +404,6 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def prepare_inputs(self, processed_inputs):
-        self.generate_trial_peak_offset_samples()
         # warped_factors # L x T x N x R x C --> C x R x L x N x T
         all_warped_factors = self.warp_all_latent_factors_for_all_trials().permute(4, 3, 0, 2, 1)
         end = torch.max(torch.tensor([all_warped_factors.shape[3]-1, 1], device=self.device)).int()

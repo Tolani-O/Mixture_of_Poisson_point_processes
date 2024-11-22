@@ -1,6 +1,8 @@
 import os
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 import seaborn as sns
 import torch
 import torch.nn.functional as F
@@ -386,7 +388,6 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(beta_dir, f'LatentFactors_{epoch}.png'))
         plt.close()
 
-        model.generate_trial_peak_offset_samples()
         avg_peak_times, left_landmarks, right_landmarks, s_new = model.compute_offsets_and_landmarks()
         warped_times = model.compute_warped_times(avg_peak_times, left_landmarks, right_landmarks, s_new)
         warped_times = warped_times.squeeze().reshape(*warped_times.shape[:2], -1).permute(0, 2, 1)
@@ -604,13 +605,13 @@ def plot_data_dispersion(Y, factor_access, n_areas, save_path, save_folder, regi
     avg_spike_counts = torch.sum(spike_counts, dim=(0, 1)) / torch.sum(filter, dim=(0, 1))
     sq_centered_spike_counts = (spike_counts - avg_spike_counts.unsqueeze(0).unsqueeze(1))**2 * filter
     spike_ct_var = torch.sum(sq_centered_spike_counts, dim=(0,1)) / (torch.sum(filter, dim=(0, 1)))
-    dispersion = (spike_ct_var - avg_spike_counts).reshape(n_areas, -1)[:, 0]
+    dispersion = (spike_ct_var/avg_spike_counts).reshape(n_areas, -1)[:, 0]
     plt.figure(figsize=(10, 6))
     plt.bar(regions, dispersion)
     plt.xlabel('Area')
-    plt.ylabel('Dispersion')
-    plt.title('Dispersion of Spike Counts')
-    plt.savefig(os.path.join(save_path, save_folder, 'data_dispersion.png'), dpi=200)
+    plt.ylabel('Dispersion ratio (V/mu)')
+    plt.title('Dispersion ratio of Spike Counts')
+    plt.savefig(os.path.join(save_path, save_folder, 'data_dispersion_ratio.png'), dpi=200)
     plt.close()
 
 
@@ -852,11 +853,102 @@ def compute_warped_factors(model, data, warped_times):
 
 
 def reverse_warp_data(model, Y):
-    model.generate_trial_peak_offset_samples()
     avg_peak_times, left_landmarks, right_landmarks, s_new = model.compute_offsets_and_landmarks()
     warped_times = model.compute_warped_times(s_new, left_landmarks, right_landmarks, avg_peak_times.expand_as(s_new))
     warped_factors = compute_warped_factors(model, Y, warped_times)
     return warped_factors
+
+
+def interpret_results(model, unique_regions, factors_of_interest, output_dir, epoch):
+    with torch.no_grad():
+        # Interpret trial
+        factors_of_interest = torch.tensor(factors_of_interest) - 1
+        avg_peak_times, _, _, peak_times = model.compute_offsets_and_landmarks()
+        avg_peak_times = avg_peak_times.squeeze()
+        peak_times = peak_times.squeeze()
+        # peak time # 2 x A x L x C x R
+        peak_times = peak_times.reshape(*peak_times.shape[:2], 2, model.n_areas, -1).permute(2, 3, 4, 1, 0)
+        # avg_peak_times # 2 x AL
+        avg_peak_times = avg_peak_times.reshape(2, model.n_areas, -1)
+        indices_of_interest = torch.zeros_like(peak_times)
+        avg_indices_of_interest = torch.zeros_like(avg_peak_times)
+        # Interpret factors of interest
+        for i, x in enumerate(factors_of_interest):
+            indices_of_interest[:, i, x] = 1
+            avg_indices_of_interest[:, i, x] = 1
+        # peak time of interest # 2A x C x R
+        # :A is peak 1, A: is peak 2
+        dimns = 2 * model.n_areas
+        peak_times_of_interest = peak_times[indices_of_interest.bool()].reshape(dimns, *peak_times.shape[3:])
+        avg_peak_times_of_interest = avg_peak_times[avg_indices_of_interest.bool()]
+        sigma = model.ltri_matix() @ model.ltri_matix().t()
+        # sigma # 2 x A x L x 2 x A x L
+        L = model.n_factors // model.n_areas
+        sigma = sigma.reshape(2, model.n_areas, L, 2, model.n_areas, L)
+        indices_of_interest = torch.zeros_like(sigma)
+        for i, x in enumerate(factors_of_interest):
+            indices_of_interest[:, i, x, :, range(len(factors_of_interest)), factors_of_interest] = 1
+        # sigma of interest # 2A x 2A
+        # :A is peak 1, A: is peak 2
+        sigma_of_interest = sigma[indices_of_interest.bool()].reshape(dimns, dimns)
+
+    inference_dir = os.path.join(output_dir, 'interpretations')
+    os.makedirs(inference_dir, exist_ok=True)
+    # plot average peak times
+    avg_peak_df = pd.DataFrame(avg_peak_times_of_interest.reshape(2, -1).t(), columns=['Peak 1', 'Peak 2'], index=unique_regions).sort_values(by='Peak 1')
+    scale = 1000
+    avg_peak_df = avg_peak_df * scale
+    colors = cm.get_cmap('tab10', len(avg_peak_df.index))
+    plt.figure(figsize=(10, 6))
+    for i, col in enumerate(avg_peak_df.columns):
+        upper_limit = avg_peak_df[col].max()
+        lower_limit = avg_peak_df[col].min()
+        for j, (idx, row) in enumerate(avg_peak_df.iterrows()):
+            color = colors(j)
+            plt.subplot(1, 2, i + 1)
+            plt.text(row[col], 0, f'{idx}', ha='center', va='bottom', bbox=dict(facecolor=color, edgecolor='black', boxstyle='round,pad=0.3'))
+            plt.yticks([])
+            plt.xlim(left=lower_limit - (1/50)*lower_limit, right=upper_limit + (1/50)*lower_limit)
+            plt.ylim(bottom=-0.01, top=0.01)
+            if i == 0:
+                plt.ylabel('Region')
+            plt.xlabel("Peak Time (ms)")
+            plt.title(f'Average Peak {i + 1} Times')
+            plt.tight_layout()
+    plt.savefig(os.path.join(inference_dir, f'Average_Peak_Times_{epoch}.png'))
+    plt.close()
+
+    peak_times_of_interest = peak_times_of_interest.reshape(peak_times_of_interest.shape[0], -1)
+    peak_times_of_interest = peak_times_of_interest.reshape(2, -1, peak_times_of_interest.shape[-1]).permute(0, 2, 1)
+    colors = cm.get_cmap('tab20b', len(unique_regions))
+    plt.figure(figsize=(10, 6))
+    for i in range(2):
+        peak_times_df = pd.DataFrame(peak_times_of_interest[i], columns=unique_regions, index=range(1, peak_times_of_interest.shape[1] + 1))
+        peak_times_df = peak_times_df * scale
+        plt.subplot(1, 2, i + 1)
+        for j, reg in enumerate(peak_times_df.columns):
+            plt.plot(peak_times_df[reg], peak_times_df.index, '.', color=colors(j), label=reg)
+        plt.xlabel('Peak Time (ms)')
+        plt.title(f'Peak {i + 1} Times')
+        if i == 0:
+            plt.ylabel('Trial')
+            plt.legend()
+        else:
+            plt.yticks([])
+        plt.tight_layout()
+    plt.savefig(os.path.join(inference_dir, f'Trial_Peak_Times_{epoch}.png'))
+    plt.close()
+
+    correlation = sigma_of_interest / np.sqrt(np.outer(np.diag(sigma_of_interest), np.diag(sigma_of_interest)))
+    plt.figure(figsize=(10, 10))
+    ax = sns.heatmap(correlation, annot=True, cmap="seismic", center=0, vmin=-1, vmax=1,
+                     xticklabels=model.n_areas, yticklabels=model.n_areas)
+    for i in range(model.n_areas, correlation.shape[0], model.n_areas):
+        ax.axvline(i, color='black', linestyle='-', linewidth=0.5)
+        ax.axhline(i, color='black', linestyle='-', linewidth=0.5)
+    plt.title('Peak time correlation matrix')
+    plt.savefig(os.path.join(inference_dir, f'Peak_Times_Correlations_{epoch}.png'))
+    plt.close()
 
 
 def plot_epoch_results(input_dict, test=False):

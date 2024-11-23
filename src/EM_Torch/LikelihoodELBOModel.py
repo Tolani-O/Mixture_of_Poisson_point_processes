@@ -60,16 +60,16 @@ class LikelihoodELBOModel(nn.Module):
         assert len(temperature) == len(weights), "Temperature and weights must be the same length"
         self.temperature = torch.tensor(temperature)
         self.weights = torch.tensor(weights, dtype=torch.float64)
-        self.time = torch.tensor(time)
+        self.time = time
         self.dt = torch.round(time[1] - time[0], decimals=3)
         T = time.shape[0]
-        self.peak1_left_landmarks = torch.searchsorted(self.time, torch.tensor(peak1_left_landmarks), side='left')
+        self.peak1_left_landmarks = torch.searchsorted(self.time, peak1_left_landmarks, side='left')
         self.peak1_left_landmarks = torch.cat([self.peak1_left_landmarks] * n_areas)
-        self.peak1_right_landmarks = torch.searchsorted(self.time, torch.tensor(peak1_right_landmarks), side='left')
+        self.peak1_right_landmarks = torch.searchsorted(self.time, peak1_right_landmarks, side='left')
         self.peak1_right_landmarks = torch.cat([self.peak1_right_landmarks] * n_areas)
-        self.peak2_left_landmarks = torch.searchsorted(self.time, torch.tensor(peak2_left_landmarks), side='left')
+        self.peak2_left_landmarks = torch.searchsorted(self.time, peak2_left_landmarks, side='left')
         self.peak2_left_landmarks = torch.cat([self.peak2_left_landmarks] * n_areas)
-        self.peak2_right_landmarks = torch.searchsorted(self.time, torch.tensor(peak2_right_landmarks), side='left')
+        self.peak2_right_landmarks = torch.searchsorted(self.time, peak2_right_landmarks, side='left')
         self.peak2_right_landmarks = torch.cat([self.peak2_right_landmarks] * n_areas)
         self.n_factors = n_factors
         self.n_areas = n_areas

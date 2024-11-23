@@ -35,10 +35,10 @@ args.tau_config = float(parser_dict['tauConfig'])
 args.tau_sigma = float(parser_dict['tauSigma'])
 args.tau_sd = float(parser_dict['tauSD'])
 args.n_trial_samples = int(parser_dict['posterior'])  # Number of samples to generate for each trial
-peak1_left_landmarks = parser_dict['peak1_left_landmarks']
-peak1_right_landmarks = parser_dict['peak1_right_landmarks']
-peak2_left_landmarks = parser_dict['peak2_left_landmarks']
-peak2_right_landmarks = parser_dict['peak2_right_landmarks']
+peak1_left_landmarks = torch.tensor(parser_dict['peak1_left_landmarks'])
+peak1_right_landmarks = torch.tensor(parser_dict['peak1_right_landmarks'])
+peak2_left_landmarks = torch.tensor(parser_dict['peak2_left_landmarks'])
+peak2_right_landmarks = torch.tensor(parser_dict['peak2_right_landmarks'])
 dt = parser_dict['dt']
 
 if args.eval_interval > args.log_interval:
@@ -90,6 +90,7 @@ if args.num_epochs < 0:
     plot_data_dispersion(Y_train, factor_access_train, args.A, folder_path, folder_name, unique_regions, model.W_CKL)
     plot_outputs(model, unique_regions, output_dir, 'Train', args.load_epoch, se_dict, Y_train, factor_access_train)
     interpret_results(model, unique_regions, [2, 1, 3], output_dir, args.load_epoch)
+    print('Finished')
     sys.exit()
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 optimizer.load_state_dict(optimizer_state)
@@ -110,11 +111,12 @@ output_str = (f"Using CUDA: {args.cuda}\n"
               f"peak1_right_landmarks:\n{model.time[model.peak1_right_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
               f"peak2_left_landmarks:\n{model.time[model.peak2_left_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
               f"peak2_right_landmarks:\n{model.time[model.peak2_right_landmarks.reshape(model.n_areas, -1)].numpy()}\n\n")
+round_decimals = len(str(dt).split('.')[1])
 params = {
-    'peak1_left_landmarks': peak1_left_landmarks,
-    'peak1_right_landmarks': peak1_right_landmarks,
-    'peak2_left_landmarks': peak2_left_landmarks,
-    'peak2_right_landmarks': peak2_right_landmarks,
+    'peak1_left_landmarks': peak1_left_landmarks.round(decimals=round_decimals).tolist(),
+    'peak1_right_landmarks': peak1_right_landmarks.round(decimals=round_decimals).tolist(),
+    'peak2_left_landmarks': peak2_left_landmarks.round(decimals=round_decimals).tolist(),
+    'peak2_right_landmarks': peak2_right_landmarks.round(decimals=round_decimals).tolist(),
     'dt': dt
 }
 create_relevant_files(output_dir, output_str, params=params)

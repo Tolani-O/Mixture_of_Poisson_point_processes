@@ -17,25 +17,27 @@ outputs_folder = 'outputs'
 args = get_parser().parse_args()
 args.data_seed = np.random.randint(0, 2 ** 32 - 1)
 
-# args.init = 'zero'
+# args.init = 'mom'
 the_rest = 'zeros'
 args.log_interval = 500
 args.eval_interval = 500
 args.lr = 0.0001
 args.num_epochs = 200000
 args.mask_neuron_threshold = 10
-args.tau_beta = 50 # 800
+args.tau_beta = 500
 args.tau_config = 0
 args.tau_sigma = 1
 args.tau_sd = 1000
-args.L = 5
+# args.L = 5
+args.n_trial_samples = 7  # Number of samples to generate for each trial
 sd_init = 0.5
-args.n_trial_samples = 10  # Number of samples to generate for each trial
-peak1_left_landmarks = [0.02] * args.L
-peak1_right_landmarks = [0.12] * args.L
-peak2_left_landmarks = [0.16] * args.L
-peak2_right_landmarks = [0.27] * args.L
 dt = 0.002
+peak1_right_landmarks_start = 0.1
+# args.landmark_step = 14
+peak1_left_landmarks = torch.tensor([0.006] * args.L)
+peak1_right_landmarks = peak1_right_landmarks_start + torch.arange(0, args.landmark_step*dt*args.L, args.landmark_step*dt)
+peak2_left_landmarks = peak1_right_landmarks + 4*dt
+peak2_right_landmarks = torch.tensor([0.34] * args.L)
 args.notes = f'maskLimit{args.mask_neuron_threshold}'
 
 regions = None
@@ -61,7 +63,6 @@ else:
 
 # Training data
 region_ct = len(regions) if regions is not None else 7
-args.L = len(peak1_left_landmarks)
 folder_path = os.path.join(os.getcwd(), outputs_folder, 'metadata')
 folder_name = f'sample_data_{region_ct}-regions_{args.L}-factors_{dt}_dt'
 Y_train, bin_time, factor_access_train, unique_regions = load_sample(folder_path, folder_name)
@@ -115,11 +116,12 @@ output_str = (f"Using CUDA: {args.cuda}\n"
               f"peak1_right_landmarks:\n{model.time[model.peak1_right_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
               f"peak2_left_landmarks:\n{model.time[model.peak2_left_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
               f"peak2_right_landmarks:\n{model.time[model.peak2_right_landmarks.reshape(model.n_areas, -1)].numpy()}\n\n")
+round_decimals = len(str(dt).split('.')[1])
 params = {
-    'peak1_left_landmarks': peak1_left_landmarks,
-    'peak1_right_landmarks': peak1_right_landmarks,
-    'peak2_left_landmarks': peak2_left_landmarks,
-    'peak2_right_landmarks': peak2_right_landmarks,
+    'peak1_left_landmarks': peak1_left_landmarks.round(decimals=round_decimals).tolist(),
+    'peak1_right_landmarks': peak1_right_landmarks.round(decimals=round_decimals).tolist(),
+    'peak2_left_landmarks': peak2_left_landmarks.round(decimals=round_decimals).tolist(),
+    'peak2_right_landmarks': peak2_right_landmarks.round(decimals=round_decimals).tolist(),
     'dt': dt
 }
 create_relevant_files(output_dir, output_str, params=params)

@@ -46,6 +46,7 @@ def get_parser():
     parser.add_argument('--notes', type=str, default='', help='Run notes')
     parser.add_argument('--K', type=int, default=30, help='Number of neurons')
     parser.add_argument('--L', type=int, default=3, help='Number of latent factors')
+    parser.add_argument('--landmark_step', type=float, default=1, help='step size for time warping landmarks')
     parser.add_argument('--intensity_mltply', type=float, default=25, help='Latent factor intensity multiplier')
     parser.add_argument('--intensity_bias', type=float, default=1, help='Latent factor intensity bias')
     parser.add_argument('--param_seed', type=int_or_str, default='', help='options are: seed (int), Truth (str)')

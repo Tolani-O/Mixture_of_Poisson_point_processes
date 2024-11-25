@@ -268,7 +268,7 @@ def parse_folder_name(folder_name, parser_key, outputs_folder, load_run):
     return parsed_values
 
 
-def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None, Y=None, factor_access=None, warp_data=True, mismatch=False):
+def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None, Y=None, factor_access=None, warp_data=True, reorder_factors=False):
 
     stderr = se_dict is not None
     plot_data = (Y is not None) and (model.W_CKL is not None)
@@ -290,6 +290,8 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
     os.makedirs(configoffset_dir, exist_ok=True)
     ltri_dir = os.path.join(output_dir, 'ltri')
     os.makedirs(ltri_dir, exist_ok=True)
+    pcorr_dir = os.path.join(output_dir, 'pcorr')
+    os.makedirs(pcorr_dir, exist_ok=True)
     corr_dir = os.path.join(output_dir, 'corr')
     os.makedirs(corr_dir, exist_ok=True)
     proposal_means_dir = os.path.join(output_dir, 'proposal_means')
@@ -347,18 +349,20 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
             else:
                 scaled_data = torch.einsum('ktrc,ckl->lcrt', data, model.W_CKL)
             scaled_data = scaled_data.sum(dim=(1, 2))/(R * model.W_CKL.sum(dim=(0, 1)).unsqueeze(-1)).numpy()
-            if mismatch:
-                diff = scaled_data - latent_factors
-                lower_limit = -0.001
         if stderr:
             softmax_grad = np.abs(latent_factors * (1 - latent_factors))
             latent_factors_se = softmax_grad * beta_se
             factor_ucl = latent_factors + latent_factors_se
             factor_lcl = latent_factors - latent_factors_se
+        factors_per_area = int(model.n_factors / model.n_areas)
+        L = np.arange(model.n_factors).reshape(model.n_areas, -1)
+        ordr = np.concatenate([np.arange(factors_per_area)] * model.n_areas).reshape(model.n_areas, -1)
+        if reorder_factors:
+            ordr = W_L.reshape(model.n_areas, -1).argsort()
+        indcs = np.concatenate([L[i, ordr[i][::-1]] for i in range(model.n_areas)]).reshape(model.n_areas, -1)
+        L = indcs.T.flatten()
         plt.figure(figsize=(model.n_areas*10, int(model.n_factors/model.n_areas)*5))
-        L = np.arange(model.n_factors).reshape(model.n_areas, -1).T.flatten()
         c = 0
-        factors_per_area = int(model.n_factors/model.n_areas)
         for l in L:
             plt.subplot(factors_per_area, model.n_areas, c + 1)
             plt.vlines(x=model.time[torch.tensor([
@@ -370,8 +374,6 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
             plt.plot(model.time, latent_factors[l, :], alpha=np.max([pi[l], 0.5]), linewidth=np.exp(1.5*pi[l]))
             if plot_data:
                 plt.plot(model.time, scaled_data[l, :], alpha=np.max([pi[l], 0.5]), linewidth=1, linestyle='--')
-                if mismatch:
-                    plt.plot(model.time, diff[l, :], alpha=np.max([pi[l], 0.5]), linewidth=1, linestyle='-.')
             if stderr:
                 plt.fill_between(model.time, factor_ucl[l, :], factor_lcl[l, :], color='grey', alpha=0.3, label='Standard Error')
                 plt.plot(model.time, factor_ucl[l, :], linestyle='--', color='black', alpha=0.07)
@@ -447,7 +449,25 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(proposal_means_dir, f'proposal_means_{epoch}.png'))
         plt.close()
 
-        covariance = (model.ltri_matix('cpu') @ model.ltri_matix('cpu').t()).numpy()
+        ltri_matrix = model.ltri_matix('cpu').numpy()
+        precision = ltri_matrix @ ltri_matrix.T
+        srt = np.concatenate([indcs.flatten(), indcs.flatten() + model.n_factors])
+        precision = precision[srt].T[srt]
+        partial_correlation = -precision / np.sqrt(np.outer(np.diag(precision), np.diag(precision)))
+        diag_indcs = np.arange(partial_correlation.shape[0])
+        partial_correlation[diag_indcs, diag_indcs] = np.abs(np.diag(partial_correlation))
+        plt.figure(figsize=(10, 10))
+        factors_per_area = model.n_factors // model.n_areas
+        ax = sns.heatmap(partial_correlation, annot=False, cmap="seismic", center=0, vmin=-1, vmax=1,
+                         xticklabels=factors_per_area, yticklabels=factors_per_area)
+        for i in range(factors_per_area, partial_correlation.shape[0], factors_per_area):
+            ax.axvline(i, color='black', linestyle='-', linewidth=0.5)
+            ax.axhline(i, color='black', linestyle='-', linewidth=0.5)
+        plt.title('Peak time partial correlation matrix')
+        plt.savefig(os.path.join(pcorr_dir, f'pcorr_{epoch}.png'))
+        plt.close()
+
+        covariance = np.linalg.inv(precision)
         correlation = covariance / np.sqrt(np.outer(np.diag(covariance), np.diag(covariance)))
         plt.figure(figsize=(10, 10))
         factors_per_area = model.n_factors // model.n_areas
@@ -885,16 +905,17 @@ def interpret_results(model, unique_regions, factors_of_interest, output_dir, ep
         dimns = 2 * model.n_areas
         peak_times_of_interest = peak_times[indices_of_interest.bool()].reshape(dimns, *peak_times.shape[3:])
         avg_peak_times_of_interest = avg_peak_times[avg_indices_of_interest.bool()]
-        sigma = model.ltri_matix() @ model.ltri_matix().t()
+        ltri_matix = model.ltri_matix()
+        inv_sigma = ltri_matix @ ltri_matix.t()
         # sigma # 2 x A x L x 2 x A x L
         L = model.n_factors // model.n_areas
-        sigma = sigma.reshape(2, model.n_areas, L, 2, model.n_areas, L)
-        indices_of_interest = torch.zeros_like(sigma)
+        inv_sigma = inv_sigma.reshape(2, model.n_areas, L, 2, model.n_areas, L)
+        indices_of_interest = torch.zeros_like(inv_sigma)
         for i, x in enumerate(factors_of_interest):
             indices_of_interest[:, i, x, :, range(len(factors_of_interest)), factors_of_interest] = 1
         # sigma of interest # 2A x 2A
         # :A is peak 1, A: is peak 2
-        sigma_of_interest = sigma[indices_of_interest.bool()].reshape(dimns, dimns)
+        precision_of_interest = inv_sigma[indices_of_interest.bool()].reshape(dimns, dimns)
 
     inference_dir = os.path.join(output_dir, 'interpretations')
     os.makedirs(inference_dir, exist_ok=True)
@@ -943,11 +964,11 @@ def interpret_results(model, unique_regions, factors_of_interest, output_dir, ep
     plt.savefig(os.path.join(inference_dir, f'Trial_Peak_Times_{epoch}.png'))
     plt.close()
 
-    correlation = sigma_of_interest / np.sqrt(np.outer(np.diag(sigma_of_interest), np.diag(sigma_of_interest)))
+    partial_correlation = -precision_of_interest / np.sqrt(np.outer(np.diag(precision_of_interest), np.diag(precision_of_interest)))
     plt.figure(figsize=(10, 10))
-    ax = sns.heatmap(correlation, annot=True, cmap="seismic", center=0, vmin=-1, vmax=1,
+    ax = sns.heatmap(partial_correlation, annot=True, cmap="seismic", center=0, vmin=-1, vmax=1,
                      xticklabels=model.n_areas, yticklabels=model.n_areas)
-    for i in range(model.n_areas, correlation.shape[0], model.n_areas):
+    for i in range(model.n_areas, partial_correlation.shape[0], model.n_areas):
         ax.axvline(i, color='black', linestyle='-', linewidth=0.5)
         ax.axhline(i, color='black', linestyle='-', linewidth=0.5)
     plt.title('Peak time correlation matrix')

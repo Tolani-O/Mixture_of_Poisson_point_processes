@@ -531,11 +531,9 @@ class LikelihoodELBOModel(nn.Module):
 
     def Sigma_log_likelihood(self, trial_peak_offsets, ltri_matrix):
         n_dims = ltri_matrix.shape[0]  # 2AL
-        Sigma = ltri_matrix @ ltri_matrix.t()
-        det_Sigma = torch.linalg.det(Sigma)
-        inv_Sigma = torch.linalg.inv(Sigma)
+        inv_Sigma = ltri_matrix @ ltri_matrix.t()
         prod_term = torch.einsum('nrcl,lj,nrcj->crn', trial_peak_offsets, inv_Sigma, trial_peak_offsets)  # sum over l
-        entropy_term = 0.5 * (n_dims * torch.log(torch.tensor(2 * torch.pi)) + torch.log(det_Sigma) + prod_term)
+        entropy_term = 0.5 * (n_dims * torch.log(torch.tensor(2 * torch.pi)) - torch.logdet(inv_Sigma) + prod_term)
         return entropy_term # C x R x N
 
 
@@ -554,9 +552,8 @@ class LikelihoodELBOModel(nn.Module):
         config_Penalty = - tau_config * (1/torch.prod(torch.tensor(self.config_peak_offsets.shape))) * torch.sum(self.config_peak_offsets * self.config_peak_offsets)
         proposal_sd_penalty = - tau_sd * (1/torch.prod(torch.tensor(self.trial_peak_offset_proposal_sds.shape))) * torch.sum(self.trial_peak_offset_proposal_sds * self.trial_peak_offset_proposal_sds)
         ltri_matrix = self.ltri_matix()
-        Sigma = ltri_matrix @ ltri_matrix.t()
-        inv_Sigma = torch.linalg.inv(Sigma)
-        sigma_Penalty = -tau_sigma * (1/(torch.prod(torch.tensor(Sigma.shape))-Sigma.shape[0])) * (torch.sum(torch.abs(inv_Sigma)) - torch.sum(torch.abs(torch.diag(inv_Sigma))))
+        inv_Sigma = ltri_matrix @ ltri_matrix.t()
+        sigma_Penalty = -tau_sigma * (1/(torch.prod(torch.tensor(inv_Sigma.shape))-inv_Sigma.shape[0])) * (torch.sum(torch.abs(inv_Sigma)) - torch.sum(torch.abs(torch.diag(inv_Sigma))))
         factors = torch.softmax(self.unnormalized_log_factors(), dim=-1)
         beta_s2_penalty = -tau_beta * (1/torch.prod(torch.tensor(factors.shape))) * torch.sum((factors @ self.Delta2TDelta2) * factors)
         penalty_term = config_Penalty + sigma_Penalty + beta_s2_penalty + proposal_sd_penalty

@@ -268,7 +268,7 @@ def parse_folder_name(folder_name, parser_key, outputs_folder, load_run):
     return parsed_values
 
 
-def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None, Y=None, factor_access=None, warp_data=True, reorder_factors=False):
+def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None, Y=None, factor_access=None, warp_data=True, reorder_factors=True):
 
     stderr = se_dict is not None
     plot_data = (Y is not None) and (model.W_CKL is not None)
@@ -345,10 +345,10 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
             data = Y / (1e-10 + neuron_firing_rates.t().unsqueeze(1).unsqueeze(2))
             # scaled_data L x C x R x T
             if warp_data:
-                scaled_data = reverse_warp_data(model, data)
+                data = reverse_warp_data(model, data)
             else:
-                scaled_data = torch.einsum('ktrc,ckl->lcrt', data, model.W_CKL)
-            scaled_data = scaled_data.sum(dim=(1, 2))/(R * model.W_CKL.sum(dim=(0, 1)).unsqueeze(-1)).numpy()
+                data = torch.einsum('ktrc,ckl->lcrt', data, model.W_CKL)
+            scaled_data = data.sum(dim=(1, 2))/(R * model.W_CKL.sum(dim=(0, 1)).unsqueeze(-1)).numpy()
         if stderr:
             softmax_grad = np.abs(latent_factors * (1 - latent_factors))
             latent_factors_se = softmax_grad * beta_se
@@ -500,10 +500,44 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(pi_dir, f'pi_{epoch}.png'))
         plt.close()
 
-        configoffset = model.config_peak_offsets.flatten().numpy()
-        plt.figure(figsize=(10, 10))
-        plt.plot(configoffset, label='ConfigOffset')
-        plt.title('ConfigOffset')
+        if plot_data:
+            # scaled_data L x C x T
+            scaled_data = data.sum(dim=2) / (R * model.W_CKL.sum(dim=1).t().unsqueeze(-1).numpy())
+        # config_times L x C x 2
+        left_landmarks_int = torch.cat([model.peak1_left_landmarks, model.peak2_left_landmarks])
+        right_landmarks_int = torch.cat([model.peak1_right_landmarks, model.peak2_right_landmarks])
+        left_landmarks = model.time[left_landmarks_int + 1]
+        right_landmarks = model.time[right_landmarks_int - 1]
+        half_range = (right_landmarks - left_landmarks) / 4
+        config_times = avg_peak_times.unsqueeze(0) + F.tanh(model.config_peak_offsets) * half_range.unsqueeze(0)
+        config_times = config_times.reshape(model.n_configs, 2, -1).permute(2, 0, 1).numpy()
+        plt.figure(figsize=(model.n_areas * 10, int(model.n_factors / model.n_areas) * 5))
+        c = 0
+        for l in L:
+            plt.subplot(factors_per_area, model.n_areas, c + 1)
+            plt.vlines(x=model.time[torch.tensor([
+                model.peak1_left_landmarks[l], model.peak1_right_landmarks[l],
+                model.peak2_left_landmarks[l], model.peak2_right_landmarks[l]])],
+                       ymin=0, ymax=upper_limit,
+                       color='grey', linestyle='--', alpha=0.5)
+            plt.hlines(y=0, xmin=0, xmax=model.time[-1], color='white', linestyle='-', linewidth=2, alpha=0.5)
+            plt.plot(model.time, latent_factors[l, :], alpha=np.max([pi[l], 0.5]),
+                     linewidth=np.exp(1.5 * pi[l]))
+            for cnf in range(model.n_configs):
+                if plot_data:
+                    plt.plot(model.time, scaled_data[l, cnf], color='grey', alpha=0.4, linewidth=1, linestyle='--')
+                plt.vlines(x=config_times[l, cnf, 0], ymin=0, ymax=upper_limit,
+                           color='red', linestyle='--', alpha=0.5)
+                plt.vlines(x=config_times[l, cnf, 1], ymin=0, ymax=upper_limit,
+                           color='green', linestyle='--', alpha=0.5)
+            plt.xlabel('Intensity')
+            plt.ylabel('Trial time course (ms)')
+            plt.title(f'Factor {(l % factors_per_area) + 1}, '
+                      f'Area {unique_regions[l // factors_per_area]}, '
+                      f'Membership: {pi[l]:.2f}, '
+                      f'Count: {W_L[l]:.1f}', fontsize=20)
+            c += 1
+        plt.tight_layout()
         plt.savefig(os.path.join(configoffset_dir, f'configoffset_{epoch}.png'))
         plt.close()
 

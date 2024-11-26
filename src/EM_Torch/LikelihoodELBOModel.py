@@ -332,20 +332,23 @@ class LikelihoodELBOModel(nn.Module):
                                                   for i in range(self.peak2_left_landmarks.shape[0])])]
         # avg_peak_times  # N x R x C x 2AL
         avg_peak_times = torch.cat([avg_peak1_times, avg_peak2_times]).unsqueeze(0).unsqueeze(1).unsqueeze(2)
-        # self.trial_peak_offset_proposal_samples # N x R x C x 2AL
-        # self.config_peak_offsets  # C x 2AL
         self.generate_trial_peak_offset_samples()
-        offsets = self.trial_peak_offset_proposal_samples + self.config_peak_offsets.unsqueeze(0).unsqueeze(1)
-        s_new = avg_peak_times + offsets
         left_landmarks_int = torch.cat([self.peak1_left_landmarks, self.peak2_left_landmarks]).unsqueeze(0).unsqueeze(1).unsqueeze(2)
         right_landmarks_int = torch.cat([self.peak1_right_landmarks, self.peak2_right_landmarks]).unsqueeze(0).unsqueeze(1).unsqueeze(2)
+        left_landmarks = self.time[left_landmarks_int + 1]
+        right_landmarks = self.time[right_landmarks_int - 1]
+        half_range = (right_landmarks - left_landmarks) / 4
+        avg_peak_times = torch.max(torch.stack([avg_peak_times, left_landmarks], dim=0), dim=0).values
+        avg_peak_times = torch.min(torch.stack([avg_peak_times, right_landmarks], dim=0), dim=0).values
+        # trial_offsets # N x R x C x 2AL
+        trial_offsets = F.tanh(self.trial_peak_offset_proposal_samples) * half_range
+        # config_offsets  # 1 x 1 x C x 2AL
+        config_offsets = F.tanh(self.config_peak_offsets.unsqueeze(0).unsqueeze(1)) * half_range
+        s_new = avg_peak_times + trial_offsets + config_offsets
+        s_new = torch.max(torch.stack([s_new, left_landmarks.expand_as(s_new)], dim=0), dim=0).values
+        s_new = torch.min(torch.stack([s_new, right_landmarks.expand_as(s_new)], dim=0), dim=0).values
         left_landmarks = self.time[left_landmarks_int]
         right_landmarks = self.time[right_landmarks_int]
-        peak_midpoint = ((left_landmarks + right_landmarks) / 2).expand_as(s_new)
-        half_range = (right_landmarks - left_landmarks) / 2
-        s_new = F.tanh(s_new - peak_midpoint) * half_range + peak_midpoint
-        avg_peak_times = torch.max(torch.stack([avg_peak_times, self.time[left_landmarks_int + 1]], dim=0), dim=0).values
-        avg_peak_times = torch.min(torch.stack([avg_peak_times, self.time[right_landmarks_int - 1]], dim=0), dim=0).values
         return avg_peak_times, left_landmarks, right_landmarks, s_new
 
 
@@ -519,8 +522,15 @@ class LikelihoodELBOModel(nn.Module):
         # alpha_times_log_theta_plus_b_CKL  # C x K x 1 x L x 1
         alpha_times_log_theta_plus_b_CKL = (alpha * (torch.log(theta) + b_CKL)).unsqueeze(2).unsqueeze(4)
         log_gamma_alpha = torch.lgamma(alpha).unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(4)  # 1 x 1 x 1 x L x 1
+        # trial_offsets # N x R x C x 2AL
+        left_landmarks_int = torch.cat([self.peak1_left_landmarks, self.peak2_left_landmarks]).unsqueeze(0).unsqueeze(1).unsqueeze(2)
+        right_landmarks_int = torch.cat([self.peak1_right_landmarks, self.peak2_right_landmarks]).unsqueeze(0).unsqueeze(1).unsqueeze(2)
+        left_landmarks = self.time[left_landmarks_int + 1]
+        right_landmarks = self.time[right_landmarks_int - 1]
+        half_range = (right_landmarks - left_landmarks) / 4
+        trial_offsets = F.tanh(self.trial_peak_offset_proposal_samples) * half_range
         # neg_log_P # C x 1 x R x 1 x N
-        neg_log_P = self.Sigma_log_likelihood(self.trial_peak_offset_proposal_samples, self.ltri_matix()).unsqueeze(1).unsqueeze(3)
+        neg_log_P = self.Sigma_log_likelihood(trial_offsets, self.ltri_matix()).unsqueeze(1).unsqueeze(3)
         # neg_log_Q # C x 1 x R x 1 x N
         neg_log_Q = self.sd_log_likelihood(self.trial_peak_offset_proposal_samples).unsqueeze(1).unsqueeze(3)
         elbo = (Y_times_warped_beta - Y_sum_t_times_logsumexp_warped_beta + (1 / R) * (alpha_times_log_theta_plus_b_CKL -

@@ -24,7 +24,6 @@ args.A = 3  # A
 args.L = 5  # L
 args.n_trial_samples = 10  # Number of samples to generate for each trial
 
-args.data_seed = 2000921404
 # args.n_trials = 5
 # args.n_configs = 3
 # args.K = 10
@@ -42,14 +41,12 @@ args.log_interval = 500
 args.eval_interval = 500
 args.lr = 0.0001
 args.num_epochs = 200000
-# args.temperature = (1,)
-# args.weights = (1,)
-args.tau_beta = 800
-args.tau_config = 500
+args.tau_beta = 500
+args.tau_config = 0
 args.tau_sigma = 1
-args.tau_sd = 10000
+args.tau_sd = 1000
 sd_init = 0.5
-args.notes = f'maskLimit{args.mask_neuron_threshold}_warping{int(args.time_warp)}'
+args.notes = f'maskLimit{args.mask_neuron_threshold}'
 
 if args.eval_interval > args.log_interval:
     args.log_interval = args.eval_interval
@@ -70,10 +67,9 @@ data = DataAnalyzer().initialize(configs=args.n_configs, A=args.A, L=args.L, int
                                  intensity_bias=args.intensity_bias, time_warp=args.time_warp)
 # Training data
 Y_train, factor_access_train = data.sample_data(K=args.K, A=args.A, n_trials=args.n_trials)
-print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')
 _, _, factor_assignment_onehot_train, neuron_gains_train, trial_offsets_train = to_cuda(load_tensors(data.get_sample_ground_truth()),
                                                                                         move_to_cuda=args.cuda)
-processed_inputs_train = preprocess_input_data(*to_cuda(load_tensors((Y_train, factor_access_train, data.time)),
+processed_inputs_train = preprocess_input_data(*to_cuda(load_tensors((Y_train, factor_access_train, data.dt)),
                                                         move_to_cuda=args.cuda), mask_threshold=args.mask_neuron_threshold)
 
 #DELETE
@@ -85,6 +81,7 @@ neuron_gains_train[remove_indcs[0], remove_indcs[1]] = 0
 #DELETE
 
 Y_train, factor_access_train, timeCourse = processed_inputs_train['Y'].cpu(), processed_inputs_train['neuron_factor_access'].cpu(), processed_inputs_train['time'].cpu()
+print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')
 peak1_left_landmarks = timeCourse[[data.left_landmark1] * args.L]
 peak1_right_landmarks = timeCourse[[data.right_landmark1] * args.L]
 peak2_left_landmarks = timeCourse[[data.left_landmark2] * args.L]

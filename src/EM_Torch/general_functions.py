@@ -427,7 +427,12 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(warp_time_dir, f'warped_times_{epoch}.png'))
         plt.close()
 
-        proposal_means = model.trial_peak_offset_proposal_means.permute(2, 0, 1).reshape(warped_times.shape[0], -1)
+        left_landmarks_int = torch.cat([model.peak1_left_landmarks, model.peak2_left_landmarks]).unsqueeze(0).unsqueeze(1)
+        right_landmarks_int = torch.cat([model.peak1_right_landmarks, model.peak2_right_landmarks]).unsqueeze(0).unsqueeze(1)
+        left_landmarks = model.time[left_landmarks_int + 1]
+        right_landmarks = model.time[right_landmarks_int - 1]
+        half_range = (right_landmarks - left_landmarks) / 4
+        proposal_means = (F.tanh(model.trial_peak_offset_proposal_means) * half_range).permute(2, 0, 1).reshape(warped_times.shape[0], -1)
         plt.figure(figsize=(model.n_areas * 15, int(model.n_factors / model.n_areas) * 5))
         c = 0
         xlimit = proposal_means.abs().max().item()
@@ -440,7 +445,7 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
                 plt.xlabel('Trial peak times')
                 plt.ylabel('Frequency')
                 plt.xlim(left=-xlimit, right=xlimit)
-                plt.ylim(bottom=-1e-5, top=100)
+                # plt.ylim(bottom=-1e-5, top=100)
                 plt.title(f'Factor {(l % factors_per_area) + 1}, '
                           f'Area {unique_regions[l // factors_per_area]}, '
                           f'Peak {p + 1} offsets', fontsize=20)
@@ -504,11 +509,6 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
             # scaled_data L x C x T
             scaled_data = data.sum(dim=2) / (R * model.W_CKL.sum(dim=1).t().unsqueeze(-1).numpy())
         # config_times L x C x 2
-        left_landmarks_int = torch.cat([model.peak1_left_landmarks, model.peak2_left_landmarks])
-        right_landmarks_int = torch.cat([model.peak1_right_landmarks, model.peak2_right_landmarks])
-        left_landmarks = model.time[left_landmarks_int + 1]
-        right_landmarks = model.time[right_landmarks_int - 1]
-        half_range = (right_landmarks - left_landmarks) / 4
         config_times = avg_peak_times.unsqueeze(0) + F.tanh(model.config_peak_offsets) * half_range.unsqueeze(0)
         config_times = config_times.reshape(model.n_configs, 2, -1).permute(2, 0, 1).numpy()
         plt.figure(figsize=(model.n_areas * 10, int(model.n_factors / model.n_areas) * 5))

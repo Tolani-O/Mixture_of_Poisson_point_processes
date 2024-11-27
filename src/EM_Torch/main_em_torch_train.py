@@ -69,6 +69,9 @@ data = DataAnalyzer().initialize(configs=args.n_configs, A=args.A, L=args.L, int
 Y_train, factor_access_train = data.sample_data(K=args.K, A=args.A, n_trials=args.n_trials)
 _, _, factor_assignment_onehot_train, neuron_gains_train, trial_offsets_train = to_cuda(load_tensors(data.get_sample_ground_truth()),
                                                                                         move_to_cuda=args.cuda)
+constrained_trial_offsets_train, constrained_config_offsets_train = to_cuda(load_tensors((data.transform_peak_offsets(config_offsets=False),
+                                                                                          data.transform_peak_offsets(config_offsets=True))),
+                                                                                        move_to_cuda=args.cuda)
 processed_inputs_train = preprocess_input_data(*to_cuda(load_tensors((Y_train, factor_access_train, data.dt)),
                                                         move_to_cuda=args.cuda), mask_threshold=args.mask_neuron_threshold)
 
@@ -154,10 +157,10 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
 output_str = (
     f"Using CUDA: {args.cuda}\n"
     f"Num available GPUs: {torch.cuda.device_count()}\n"
-    f"peak1_left_landmarks:\n{model.time[model.peak1_left_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
-    f"peak1_right_landmarks:\n{model.time[model.peak1_right_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
-    f"peak2_left_landmarks:\n{model.time[model.peak2_left_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
-    f"peak2_right_landmarks:\n{model.time[model.peak2_right_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
+    f"peak1_left_landmarks:\n{model.time[model.left_landmarks_indx[:model.n_factors]].reshape(model.n_areas, -1).numpy()}\n"
+    f"peak1_right_landmarks:\n{model.time[model.right_landmarks_indx[:model.n_factors]].reshape(model.n_areas, -1).numpy()}\n"
+    f"peak2_left_landmarks:\n{model.time[model.left_landmarks_indx[model.n_factors:]].reshape(model.n_areas, -1).numpy()}\n"
+    f"peak2_right_landmarks:\n{model.time[model.right_landmarks_indx[model.n_factors:]].reshape(model.n_areas, -1).numpy()}\n"
     f"True ELBO Training: {true_ELBO_train}\n"
     f"True Offset Likelihood Training: {true_offset_penalty_train}\n\n")
 params = {
@@ -282,20 +285,20 @@ if __name__ == "__main__":
                 Sigma_data = Sigma_data.reshape(ltri_matrix.shape[0], 2, model.n_factors)[:, :,
                              non_zero_data_train[:, 2]]
                 Sigma_mses.append(F.mse_loss(Sigma_model, Sigma_data).item())
-                config_model = model.config_peak_offsets.reshape(model.config_peak_offsets.shape[0], 2,
+                config_model = model.transform_peak_offsets(config_offsets=True).reshape(model.config_peak_offsets.shape[0], 2,
                                                                  model.n_factors)[non_zero_model_train[:, 0], :,
                                non_zero_model_train[:, 2]]
-                config_data = data.config_peak_offsets.reshape(model.config_peak_offsets.shape[0], 2,
+                config_data = constrained_config_offsets_train.reshape(model.config_peak_offsets.shape[0], 2,
                                                                model.n_factors)[non_zero_data_train[:, 0], :,
                               non_zero_data_train[:, 2]]
                 config_mses.append(F.mse_loss(config_model, config_data).item())
 
                 gains_train.append(F.mse_loss(neuron_gains_train, model_neuron_gains_train).item())
-                trial_offsets_data_train = trial_offsets_train.squeeze().permute(1, 0, 2).reshape(
+                trial_offsets_data_train = constrained_trial_offsets_train.squeeze().permute(1, 0, 2).reshape(
                     trial_offsets_train.shape[2],
                     trial_offsets_train.shape[1],
                     2, model.n_factors)[non_zero_data_train[:, 0], :, :, non_zero_data_train[:, 2]]
-                trial_offsets_proposal_means = model.trial_peak_offset_proposal_means.permute(1, 0, 2).reshape(
+                trial_offsets_proposal_means = model.transform_peak_offsets(config_offsets=False).squeeze().permute(1, 0, 2).reshape(
                     trial_offsets_train.shape[2],
                     trial_offsets_train.shape[1],
                     2, model.n_factors)[non_zero_data_train[:, 0], :, :, non_zero_data_train[:, 2]]

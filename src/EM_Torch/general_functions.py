@@ -269,7 +269,7 @@ def parse_folder_name(folder_name, parser_key, outputs_folder, load_run):
 
 
 def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None, Y=None, factor_access=None, warp_data=True, reorder_factors=True):
-
+    model.train(False)
     stderr = se_dict is not None
     plot_data = (Y is not None) and (model.W_CKL is not None)
     output_dir = os.path.join(output_dir, folder)
@@ -303,9 +303,8 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         L = beta.shape[0]
         if stderr:
             beta_se = torch.cat([torch.zeros(L, 1), se_dict['beta']], dim=1).numpy() * 1.96
-            for landmarks in [model.peak1_left_landmarks, model.peak2_left_landmarks,
-                              model.peak1_right_landmarks, model.peak2_right_landmarks]:
-                beta_se[range(L), landmarks] = (beta_se[range(L), landmarks - 1] +
+            for landmarks in [model.left_landmarks_indx, model.right_landmarks_indx]:
+                beta_se[np.array([range(L)]*2).flatten(), landmarks] = (beta_se[range(L), landmarks - 1] +
                                                  beta_se[range(L), landmarks + 1]) / 2
             beta_se = np.where(beta_se == 0, (np.roll(beta_se, 1, axis=1) + np.roll(beta_se, -1, axis=1)) / 2, beta_se)
             beta_ucl = beta + beta_se
@@ -366,8 +365,8 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         for l in L:
             plt.subplot(factors_per_area, model.n_areas, c + 1)
             plt.vlines(x=model.time[torch.tensor([
-                model.peak1_left_landmarks[l], model.peak1_right_landmarks[l],
-                model.peak2_left_landmarks[l], model.peak2_right_landmarks[l]])],
+                model.left_landmarks_indx[l], model.right_landmarks_indx[l],
+                model.left_landmarks_indx[l+model.n_factors], model.right_landmarks_indx[l+model.n_factors]])],
                        ymin=0, ymax=upper_limit,
                        color='grey', linestyle='--', alpha=0.5)
             plt.hlines(y=0, xmin=0, xmax=model.time[-1], color='white', linestyle='-', linewidth=2, alpha=0.5)
@@ -395,19 +394,16 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         warped_times = model.compute_warped_times(avg_peak_times, left_landmarks, right_landmarks, s_new)
         warped_times = warped_times.squeeze().reshape(*warped_times.shape[:2], -1)
         avg_peak_times = avg_peak_times.squeeze()
-        left_landmarks_int = torch.cat([model.peak1_left_landmarks, model.peak2_left_landmarks])
-        right_landmarks_int = torch.cat([model.peak1_right_landmarks, model.peak2_right_landmarks])
-        landmark_speads = right_landmarks_int - left_landmarks_int + 1
         expended_time = model.time.unsqueeze(-1).expand(-1, warped_times.shape[-1])
         plt.figure(figsize=(model.n_areas * 10, int(model.n_factors / model.n_areas) * 5))
         c = 0
         for l in L:
             plt.subplot(factors_per_area, model.n_areas, c + 1)
-            warped_times_l = torch.concat([expended_time[:left_landmarks_int[l]],
-                                           warped_times[l, :landmark_speads[l]],
-                                           expended_time[(right_landmarks_int[l]+1):left_landmarks_int[l+model.n_factors]],
-                                           warped_times[l+model.n_factors, :landmark_speads[l+model.n_factors]],
-                                           expended_time[(right_landmarks_int[l+model.n_factors]+1):]],
+            warped_times_l = torch.concat([expended_time[:model.left_landmarks_indx[l]],
+                                           warped_times[l, :model.landmark_indx_speads[l]],
+                                           expended_time[(model.right_landmarks_indx[l]+1):model.left_landmarks_indx[l+model.n_factors]],
+                                           warped_times[l+model.n_factors, :model.landmark_indx_speads[l+model.n_factors]],
+                                           expended_time[(model.right_landmarks_indx[l+model.n_factors]+1):]],
                                           dim=0).t().numpy()
             latent_factors_l = latent_factors[l]
             lf_max, lf_min = latent_factors_l.max(), latent_factors_l.min()
@@ -427,12 +423,7 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(warp_time_dir, f'warped_times_{epoch}.png'))
         plt.close()
 
-        left_landmarks_int = torch.cat([model.peak1_left_landmarks, model.peak2_left_landmarks]).unsqueeze(0).unsqueeze(1)
-        right_landmarks_int = torch.cat([model.peak1_right_landmarks, model.peak2_right_landmarks]).unsqueeze(0).unsqueeze(1)
-        left_landmarks = model.time[left_landmarks_int + 1]
-        right_landmarks = model.time[right_landmarks_int - 1]
-        half_range = (right_landmarks - left_landmarks) / 4
-        proposal_means = (F.tanh(model.trial_peak_offset_proposal_means) * half_range).permute(2, 0, 1).reshape(warped_times.shape[0], -1)
+        proposal_means = model.transform_peak_offsets().squeeze().permute(2, 0, 1).reshape(warped_times.shape[0], -1)
         plt.figure(figsize=(model.n_areas * 15, int(model.n_factors / model.n_areas) * 5))
         c = 0
         xlimit = proposal_means.abs().max().item()
@@ -509,15 +500,15 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
             # scaled_data L x C x T
             scaled_data = data.sum(dim=2) / (R * model.W_CKL.sum(dim=1).t().unsqueeze(-1).numpy())
         # config_times L x C x 2
-        config_times = avg_peak_times.unsqueeze(0) + F.tanh(model.config_peak_offsets) * half_range.unsqueeze(0)
+        config_times = avg_peak_times.unsqueeze(0) + model.transform_peak_offsets(config_offsets=True).numpy()
         config_times = config_times.reshape(model.n_configs, 2, -1).permute(2, 0, 1).numpy()
         plt.figure(figsize=(model.n_areas * 10, int(model.n_factors / model.n_areas) * 5))
         c = 0
         for l in L:
             plt.subplot(factors_per_area, model.n_areas, c + 1)
             plt.vlines(x=model.time[torch.tensor([
-                model.peak1_left_landmarks[l], model.peak1_right_landmarks[l],
-                model.peak2_left_landmarks[l], model.peak2_right_landmarks[l]])],
+                model.left_landmarks_indx[l], model.right_landmarks_indx[l],
+                model.left_landmarks_indx[l+model.n_factors], model.right_landmarks_indx[l+model.n_factors]])],
                        ymin=0, ymax=upper_limit,
                        color='grey', linestyle='--', alpha=0.5)
             plt.hlines(y=0, xmin=0, xmax=model.time[-1], color='white', linestyle='-', linewidth=2, alpha=0.5)
@@ -669,7 +660,9 @@ def plot_data_dispersion(Y, factor_access, n_areas, save_path, save_folder, regi
     plt.xlabel('Area')
     plt.ylabel('Dispersion ratio (V/mu)')
     plt.title('Dispersion ratio of Spike Counts')
-    plt.savefig(os.path.join(save_path, save_folder, 'data_dispersion_ratio.png'), dpi=200)
+    folder_name = os.path.join(save_path, save_folder)
+    os.makedirs(folder_name, exist_ok=True)
+    plt.savefig(os.path.join(folder_name, 'data_dispersion_ratio.png'), dpi=200)
     plt.close()
 
 
@@ -870,14 +863,12 @@ def compute_uncertainty(model, processed_inputs, output_dir, epoch):
 
 def compute_warped_factors(model, data, warped_times):
     factors = torch.einsum('ktrc,ckl->lcrt', data, model.W_CKL)
-    warped_indices = warped_times / model.dt
-    floor_warped_indices = torch.floor(warped_indices).int()
-    ceil_warped_indices = torch.ceil(warped_indices).int()
+    r0und = model.dt / (10 * int(str(model.dt.item())[-1]))
+    warped_indices = (warped_times / model.dt) + r0und  # could be round but its not differentiable
+    floor_warped_indices = warped_indices.int()  # could be torch.floor but for non-negative numbers it is the same
+    ceil_warped_indices = (warped_indices + 1).int()  # could be torch.ceil but for non-negative numbers it is the same
     ceil_weights = warped_indices - floor_warped_indices
     floor_weights = 1 - ceil_weights
-    left_landmarks_int = torch.cat([model.peak1_left_landmarks, model.peak2_left_landmarks])
-    right_landmarks_int = torch.cat([model.peak1_right_landmarks, model.peak2_right_landmarks])
-    landmark_speads = right_landmarks_int - left_landmarks_int + 1
     full_warped_factors = []
     L, C, R, T = factors.shape
     for l in range(L):
@@ -897,11 +888,11 @@ def compute_warped_factors(model, data, warped_times):
                 weighted_ceil_warped_factor_l = ceil_warped_factor_l * ceil_weights[l + model.n_factors, :, 0, r, c]
                 peak2 = weighted_floor_warped_factor_l + weighted_ceil_warped_factor_l
 
-                early = factors[l, c, r, :left_landmarks_int[l]]
-                peak1 = peak1[:landmark_speads[l]]
-                mid = factors[l, c, r, (right_landmarks_int[l]+1):left_landmarks_int[l + model.n_factors]]
-                peak2 = peak2[:landmark_speads[l + model.n_factors]]
-                late = factors[l, c, r, (right_landmarks_int[l + model.n_factors]+1):]
+                early = factors[l, c, r, :model.left_landmarks_indx[l]]
+                peak1 = peak1[:model.landmark_indx_speads[l]]
+                mid = factors[l, c, r, (model.right_landmarks_indx[l]+1):model.left_landmarks_indx[l + model.n_factors]]
+                peak2 = peak2[:model.landmark_indx_speads[l + model.n_factors]]
+                late = factors[l, c, r, (model.right_landmarks_indx[l + model.n_factors]+1):]
                 full_warped_factors_c.append(torch.cat([early, peak1, mid, peak2, late], dim=0))
             full_warped_factors_l.append(torch.stack(full_warped_factors_c))
         full_warped_factors.append(torch.stack(full_warped_factors_l))

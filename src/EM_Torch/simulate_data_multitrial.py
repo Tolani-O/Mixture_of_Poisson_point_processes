@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.special import softmax
+from scipy.stats import norm
 import torch
 
 
@@ -183,19 +184,36 @@ class DataAnalyzer:
         return warped_factors
 
 
+    def transform_peak_offsets(self, config_offsets=False):
+        n_factors = self.trial_peak_offset_covar_ltri.shape[0]//2
+        half_warping_window1 = (self.time[self.right_landmark1 - 1] - self.time[self.left_landmark1 + 1]) / 4
+        half_warping_window2 = (self.time[self.right_landmark2 - 1] - self.time[self.left_landmark2 + 1]) / 4
+        half_warping_window = np.array([[half_warping_window1]*n_factors, [half_warping_window2]*n_factors]).flatten()
+        bounding_sigma = 0.5
+        if config_offsets:
+            scaled_config_offsets = bounding_sigma * self.config_peak_offsets / np.sqrt(np.var(self.config_peak_offsets, axis=0, keepdims=True))
+            peak_offsets = half_warping_window[np.newaxis, :] * (2 * norm.cdf(scaled_config_offsets) - 1)
+        else:
+            scale_trial_offsets = bounding_sigma * self.trial_peak_offsets / np.sqrt(np.var(self.trial_peak_offsets, axis=(0, 1, 2), keepdims=True))
+            peak_offsets = half_warping_window[np.newaxis, np.newaxis, np.newaxis, :] * (2 * norm.cdf(scale_trial_offsets) - 1)
+        return peak_offsets
+
+
     def compute_offsets_and_landmarks(self):
         factors = np.exp(self.beta)
         avg_peak1_times = self.time[self.left_landmark1 + np.argmax(factors[:, self.left_landmark1:self.right_landmark1], axis=1)]
         avg_peak2_times = self.time[self.left_landmark2 + np.argmax(factors[:, self.left_landmark2:self.right_landmark2], axis=1)]
-        avg_peak_times = np.hstack([avg_peak1_times, avg_peak2_times])
         # avg_peak_times  # 2AL
+        avg_peak_times = np.hstack([avg_peak1_times, avg_peak2_times])
+        left_landmarks = self.time[np.expand_dims(np.repeat(np.array([self.left_landmark1, self.left_landmark2]), avg_peak_times.shape[-1] // 2), (0, 1, 2))]
+        right_landmarks = self.time[np.expand_dims(np.repeat(np.array([self.right_landmark1, self.right_landmark2]), avg_peak_times.shape[-1] // 2), (0, 1, 2))]
+        avg_peak_times = np.where(avg_peak_times <= left_landmarks, left_landmarks + self.dt, avg_peak_times)
+        avg_peak_times = np.where(avg_peak_times >= right_landmarks, right_landmarks - self.dt, avg_peak_times)
         # self.transformed_trial_peak_offset_samples  N x R x C x 2AL
         # self.config_peak_offsets  # C x 2AL
-        offsets = self.trial_peak_offsets + np.expand_dims(self.config_peak_offsets, (0, 1))
-        avg_peak_times = np.expand_dims(avg_peak_times, (0, 1, 2))
-        s_new = avg_peak_times + offsets  # offset peak time
-        left_landmarks = self.time[np.expand_dims(np.repeat(np.array([self.left_landmark1, self.left_landmark2]), s_new.shape[-1] // 2), (0, 1, 2))]
-        right_landmarks = self.time[np.expand_dims(np.repeat(np.array([self.right_landmark1, self.right_landmark2]), s_new.shape[-1] // 2), (0, 1, 2))]
+        trial_offsets = self.transform_peak_offsets(config_offsets=False)
+        config_offsets = self.transform_peak_offsets(config_offsets=True)[None, None, :, :]
+        s_new = avg_peak_times + trial_offsets + config_offsets
         s_new = np.where(s_new <= left_landmarks, left_landmarks + self.dt, s_new)
         s_new = np.where(s_new >= right_landmarks, right_landmarks - self.dt, s_new)
         return avg_peak_times, left_landmarks, right_landmarks, s_new

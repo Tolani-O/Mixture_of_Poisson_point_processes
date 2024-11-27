@@ -134,10 +134,10 @@ scheduler.load_state_dict(scheduler_state)
 output_str = (
     f"Using CUDA: {args.cuda}\n"
     f"Num available GPUs: {torch.cuda.device_count()}\n"
-    f"peak1_left_landmarks:\n{model.time[model.peak1_left_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
-    f"peak1_right_landmarks:\n{model.time[model.peak1_right_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
-    f"peak2_left_landmarks:\n{model.time[model.peak2_left_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
-    f"peak2_right_landmarks:\n{model.time[model.peak2_right_landmarks.reshape(model.n_areas, -1)].numpy()}\n"
+    f"peak1_left_landmarks:\n{model.time[model.left_landmarks_indx[:model.n_factors]].reshape(model.n_areas, -1).numpy()}\n"
+    f"peak1_right_landmarks:\n{model.time[model.right_landmarks_indx[:model.n_factors]].reshape(model.n_areas, -1).numpy()}\n"
+    f"peak2_left_landmarks:\n{model.time[model.left_landmarks_indx[model.n_factors:]].reshape(model.n_areas, -1).numpy()}\n"
+    f"peak2_right_landmarks:\n{model.time[model.right_landmarks_indx[model.n_factors:]].reshape(model.n_areas, -1).numpy()}\n"
     f"True ELBO Training: {true_ELBO_train}\n"
     f"True Offset Likelihood Training: {true_offset_penalty_train}\n\n")
 params = {

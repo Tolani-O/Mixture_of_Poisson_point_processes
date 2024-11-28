@@ -186,16 +186,17 @@ class DataAnalyzer:
 
     def transform_peak_offsets(self, config_offsets=False):
         n_factors = self.trial_peak_offset_covar_ltri.shape[0]//2
-        half_warping_window1 = (self.time[self.right_landmark1 - 1] - self.time[self.left_landmark1 + 1]) / 4
-        half_warping_window2 = (self.time[self.right_landmark2 - 1] - self.time[self.left_landmark2 + 1]) / 4
+        half_warping_window1 = (self.time[self.right_landmark1] - self.time[self.left_landmark1]) / 4
+        half_warping_window2 = (self.time[self.right_landmark2] - self.time[self.left_landmark2]) / 4
         half_warping_window = np.array([[half_warping_window1]*n_factors, [half_warping_window2]*n_factors]).flatten()
-        bounding_sigma = 0.5
+        bounding_sigma = 0.1
+        max_scaling = 0.5
         if config_offsets:
             scaled_config_offsets = bounding_sigma * self.config_peak_offsets / np.sqrt(np.var(self.config_peak_offsets, axis=0, keepdims=True))
-            peak_offsets = half_warping_window[np.newaxis, :] * (2 * norm.cdf(scaled_config_offsets) - 1)
+            peak_offsets = np.tanh(scaled_config_offsets) * half_warping_window[np.newaxis, :] / max_scaling
         else:
             scale_trial_offsets = bounding_sigma * self.trial_peak_offsets / np.sqrt(np.var(self.trial_peak_offsets, axis=(0, 1, 2), keepdims=True))
-            peak_offsets = half_warping_window[np.newaxis, np.newaxis, np.newaxis, :] * (2 * norm.cdf(scale_trial_offsets) - 1)
+            peak_offsets = np.tanh(scale_trial_offsets) * half_warping_window[np.newaxis, np.newaxis, np.newaxis, :] / max_scaling
         return peak_offsets
 
 

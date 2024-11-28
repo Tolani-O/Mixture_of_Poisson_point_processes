@@ -323,14 +323,15 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def transform_peak_offsets(self, config_offsets=False):
-        half_warping_window = (self.time[self.right_landmarks_indx - 1] - self.time[self.left_landmarks_indx + 1]) / 4
-        bounding_sigma = 0.5
+        half_warping_window = (self.time[self.right_landmarks_indx] - self.time[self.left_landmarks_indx]) / 4
+        bounding_sigma = 0.1
+        max_scaling = 0.5
         if config_offsets:
             scaled_config_offsets = bounding_sigma * self.config_peak_offsets / (1e-20 + torch.var(self.config_peak_offsets, dim=0, keepdim=True)).sqrt()
-            peak_offsets = half_warping_window.unsqueeze(0) * (2 * Normal(loc=0, scale=1).cdf(scaled_config_offsets) - 1)
+            peak_offsets = F.tanh(scaled_config_offsets) * half_warping_window.unsqueeze(0) / max_scaling
         else:
             scale_trial_offsets = bounding_sigma * self.trial_peak_offset_proposal_samples / (1e-20 + torch.var(self.trial_peak_offset_proposal_samples, dim=(0,1,2), keepdim=True)).sqrt()
-            peak_offsets = half_warping_window.unsqueeze(0).unsqueeze(1).unsqueeze(2) * (2 * Normal(loc=0, scale=1).cdf(scale_trial_offsets) - 1)
+            peak_offsets = F.tanh(scale_trial_offsets) * half_warping_window.unsqueeze(0).unsqueeze(1).unsqueeze(2) / max_scaling
         return peak_offsets
 
 

@@ -17,6 +17,7 @@ outputs_folder = 'outputs'
 args = get_parser().parse_args()
 parser_key = ['ID', 'K', 'A', 'C', 'L', 'R', 'tauBeta', 'tauConfig', 'tauSigma', 'tauSD', 'posterior', 'iters', 'lr', 'maskLimit', 'warping']
 # args.folder_name = ''
+# args.load_run = 1
 parser_dict = parse_folder_name(args.folder_name, parser_key, outputs_folder, args.load_run)
 
 args.data_seed = int(parser_dict['ID'])
@@ -60,13 +61,17 @@ Y_train, factor_access_train = data.sample_data(K=args.K, A=args.A, n_trials=arg
 print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')
 _, _, factor_assignment_onehot_train, neuron_gains_train, trial_offsets_train = to_cuda(load_tensors(data.get_sample_ground_truth()),
                                                                                         move_to_cuda=args.cuda)
-processed_inputs_train = preprocess_input_data(*to_cuda(load_tensors((Y_train, factor_access_train, data.time)),
+processed_inputs_train = preprocess_input_data(*to_cuda(load_tensors((Y_train, factor_access_train, data.dt)),
                                                         move_to_cuda=args.cuda), mask_threshold=args.mask_neuron_threshold)
-Y_train, factor_access_train = processed_inputs_train['Y'].cpu(), processed_inputs_train['neuron_factor_access'].cpu()
-peak1_left_landmarks = parser_dict['peak1_left_landmarks']
-peak1_right_landmarks = parser_dict['peak1_right_landmarks']
-peak2_left_landmarks = parser_dict['peak2_left_landmarks']
-peak2_right_landmarks = parser_dict['peak2_right_landmarks']
+
+# #DELETE
+# remove_indcs = torch.concat(torch.where(factor_assignment_onehot_train == 1)).reshape(3, -1)
+# remove_indcs = remove_indcs[:, torch.isin(remove_indcs[2], torch.tensor([0,1,3,4,5,8], device=remove_indcs.device.type))]
+# processed_inputs_train['neuron_factor_access'][remove_indcs[0], remove_indcs[1]] = 0
+# factor_assignment_onehot_train[remove_indcs[0], remove_indcs[1]] = 0
+# neuron_gains_train[remove_indcs[0], remove_indcs[1]] = 0
+# #DELETE
+
 Y_train, factor_access_train, timeCourse = processed_inputs_train['Y'].cpu(), processed_inputs_train['neuron_factor_access'].cpu(), processed_inputs_train['time'].cpu()
 peak1_left_landmarks = timeCourse[[data.left_landmark1] * args.L]
 peak1_right_landmarks = timeCourse[[data.right_landmark1] * args.L]
@@ -116,7 +121,7 @@ if args.num_epochs < 0:
     model.cpu()
     plot_data_dispersion(Y_train, factor_access_train, args.A, folder_path, folder_name, unique_regions, model.W_CKL)
     plot_outputs(model, unique_regions, output_dir, 'Train', args.load_epoch, se_dict, Y_train, factor_access_train)
-    interpret_results(model, unique_regions, [2, 1, 3], output_dir, args.load_epoch)
+    # interpret_results(model, unique_regions, [2, 1, 3], output_dir, args.load_epoch)
     sys.exit()
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 optimizer.load_state_dict(optimizer_state)
@@ -141,10 +146,10 @@ output_str = (
     f"True ELBO Training: {true_ELBO_train}\n"
     f"True Offset Likelihood Training: {true_offset_penalty_train}\n\n")
 params = {
-    'peak1_left_landmarks': peak1_left_landmarks,
-    'peak1_right_landmarks': peak1_right_landmarks,
-    'peak2_left_landmarks': peak2_left_landmarks,
-    'peak2_right_landmarks': peak2_right_landmarks,
+    'peak1_left_landmarks': peak1_left_landmarks.tolist(),
+    'peak1_right_landmarks': peak1_right_landmarks.tolist(),
+    'peak2_left_landmarks': peak2_left_landmarks.tolist(),
+    'peak2_right_landmarks': peak2_right_landmarks.tolist(),
 }
 create_relevant_files(output_dir, output_str, params=params, ground_truth=True)
 plot_outputs(model, unique_regions, output_dir, 'Train', -1, Y=Y_train, factor_access=factor_access_train)

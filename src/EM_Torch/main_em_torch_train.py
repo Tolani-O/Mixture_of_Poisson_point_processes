@@ -46,7 +46,7 @@ args.tau_config = 0
 args.tau_sigma = 1
 args.tau_sd = 1000
 sd_init = 0.5
-args.notes = f'maskLimit{args.mask_neuron_threshold}'
+args.notes = f'maskLimit{args.mask_neuron_threshold}_warping{int(args.time_warp)}'
 
 if args.eval_interval > args.log_interval:
     args.log_interval = args.eval_interval

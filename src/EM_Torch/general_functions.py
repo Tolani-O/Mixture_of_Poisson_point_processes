@@ -134,7 +134,7 @@ def plot_latent_coupling(latent_coupling, output_dir):
     plt.savefig(os.path.join(output_dir, f'groundTruth_neuron_clusters.png'))
 
 
-def load_model_checkpoint(output_dir, load_epoch):
+def load_model_checkpoint(model, output_dir, load_epoch):
     if load_epoch < 0:
         with open(os.path.join(output_dir, 'json', 'epoch_train.json'), 'r') as f:
             load_epoch = json.load(f)[-1]
@@ -144,7 +144,7 @@ def load_model_checkpoint(output_dir, load_epoch):
     load_optimizer_dir = os.path.join(output_dir, 'models', f'optimizer_{load_epoch}.pth')
     scheduler_dir = os.path.join(output_dir, 'models', f'scheduler_{load_epoch}.pth')
     if os.path.isfile(load_model_dir):
-        model = torch.load(load_model_dir, map_location=torch.device('cpu'))
+        model_state = torch.load(load_model_dir, map_location=torch.device('cpu'))
     else:
         raise Exception(f'No model_{load_epoch}.pth file found at {load_model_dir}')
     if os.path.isfile(intermediate_vars_dir):
@@ -161,7 +161,10 @@ def load_model_checkpoint(output_dir, load_epoch):
         scheduler = torch.load(scheduler_dir, map_location=torch.device('cpu'))
     else:
         raise Exception(f'No scheduler_{load_epoch}.pth file found at {scheduler_dir}')
-    return model, optimizer, scheduler, W_CKL, a_CKL, theta, pi, load_epoch
+    model.load_state_dict(model_state)
+    model.W_CKL, model.a_CKL, model.theta, model.pi = W_CKL, a_CKL, theta, pi
+    model.ltri_matix()
+    return model, optimizer, scheduler, load_epoch
 
 
 def reset_metric_checkpoint(output_dir, folder_name, sub_folder_name, metric_files, start_epoch):
@@ -287,16 +290,18 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
     os.makedirs(theta_dir, exist_ok=True)
     pi_dir = os.path.join(output_dir, 'pi')
     os.makedirs(pi_dir, exist_ok=True)
-    configoffset_dir = os.path.join(output_dir, 'configoffset')
-    os.makedirs(configoffset_dir, exist_ok=True)
-    # ltri_dir = os.path.join(output_dir, 'ltri')
-    # os.makedirs(ltri_dir, exist_ok=True)
+    configOffsets_dir = os.path.join(output_dir, 'configoffset')
+    os.makedirs(configOffsets_dir, exist_ok=True)
+    configPeaks_dir = os.path.join(output_dir, 'configPeaks')
+    os.makedirs(configPeaks_dir, exist_ok=True)
+    peakOffsets_dir = os.path.join(output_dir, 'peakOffsets')
+    os.makedirs(peakOffsets_dir, exist_ok=True)
     pcorr_dir = os.path.join(output_dir, 'pcorr')
     os.makedirs(pcorr_dir, exist_ok=True)
     corr_dir = os.path.join(output_dir, 'corr')
     os.makedirs(corr_dir, exist_ok=True)
-    proposal_means_dir = os.path.join(output_dir, 'proposal_means')
-    os.makedirs(proposal_means_dir, exist_ok=True)
+    trialOffsets_dir = os.path.join(output_dir, 'trialOffsets')
+    os.makedirs(trialOffsets_dir, exist_ok=True)
     trial_sd_dir = os.path.join(output_dir, 'trial_SDs')
     os.makedirs(trial_sd_dir, exist_ok=True)
     with torch.no_grad():
@@ -305,9 +310,8 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         if stderr:
             beta_se = torch.cat([torch.zeros(L, 1), se_dict['beta']], dim=1).numpy() * 1.96
             for landmarks in [model.left_landmarks_indx, model.right_landmarks_indx]:
-                beta_se[np.array([range(L)]*2).flatten(), landmarks] = (beta_se[range(L), landmarks - 1] +
-                                                 beta_se[range(L), landmarks + 1]) / 2
-            beta_se = np.where(beta_se == 0, (np.roll(beta_se, 1, axis=1) + np.roll(beta_se, -1, axis=1)) / 2, beta_se)
+                beta_se[np.array([range(L)]*2).flatten(), landmarks] = (beta_se[np.array([range(L)]*2).flatten(), landmarks - 1] + beta_se[np.array([range(L)]*2).flatten(), landmarks + 1]) / 2
+            beta_se = gaussian_filter1d(beta_se, sigma=5, axis=1)
             beta_ucl = beta + beta_se
             beta_lcl = beta - beta_se
         upper_limit = np.max(beta) + 0.1
@@ -391,6 +395,38 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(beta_dir, f'LatentFactors_{epoch}.png'))
         plt.close()
 
+        model.ltri_matix()
+        precision = (model.prec_ltri @ model.prec_ltri.t()).numpy()
+        srt = np.concatenate([indcs.flatten(), indcs.flatten() + model.n_factors])
+        precision = precision[srt].T[srt]
+        partial_correlation = -precision / np.sqrt(np.outer(np.diag(precision), np.diag(precision)))
+        diag_indcs = np.arange(partial_correlation.shape[0])
+        partial_correlation[diag_indcs, diag_indcs] = np.abs(np.diag(partial_correlation))
+        plt.figure(figsize=(10, 10))
+        factors_per_area = model.n_factors // model.n_areas
+        ax = sns.heatmap(partial_correlation, annot=False, cmap="seismic", center=0, vmin=-1, vmax=1,
+                         xticklabels=factors_per_area, yticklabels=factors_per_area)
+        for i in range(factors_per_area, partial_correlation.shape[0], factors_per_area):
+            ax.axvline(i, color='black', linestyle='-', linewidth=0.5)
+            ax.axhline(i, color='black', linestyle='-', linewidth=0.5)
+        plt.title('Peak time partial correlation matrix')
+        plt.savefig(os.path.join(pcorr_dir, f'pcorr_{epoch}.png'))
+        plt.close()
+
+        covariance = (model.sigma_ltri @ model.sigma_ltri.t()).numpy()
+        covariance = covariance[srt].T[srt]
+        correlation = covariance / np.sqrt(np.outer(np.diag(covariance), np.diag(covariance)))
+        plt.figure(figsize=(10, 10))
+        factors_per_area = model.n_factors // model.n_areas
+        ax = sns.heatmap(correlation, annot=False, cmap="seismic", center=0, vmin=-1, vmax=1,
+                         xticklabels=factors_per_area, yticklabels=factors_per_area)
+        for i in range(factors_per_area, correlation.shape[0], factors_per_area):
+            ax.axvline(i, color='black', linestyle='-', linewidth=0.5)
+            ax.axhline(i, color='black', linestyle='-', linewidth=0.5)
+        plt.title('Peak time correlation matrix')
+        plt.savefig(os.path.join(corr_dir, f'corr_{epoch}.png'))
+        plt.close()
+
         avg_peak_times, left_landmarks, right_landmarks, s_new = model.compute_offsets_and_landmarks()
         warped_times = model.compute_warped_times(avg_peak_times, left_landmarks, right_landmarks, s_new)
         warped_times = warped_times.squeeze().reshape(*warped_times.shape[:2], -1)
@@ -434,7 +470,7 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
                 plt.subplot(factors_per_area, 2 * model.n_areas, c + 1)
                 counts, bin_edges = np.histogram(proposal_means[i], bins=30)
                 plt.bar(bin_edges[:-1], counts, width=np.diff(bin_edges), edgecolor='black', align='edge', alpha=0.7)
-                plt.xlabel('Trial peak times')
+                plt.xlabel('Trial peak offsets')
                 plt.ylabel('Frequency')
                 plt.xlim(left=-xlimit, right=xlimit)
                 # plt.ylim(bottom=-1e-5, top=100)
@@ -443,39 +479,87 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
                           f'Peak {p + 1} offsets', fontsize=20)
                 c += 1
         plt.tight_layout()
-        plt.savefig(os.path.join(proposal_means_dir, f'proposal_means_{epoch}.png'))
+        plt.savefig(os.path.join(trialOffsets_dir, f'trialOffsets_{epoch}.png'))
         plt.close()
 
-        model.ltri_matix()
-        precision = (model.prec_ltri @ model.prec_ltri.t()).numpy()
-        srt = np.concatenate([indcs.flatten(), indcs.flatten() + model.n_factors])
-        precision = precision[srt].T[srt]
-        partial_correlation = -precision / np.sqrt(np.outer(np.diag(precision), np.diag(precision)))
-        diag_indcs = np.arange(partial_correlation.shape[0])
-        partial_correlation[diag_indcs, diag_indcs] = np.abs(np.diag(partial_correlation))
-        plt.figure(figsize=(10, 10))
-        factors_per_area = model.n_factors // model.n_areas
-        ax = sns.heatmap(partial_correlation, annot=False, cmap="seismic", center=0, vmin=-1, vmax=1,
-                         xticklabels=factors_per_area, yticklabels=factors_per_area)
-        for i in range(factors_per_area, partial_correlation.shape[0], factors_per_area):
-            ax.axvline(i, color='black', linestyle='-', linewidth=0.5)
-            ax.axhline(i, color='black', linestyle='-', linewidth=0.5)
-        plt.title('Peak time partial correlation matrix')
-        plt.savefig(os.path.join(pcorr_dir, f'pcorr_{epoch}.png'))
+        if plot_data:
+            # scaled_data L x C x T
+            scaled_data = data.sum(dim=2) / (R * model.W_CKL.sum(dim=1).t().unsqueeze(-1).numpy())
+        # config_times L x C x 2
+        config_times = avg_peak_times.unsqueeze(0) + model.config_peak_offsets.numpy()
+        config_times = config_times.reshape(model.n_configs, 2, -1).permute(2, 0, 1)
+        plt.figure(figsize=(model.n_areas * 10, int(model.n_factors / model.n_areas) * 5))
+        c = 0
+        for l in L:
+            upper_limit = (4/5) * scaled_data[l].max()
+            plt.subplot(factors_per_area, model.n_areas, c + 1)
+            plt.vlines(x=model.time[torch.tensor([
+                model.left_landmarks_indx[l], model.right_landmarks_indx[l],
+                model.left_landmarks_indx[l+model.n_factors], model.right_landmarks_indx[l+model.n_factors]])],
+                       ymin=0, ymax=upper_limit, color='grey', linestyle='-', linewidth=3)
+            plt.vlines(x=[avg_peak_times[l], avg_peak_times[l + model.n_factors]],
+                       ymin=0, ymax=upper_limit, color='black', linestyle='-', linewidth=3)
+            plt.hlines(y=0, xmin=0, xmax=model.time[-1], color='white', linestyle='-', linewidth=2, alpha=0.5)
+            plt.plot(model.time, latent_factors[l, :], alpha=np.max([pi[l], 0.5]),
+                     linewidth=np.exp(1.5 * pi[l]))
+            for cnf in range(model.n_configs):
+                if plot_data:
+                    plt.plot(model.time, scaled_data[l, cnf], color='grey', alpha=0.4, linewidth=1, linestyle='--')
+                plt.vlines(x=config_times[l, cnf, 0], ymin=0, ymax=upper_limit,
+                           color='red', linestyle='--', alpha=0.5)
+                plt.vlines(x=config_times[l, cnf, 1], ymin=0, ymax=upper_limit,
+                           color='green', linestyle='--', alpha=0.5)
+            plt.xlabel('Intensity')
+            plt.ylabel('Trial time course (ms)')
+            plt.title(f'Factor {(l % factors_per_area) + 1}, '
+                      f'Area {unique_regions[l // factors_per_area]}, '
+                      f'Membership: {pi[l]:.2f}, '
+                      f'Count: {W_L[l]:.1f}', fontsize=20)
+            c += 1
+        plt.tight_layout()
+        plt.savefig(os.path.join(configPeaks_dir, f'configPeakTimes_{epoch}.png'))
         plt.close()
 
-        covariance = (model.sigma_ltri @ model.sigma_ltri.t()).numpy()
-        covariance = covariance[srt].T[srt]
-        correlation = covariance / np.sqrt(np.outer(np.diag(covariance), np.diag(covariance)))
-        plt.figure(figsize=(10, 10))
-        factors_per_area = model.n_factors // model.n_areas
-        ax = sns.heatmap(correlation, annot=False, cmap="seismic", center=0, vmin=-1, vmax=1,
-                         xticklabels=factors_per_area, yticklabels=factors_per_area)
-        for i in range(factors_per_area, correlation.shape[0], factors_per_area):
-            ax.axvline(i, color='black', linestyle='-', linewidth=0.5)
-            ax.axhline(i, color='black', linestyle='-', linewidth=0.5)
-        plt.title('Peak time correlation matrix')
-        plt.savefig(os.path.join(corr_dir, f'corr_{epoch}.png'))
+        config_offsets = model.config_peak_offsets.t().numpy()
+        plt.figure(figsize=(model.n_areas * 15, int(model.n_factors / model.n_areas) * 5))
+        c = 0
+        xlimit = np.abs(config_offsets).max()
+        for l in L:
+            for p in range(2):
+                i = l + p * model.n_factors
+                plt.subplot(factors_per_area, 2 * model.n_areas, c + 1)
+                counts, bin_edges = np.histogram(config_offsets[i], bins=30)
+                plt.bar(bin_edges[:-1], counts, width=np.diff(bin_edges), edgecolor='black', align='edge', alpha=0.7)
+                plt.xlabel('Config peak offsets')
+                plt.ylabel('Frequency')
+                plt.xlim(left=-xlimit, right=xlimit)
+                plt.title(f'Factor {(l % factors_per_area) + 1}, '
+                          f'Area {unique_regions[l // factors_per_area]}, '
+                          f'Peak {p + 1} offsets', fontsize=20)
+                c += 1
+        plt.tight_layout()
+        plt.savefig(os.path.join(configOffsets_dir, f'configOffsets_{epoch}.png'))
+        plt.close()
+
+        peak_offsets = (model.trial_peak_offset_proposal_means + model.config_peak_offsets.unsqueeze(0)).permute(2, 0, 1).reshape(2 * model.n_factors, -1).numpy()
+        plt.figure(figsize=(model.n_areas * 15, int(model.n_factors / model.n_areas) * 5))
+        c = 0
+        xlimit = np.abs(peak_offsets).max()
+        for l in L:
+            for p in range(2):
+                i = l + p * model.n_factors
+                plt.subplot(factors_per_area, 2 * model.n_areas, c + 1)
+                counts, bin_edges = np.histogram(peak_offsets[i], bins=30)
+                plt.bar(bin_edges[:-1], counts, width=np.diff(bin_edges), edgecolor='black', align='edge', alpha=0.7)
+                plt.xlabel('Peak offsets')
+                plt.ylabel('Frequency')
+                plt.xlim(left=-xlimit, right=xlimit)
+                plt.title(f'Factor {(l % factors_per_area) + 1}, '
+                          f'Area {unique_regions[l // factors_per_area]}, '
+                          f'Peak {p + 1} offsets', fontsize=20)
+                c += 1
+        plt.tight_layout()
+        plt.savefig(os.path.join(peakOffsets_dir, f'peakOffsets_{epoch}.png'))
         plt.close()
 
         alpha = F.softplus(model.alpha).numpy()
@@ -497,49 +581,6 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.title('Pi')
         plt.savefig(os.path.join(pi_dir, f'pi_{epoch}.png'))
         plt.close()
-
-        if plot_data:
-            # scaled_data L x C x T
-            scaled_data = data.sum(dim=2) / (R * model.W_CKL.sum(dim=1).t().unsqueeze(-1).numpy())
-        # config_times L x C x 2
-        config_times = avg_peak_times.unsqueeze(0) + model.config_peak_offsets.numpy()
-        config_times = config_times.reshape(model.n_configs, 2, -1).permute(2, 0, 1).numpy()
-        plt.figure(figsize=(model.n_areas * 10, int(model.n_factors / model.n_areas) * 5))
-        c = 0
-        for l in L:
-            plt.subplot(factors_per_area, model.n_areas, c + 1)
-            plt.vlines(x=model.time[torch.tensor([
-                model.left_landmarks_indx[l], model.right_landmarks_indx[l],
-                model.left_landmarks_indx[l+model.n_factors], model.right_landmarks_indx[l+model.n_factors]])],
-                       ymin=0, ymax=upper_limit,
-                       color='grey', linestyle='--', alpha=0.5)
-            plt.hlines(y=0, xmin=0, xmax=model.time[-1], color='white', linestyle='-', linewidth=2, alpha=0.5)
-            plt.plot(model.time, latent_factors[l, :], alpha=np.max([pi[l], 0.5]),
-                     linewidth=np.exp(1.5 * pi[l]))
-            for cnf in range(model.n_configs):
-                if plot_data:
-                    plt.plot(model.time, scaled_data[l, cnf], color='grey', alpha=0.4, linewidth=1, linestyle='--')
-                plt.vlines(x=config_times[l, cnf, 0], ymin=0, ymax=upper_limit,
-                           color='red', linestyle='--', alpha=0.5)
-                plt.vlines(x=config_times[l, cnf, 1], ymin=0, ymax=upper_limit,
-                           color='green', linestyle='--', alpha=0.5)
-            plt.xlabel('Intensity')
-            plt.ylabel('Trial time course (ms)')
-            plt.title(f'Factor {(l % factors_per_area) + 1}, '
-                      f'Area {unique_regions[l // factors_per_area]}, '
-                      f'Membership: {pi[l]:.2f}, '
-                      f'Count: {W_L[l]:.1f}', fontsize=20)
-            c += 1
-        plt.tight_layout()
-        plt.savefig(os.path.join(configoffset_dir, f'configoffset_{epoch}.png'))
-        plt.close()
-
-        # ltri = model.prec_ltri.flatten().numpy()
-        # plt.figure(figsize=(10, 10))
-        # plt.plot(ltri, label='Ltri')
-        # plt.title('Ltri')
-        # plt.savefig(os.path.join(ltri_dir, f'ltri_{epoch}.png'))
-        # plt.close()
 
         trial_SDs = model.trial_peak_offset_proposal_sds.flatten().numpy()
         plt.figure(figsize=(10, 10))
@@ -714,6 +755,8 @@ def plot_losses(true_likelihood, output_dir, name, metric, cutoff=0, merge=True)
     for run_fldr in run_folders:
         output_dir = os.path.join(parent_dir, run_fldr, 'json')
         json_path = os.path.join(output_dir, file_name)
+        if not os.path.exists(json_path):
+            continue
         with open(json_path, 'r') as file:
             metric_data.extend(json.load(file))
         epoch_json_path = os.path.join(output_dir, epoch_file_name)
@@ -783,23 +826,25 @@ def plot_grad_norms(norms_list, output_dir, name, cutoff=0, merge=True):
         for run_fldr in run_folders:
             output_dir = os.path.join(parent_dir, run_fldr, 'json')
             json_path = os.path.join(output_dir, file_name)
+            if not os.path.exists(json_path):
+                continue
             with open(json_path, 'r') as file:
                 metric_data.extend(json.load(file))
             epoch_json_path = os.path.join(output_dir, epoch_file_name)
             with open(epoch_json_path, 'r') as file:
                 epoch_data.extend(json.load(file))
-            metric_data = metric_data[cutoff:]
-            epoch_data = epoch_data[cutoff:]
-            plt.figure(figsize=(10, 6))
-            plt.plot(epoch_data, metric_data, label='grad norms')
-            plt.xlabel('Iterations')
-            plt.ylabel('Gradient Norm')
-            plt.title(f'Plot of {param} gradient norms')
-            plt.legend()
-            if cutoff > 0:
-                plt.savefig(os.path.join(plt_path, f'{param}_{name}_grad_norms_Trajectories_Cutoff{cutoff}.png'))
-            else:
-                plt.savefig(os.path.join(plt_path, f'{param}_{name}_grad_norms_Trajectories.png'))
+        metric_data = metric_data[cutoff:]
+        epoch_data = epoch_data[cutoff:]
+        plt.figure(figsize=(10, 6))
+        plt.plot(epoch_data, metric_data, label='grad norms')
+        plt.xlabel('Iterations')
+        plt.ylabel('Gradient Norm')
+        plt.title(f'Plot of {param} gradient norms')
+        plt.legend()
+        if cutoff > 0:
+            plt.savefig(os.path.join(plt_path, f'{param}_{name}_grad_norms_Trajectories_Cutoff{cutoff}.png'))
+        else:
+            plt.savefig(os.path.join(plt_path, f'{param}_{name}_grad_norms_Trajectories.png'))
 
 
 def compute_uncertainty(model, processed_inputs, output_dir, epoch):
@@ -1013,11 +1058,9 @@ def plot_training_epoch_results(input_dict):
     print('Plotting epoch results')
     Y, factor_access, unique_regions, output_dir, epoch = input_dict['Y'], input_dict['neuron_factor_access'], input_dict['unique_regions'], input_dict['output_dir'], input_dict['epoch']
     batch_grad_norms, grad_norms = input_dict['batch_grad_norms'], input_dict['grad_norms']
-    model_state, optimizer_state, scheduler_state, W_CKL, a_CKL, theta, pi, epoch = load_model_checkpoint(output_dir, epoch)
     model = LikelihoodELBOModel(**input_dict['model_params'])
     model.init_zero()
-    model.load_state_dict(model_state)
-    model.W_CKL, model.a_CKL, model.theta, model.pi = W_CKL, a_CKL, theta, pi
+    model, optimizer_state, scheduler_state, epoch = load_model_checkpoint(model, output_dir, epoch)
     likelihood_ground_truth_train, true_ELBO_train = input_dict['likelihood_ground_truth_train'], input_dict['true_ELBO_train']
     plot_outputs(model, unique_regions, output_dir, 'Train', epoch, Y=Y.to(model.W_CKL.dtype), factor_access=factor_access)
     plot_grad_norms(batch_grad_norms, output_dir, 'batch', 20, False)

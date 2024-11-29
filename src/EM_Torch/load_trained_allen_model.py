@@ -15,7 +15,7 @@ import threading
 outputs_folder = 'outputs'
 
 args = get_parser().parse_args()
-parser_key = ['ID', 'A', 'L', 'tauBeta', 'tauConfig', 'tauSigma', 'tauSD', 'posterior', 'iters', 'lr', 'maskLimit']
+parser_key = ['ID', 'A', 'L', 'tauBeta', 'tauConfig', 'tauSigma', 'tauPrec', 'tauSD', 'posterior', 'iters', 'lr', 'maskLimit']
 # args.folder_name = ''
 # args.load_run = 0
 # args.num_epochs = 0
@@ -33,6 +33,7 @@ if args.num_epochs >= 0:
 args.tau_beta = float(parser_dict['tauBeta'])
 args.tau_config = float(parser_dict['tauConfig'])
 args.tau_sigma = float(parser_dict['tauSigma'])
+args.tau_prec = float(parser_dict['tauPrec'])
 args.tau_sd = float(parser_dict['tauSD'])
 args.n_trial_samples = int(parser_dict['posterior'])  # Number of samples to generate for each trial
 peak1_left_landmarks = torch.tensor(parser_dict['peak1_left_landmarks'])
@@ -79,10 +80,8 @@ output_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, f'Run_{
 os.makedirs(output_dir, exist_ok=True)
 # Load the model
 load_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, f'Run_{args.load_run}')
-model_state, optimizer_state, scheduler_state, W_CKL, a_CKL, theta, pi, args.load_epoch = load_model_checkpoint(load_dir, args.load_epoch)
 model.init_zero()
-model.load_state_dict(model_state)
-model.W_CKL, model.a_CKL, model.theta, model.pi = W_CKL, a_CKL, theta, pi
+model, optimizer_state, scheduler_state, args.load_epoch = load_model_checkpoint(model, load_dir, args.load_epoch)
 if args.num_epochs < 0:
     model.cuda(move_to_cuda=args.cuda)
     se_dict = compute_uncertainty(model, processed_inputs_train, output_dir, args.load_epoch)
@@ -168,7 +167,7 @@ if __name__ == "__main__":
         model.cuda(move_to_cuda=args.cuda)
         optimizer.zero_grad()
         likelihood_term = model.forward(processed_inputs_train)
-        penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
+        penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_prec, args.tau_sd)
         loss = -(likelihood_term + penalty_term)
         loss.backward()
         optimizer.step()
@@ -182,9 +181,9 @@ if __name__ == "__main__":
         if epoch == start_epoch or epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             with torch.no_grad():
                 [grad_norms[name].append(model_named_parameters[name].grad.norm().item()) for name in grad_norms.keys()]
-                penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
                 likelihood_term = model.forward(processed_inputs_train, train=False)
                 true_likelihood_term = model.log_likelihood(processed_inputs_train)
+                penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_prec, args.tau_sd)
                 model_factor_assignment_train, model_neuron_gains_train = model.infer_latent_variables(processed_inputs_train)
                 losses_train.append((likelihood_term + penalty_term).item())
                 log_likelihoods_train.append((1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * likelihood_term.item())

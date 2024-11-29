@@ -18,7 +18,7 @@ args = get_parser().parse_args()
 args.data_seed = np.random.randint(0, 2 ** 32 - 1)
 
 args.n_trials = 15  # R
-args.n_configs = 5  # C
+args.n_configs = 10  # C
 args.K = 100  # K
 args.A = 3  # A
 args.L = 5  # L
@@ -32,6 +32,8 @@ args.n_trial_samples = 10  # Number of samples to generate for each trial
 # args.n_trial_samples = 1
 
 args.init = 'dtw'
+# args.init = 'mom'
+# args.init = 'dtw'
 # args.init = 'rand'
 # args.init = 'zero'
 # args.init = 'true'
@@ -42,9 +44,10 @@ args.eval_interval = 500
 args.lr = 0.0001
 args.num_epochs = 200000
 args.tau_beta = 500
-args.tau_config = 0
-args.tau_sigma = 1
-args.tau_sd = 1000
+args.tau_config = 500
+args.tau_sigma = 10
+args.tau_prec = 1
+args.tau_sd = 10000
 sd_init = 0.5
 args.notes = f'maskLimit{args.mask_neuron_threshold}_warping{int(args.time_warp)}'
 
@@ -68,9 +71,6 @@ data = DataAnalyzer().initialize(configs=args.n_configs, A=args.A, L=args.L, int
 # Training data
 Y_train, factor_access_train = data.sample_data(K=args.K, A=args.A, n_trials=args.n_trials)
 _, _, factor_assignment_onehot_train, neuron_gains_train, trial_offsets_train = to_cuda(load_tensors(data.get_sample_ground_truth()),
-                                                                                        move_to_cuda=args.cuda)
-constrained_trial_offsets_train, constrained_config_offsets_train = to_cuda(load_tensors((data.transform_peak_offsets(config_offsets=False),
-                                                                                          data.transform_peak_offsets(config_offsets=True))),
                                                                                         move_to_cuda=args.cuda)
 processed_inputs_train = preprocess_input_data(*to_cuda(load_tensors((Y_train, factor_access_train, data.dt)),
                                                         move_to_cuda=args.cuda), mask_threshold=args.mask_neuron_threshold)
@@ -113,12 +113,11 @@ with torch.no_grad():
     likelihood_ground_truth_train = model.log_likelihood(processed_inputs_train, E_step=True)
 true_ELBO_train = (1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * true_ELBO_train.item()
 likelihood_ground_truth_train = (1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * likelihood_ground_truth_train.item()
-ltri_matrix = model.ltri_matix()
-true_offset_penalty_train = (1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_train, ltri_matrix).sum().item()
+true_offset_penalty_train = (1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_train, model.prec_ltri).sum().item()
 model.cpu()
 args.folder_name = (
     f'Simulated_ID{args.data_seed}_Init{args.init}_K{args.K}_A{args.A}_C{args.n_configs}_L{args.L}'
-    f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauSD{args.tau_sd}'
+    f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauPrec{args.tau_prec}_tauSD{args.tau_sd}'
     f'_posterior{args.n_trial_samples}_iters{args.num_epochs}_lr{args.lr}_{args.notes}')
 output_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, 'Run_0')
 os.makedirs(output_dir, exist_ok=True)
@@ -231,7 +230,7 @@ if __name__ == "__main__":
         model.cuda(move_to_cuda=args.cuda)
         optimizer.zero_grad()
         likelihood_term = model.forward(processed_inputs_train)
-        penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
+        penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_prec, args.tau_sd)
         loss = -(likelihood_term + penalty_term)
         loss.backward()
         optimizer.step()
@@ -245,9 +244,9 @@ if __name__ == "__main__":
         if epoch == start_epoch or epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             with torch.no_grad():
                 [grad_norms[name].append(model_named_parameters[name].grad.norm().item()) for name in grad_norms.keys()]
-                penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
                 likelihood_term = model.forward(processed_inputs_train, train=False)
                 true_likelihood_term = model.log_likelihood(processed_inputs_train)
+                penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_prec, args.tau_sd)
                 model_factor_assignment_train, model_neuron_gains_train = model.infer_latent_variables(processed_inputs_train)
 
                 losses_train.append((likelihood_term + penalty_term).item())
@@ -272,7 +271,7 @@ if __name__ == "__main__":
                 pi_model = model.pi[non_zero_model_train[:, 2]]
                 pi_data = F.softmax(data.pi.reshape(args.A, -1), dim=1).flatten()[non_zero_data_train[:, 2]]
                 pi_mses.append(F.mse_loss(pi_model, pi_data).item())
-                ltri_matrix = model.ltri_matix()
+                ltri_matrix = model.sigma_ltri
                 ltri_model = ltri_matrix.reshape(ltri_matrix.shape[0], 2, model.n_factors)[:, :,
                              non_zero_model_train[:, 2]]
                 ltri_data = data.trial_peak_offset_covar_ltri.reshape(ltri_matrix.shape[0], 2,
@@ -285,25 +284,25 @@ if __name__ == "__main__":
                 Sigma_data = Sigma_data.reshape(ltri_matrix.shape[0], 2, model.n_factors)[:, :,
                              non_zero_data_train[:, 2]]
                 Sigma_mses.append(F.mse_loss(Sigma_model, Sigma_data).item())
-                config_model = model.transform_peak_offsets(config_offsets=True).reshape(model.config_peak_offsets.shape[0], 2,
+                config_model = model.config_peak_offsets.reshape(model.config_peak_offsets.shape[0], 2,
                                                                  model.n_factors)[non_zero_model_train[:, 0], :,
                                non_zero_model_train[:, 2]]
-                config_data = constrained_config_offsets_train.reshape(model.config_peak_offsets.shape[0], 2,
+                config_data = data.config_peak_offsets.reshape(model.config_peak_offsets.shape[0], 2,
                                                                model.n_factors)[non_zero_data_train[:, 0], :,
                               non_zero_data_train[:, 2]]
                 config_mses.append(F.mse_loss(config_model, config_data).item())
 
                 gains_train.append(F.mse_loss(neuron_gains_train, model_neuron_gains_train).item())
-                trial_offsets_data_train = constrained_trial_offsets_train.squeeze().permute(1, 0, 2).reshape(
+                trial_offsets_data_train = trial_offsets_train.squeeze().permute(1, 0, 2).reshape(
                     trial_offsets_train.shape[2],
                     trial_offsets_train.shape[1],
                     2, model.n_factors)[non_zero_data_train[:, 0], :, :, non_zero_data_train[:, 2]]
-                trial_offsets_proposal_means = model.transform_peak_offsets(config_offsets=False).squeeze().permute(1, 0, 2).reshape(
+                trial_offsets_proposal_means = model.trial_peak_offset_proposal_means.permute(1, 0, 2).reshape(
                     trial_offsets_train.shape[2],
                     trial_offsets_train.shape[1],
                     2, model.n_factors)[non_zero_data_train[:, 0], :, :, non_zero_data_train[:, 2]]
                 proposal_means_mses.append(F.mse_loss(trial_offsets_data_train, trial_offsets_proposal_means).item())
-                ltriLkhd_train.append((1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_train, ltri_matrix).sum().item())
+                ltriLkhd_train.append((1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_train, model.prec_ltri).sum().item())
 
         if epoch == start_epoch or epoch % args.log_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             end_time = time.time()  # Record the end time of the epoch

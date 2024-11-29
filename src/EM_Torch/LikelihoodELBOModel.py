@@ -2,7 +2,6 @@ import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributions import Normal
 import numpy as np
 import pickle
 torch.set_default_dtype(torch.float64)
@@ -75,6 +74,7 @@ class LikelihoodELBOModel(nn.Module):
         self.left_landmarks_indx = torch.cat([peak1_left_landmarks_indx, peak2_left_landmarks_indx])
         self.right_landmarks_indx = torch.cat([peak1_right_landmarks_indx, peak2_right_landmarks_indx])
         self.landmark_indx_speads = self.right_landmarks_indx - self.left_landmarks_indx + 1 # adding one because the last element is not included when indexing
+        self.half_warping_window = 0.3 * (self.time[self.right_landmarks_indx] - self.time[self.left_landmarks_indx]) / 4  # 0.3 is the standard deviation for the gaussian distribution such that 99.7% of the values are in the range [-1, 1]
         self.n_factors = n_factors
         self.n_areas = n_areas
         self.n_trial_samples = n_trial_samples
@@ -91,6 +91,8 @@ class LikelihoodELBOModel(nn.Module):
         self.W_CKL = None  # C x K x L
         self.a_CKL = None  # C x K x L
         self.log_sum_exp_U_tensor = None  # C x K x L
+        self.prec_ltri = None
+        self.sigma_ltri = None
 
         # Parameters
         self.beta = None  # AL x T
@@ -106,11 +108,9 @@ class LikelihoodELBOModel(nn.Module):
         self.beta = nn.Parameter(torch.log(torch.rand(self.n_factors, self.time.shape[0]-1)))
         self.alpha = nn.Parameter(torch.rand(self.n_factors))
         n_dims = 2 * self.n_factors
-        num_elements = n_dims * (n_dims - 1) // 2
         self.config_peak_offsets = nn.Parameter(torch.randn(self.n_configs, n_dims))
-        self.trial_peak_offset_covar_ltri_diag = nn.Parameter(torch.rand(n_dims)+1)
-        self.trial_peak_offset_covar_ltri_offdiag = nn.Parameter(torch.randn(num_elements))
-        self.trial_peak_offset_proposal_means = nn.Parameter(torch.randn(self.n_trials, self.n_configs, n_dims))
+        self.init_sigma_ltri(rand=True)
+        self.trial_peak_offset_proposal_means = nn.Parameter(self.init_trial_offsets())
         self.trial_peak_offset_proposal_sds = nn.Parameter(torch.rand(self.n_trials, self.n_configs, n_dims) + 1)
         self.pi = F.softmax(torch.randn(self.n_areas, self.n_factors // self.n_areas), dim=1).flatten()
         self.theta = torch.rand(self.n_factors)
@@ -121,15 +121,34 @@ class LikelihoodELBOModel(nn.Module):
         self.beta = nn.Parameter(torch.zeros(self.n_factors, self.time.shape[0]-1))
         self.alpha = nn.Parameter(torch.ones(self.n_factors))
         n_dims = 2 * self.n_factors
-        num_elements = n_dims * (n_dims - 1) // 2
         self.config_peak_offsets = nn.Parameter(torch.zeros(self.n_configs, n_dims))
-        self.trial_peak_offset_covar_ltri_diag = nn.Parameter(torch.ones(n_dims))
-        self.trial_peak_offset_covar_ltri_offdiag = nn.Parameter(torch.zeros(num_elements))
-        self.trial_peak_offset_proposal_means = nn.Parameter(torch.zeros(self.n_trials, self.n_configs, n_dims))
+        self.init_sigma_ltri()
+        self.trial_peak_offset_proposal_means = nn.Parameter(self.init_trial_offsets())
         self.trial_peak_offset_proposal_sds = nn.Parameter(torch.ones(self.n_trials, self.n_configs, n_dims))
         self.pi = F.softmax(torch.zeros(self.n_areas, self.n_factors // self.n_areas), dim=1).flatten()
         self.theta = torch.ones(self.n_factors)
         self.standard_init()
+
+
+    def init_sigma_ltri(self, ltri_matrix=None, rand=False):
+        n_dims = 2 * self.n_factors
+        if ltri_matrix is None:
+            if rand:
+                ltri_matrix = torch.tril(torch.randn(n_dims, n_dims))
+            else:
+                ltri_matrix = torch.eye(n_dims, n_dims)
+        sigma = ltri_matrix @ ltri_matrix.t()
+        corr = sigma / torch.outer(sigma.diag(), sigma.diag()).sqrt()
+        scaled_sigma = (corr * torch.outer(self.half_warping_window, self.half_warping_window)) + (torch.eye(n_dims, n_dims) * 1e-6)
+        sigma_ltri = torch.linalg.cholesky(scaled_sigma)
+        self.trial_peak_offset_covar_ltri_diag = nn.Parameter(sigma_ltri.diag())
+        indices = torch.tril_indices(row=n_dims, col=n_dims, offset=-1)
+        self.trial_peak_offset_covar_ltri_offdiag = nn.Parameter(sigma_ltri[indices[0], indices[1]])
+
+    def init_trial_offsets(self):
+        self.ltri_matix()
+        normal_samples = torch.randn((self.n_trials, self.n_configs, 2 * self.n_factors))
+        return torch.einsum('lj,rcj->rcl', self.sigma_ltri, normal_samples)
 
 
     def standard_init(self):
@@ -157,16 +176,15 @@ class LikelihoodELBOModel(nn.Module):
             self.validated_W_CKL(W_CKL)
         elif pi is not None:
             self.pi = pi
-        if trial_peak_offset_proposal_means is not None:
-            self.trial_peak_offset_proposal_means = nn.Parameter(trial_peak_offset_proposal_means)
         if sd_init is not None:
             self.trial_peak_offset_proposal_sds = nn.Parameter(sd_init * torch.ones(self.n_trials, self.n_configs, n_dims, device=self.device))
         if config_peak_offsets is not None:
             self.config_peak_offsets = nn.Parameter(config_peak_offsets)
         if trial_peak_offset_covar_ltri is not None:
-            self.trial_peak_offset_covar_ltri_diag = nn.Parameter(trial_peak_offset_covar_ltri.diag())
-            indices = torch.tril_indices(row=n_dims, col=n_dims, offset=-1)
-            self.trial_peak_offset_covar_ltri_offdiag = nn.Parameter(trial_peak_offset_covar_ltri[indices[0], indices[1]])
+            self.init_sigma_ltri(trial_peak_offset_covar_ltri)
+            self.trial_peak_offset_proposal_means = nn.Parameter(self.init_trial_offsets())
+        if trial_peak_offset_proposal_means is not None:
+            self.trial_peak_offset_proposal_means = nn.Parameter(trial_peak_offset_proposal_means)
 
 
     def init_from_data(self, Y, factor_access, sd_init, cluster_dir=None, init='zeros'):
@@ -218,6 +236,8 @@ class LikelihoodELBOModel(nn.Module):
         self.left_landmarks_indx = self.left_landmarks_indx.cuda(device)
         self.right_landmarks_indx = self.right_landmarks_indx.cuda(device)
         self.landmark_indx_speads = self.landmark_indx_speads.cuda(device)
+        self.prec_ltri = self.prec_ltri.cuda(device)
+        self.sigma_ltri = self.sigma_ltri.cuda(device)
         if self.theta is not None:
             self.theta = self.theta.cuda(device)
         if self.pi is not None:
@@ -240,6 +260,8 @@ class LikelihoodELBOModel(nn.Module):
         self.left_landmarks_indx = self.left_landmarks_indx.cpu()
         self.right_landmarks_indx = self.right_landmarks_indx.cpu()
         self.landmark_indx_speads = self.landmark_indx_speads.cpu()
+        self.prec_ltri = self.prec_ltri.cpu()
+        self.sigma_ltri = self.sigma_ltri.cpu()
         if self.theta is not None:
             self.theta = self.theta.cpu()
         if self.pi is not None:
@@ -266,7 +288,9 @@ class LikelihoodELBOModel(nn.Module):
         ltri_matrix[torch.arange(n_dims), torch.arange(n_dims)] = self.trial_peak_offset_covar_ltri_diag
         indices = torch.tril_indices(row=n_dims, col=n_dims, offset=-1)
         ltri_matrix[indices[0], indices[1]] = self.trial_peak_offset_covar_ltri_offdiag
-        return ltri_matrix
+        # We will call this Sigma
+        self.sigma_ltri = ltri_matrix
+        self.prec_ltri = torch.linalg.cholesky(torch.linalg.inv(ltri_matrix @ ltri_matrix.t()))
 
 
     def unnormalized_log_factors(self):
@@ -322,19 +346,6 @@ class LikelihoodELBOModel(nn.Module):
                                                        gaussian_sample * self.trial_peak_offset_proposal_sds.unsqueeze(0))
 
 
-    def transform_peak_offsets(self, config_offsets=False):
-        half_warping_window = (self.time[self.right_landmarks_indx] - self.time[self.left_landmarks_indx]) / 4
-        bounding_sigma = 0.1
-        max_scaling = 0.5
-        if config_offsets:
-            scaled_config_offsets = bounding_sigma * self.config_peak_offsets / (1e-20 + torch.var(self.config_peak_offsets, dim=0, keepdim=True)).sqrt()
-            peak_offsets = F.tanh(scaled_config_offsets) * half_warping_window.unsqueeze(0) / max_scaling
-        else:
-            scale_trial_offsets = bounding_sigma * self.trial_peak_offset_proposal_samples / (1e-20 + torch.var(self.trial_peak_offset_proposal_samples, dim=(0,1,2), keepdim=True)).sqrt()
-            peak_offsets = F.tanh(scale_trial_offsets) * half_warping_window.unsqueeze(0).unsqueeze(1).unsqueeze(2) / max_scaling
-        return peak_offsets
-
-
     def warp_all_latent_factors_for_all_trials(self):
         return self.compute_warped_factors(self.compute_warped_times(*self.compute_offsets_and_landmarks()))
 
@@ -350,11 +361,9 @@ class LikelihoodELBOModel(nn.Module):
         # avg_peak_times  # 1 x 1 x 1 x 2AL
         avg_peak_times = avg_peak_times.unsqueeze(0).unsqueeze(1).unsqueeze(2)
         self.generate_trial_peak_offset_samples()
-        # trial_offsets # N x R x C x 2AL
-        trial_offsets = self.transform_peak_offsets(config_offsets=False)
+        # trial_peak_offset_proposal_samples # N x R x C x 2AL
         # config_offsets  # 1 x 1 x C x 2AL
-        config_offsets = self.transform_peak_offsets(config_offsets=True).unsqueeze(0).unsqueeze(1)
-        s_new = avg_peak_times + trial_offsets + config_offsets
+        s_new = avg_peak_times + self.trial_peak_offset_proposal_samples + self.config_peak_offsets.unsqueeze(0).unsqueeze(1)
         left_landmarks = left_landmarks.unsqueeze(0).unsqueeze(1).unsqueeze(2)
         right_landmarks = right_landmarks.unsqueeze(0).unsqueeze(1).unsqueeze(2)
         s_new = torch.max(torch.stack([s_new, left_landmarks.expand_as(s_new) + self.dt], dim=0), dim=0).values
@@ -527,7 +536,7 @@ class LikelihoodELBOModel(nn.Module):
         log_gamma_alpha = torch.lgamma(alpha).unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(4)  # 1 x 1 x 1 x L x 1
         # trial_offsets # N x R x C x 2AL
         # neg_log_P # C x 1 x R x 1 x N
-        neg_log_P = self.Sigma_log_likelihood(self.transform_peak_offsets(config_offsets=False), self.ltri_matix()).unsqueeze(1).unsqueeze(3)
+        neg_log_P = self.Sigma_log_likelihood(self.trial_peak_offset_proposal_samples, self.prec_ltri).unsqueeze(1).unsqueeze(3)
         # neg_log_Q # C x 1 x R x 1 x N
         neg_log_Q = self.sd_log_likelihood(self.trial_peak_offset_proposal_samples).unsqueeze(1).unsqueeze(3)
         elbo = (Y_times_warped_beta - Y_sum_t_times_logsumexp_warped_beta + (1 / R) * (alpha_times_log_theta_plus_b_CKL -
@@ -538,7 +547,7 @@ class LikelihoodELBOModel(nn.Module):
 
     def Sigma_log_likelihood(self, trial_peak_offsets, ltri_matrix):
         n_dims = ltri_matrix.shape[0]  # 2AL
-        inv_Sigma = ltri_matrix @ ltri_matrix.t()
+        inv_Sigma = ltri_matrix @ ltri_matrix.t() # Precision matrix
         prod_term = torch.einsum('nrcl,lj,nrcj->crn', trial_peak_offsets, inv_Sigma, trial_peak_offsets)  # sum over l
         entropy_term = 0.5 * (n_dims * torch.log(torch.tensor(2 * torch.pi)) - torch.logdet(inv_Sigma) + prod_term)
         return entropy_term # C x R x N
@@ -554,29 +563,24 @@ class LikelihoodELBOModel(nn.Module):
         return entropy_term  # C x R x N
 
 
-    def compute_penalty_terms(self, tau_beta, tau_config, tau_sigma, tau_sd):
+    def compute_penalty_terms(self, tau_beta, tau_config, tau_sigma, tau_prec, tau_sd):
         # Penalty Terms
-        config_Penalty = - tau_config * (1/torch.prod(torch.tensor(self.config_peak_offsets.shape))) * torch.sum(self.config_peak_offsets * self.config_peak_offsets)
+        self.ltri_matix()
+        config_Penalty = - tau_config * (1/torch.prod(torch.tensor(self.config_peak_offsets.shape))) * torch.sum(self.config_peak_offsets**2)
         proposal_sd_penalty = - tau_sd * (1/torch.prod(torch.tensor(self.trial_peak_offset_proposal_sds.shape))) * torch.sum(self.trial_peak_offset_proposal_sds * self.trial_peak_offset_proposal_sds)
-        ltri_matrix = self.ltri_matix()
-        inv_Sigma = ltri_matrix @ ltri_matrix.t()
-        sigma_Penalty = -tau_sigma * (1/(torch.prod(torch.tensor(inv_Sigma.shape))-inv_Sigma.shape[0])) * (torch.sum(torch.abs(inv_Sigma)) - torch.sum(torch.abs(torch.diag(inv_Sigma))))
+        sigma = self.sigma_ltri @ self.sigma_ltri.t()
+        precision = self.prec_ltri @ self.prec_ltri.t()
+        prec_Penalty = -tau_prec * (1/(torch.prod(torch.tensor(precision.shape))-precision.shape[0])) * (torch.sum(torch.abs(precision)) - torch.sum(torch.abs(torch.diag(precision))))
+        sigma_Penalty = -tau_sigma * (1/sigma.shape[0]) * torch.sum(torch.diag(sigma)**2)
         factors = torch.softmax(self.unnormalized_log_factors(), dim=-1)
-        beta_s2_penalty = -tau_beta * (1/torch.prod(torch.tensor(factors.shape))) * torch.sum((factors @ self.Delta2TDelta2) * factors)
-        penalty_term = config_Penalty + sigma_Penalty + beta_s2_penalty + proposal_sd_penalty
+        beta_penalty = -tau_beta * (1/torch.prod(torch.tensor(factors.shape))) * torch.sum((factors @ self.Delta2TDelta2) * factors)
+        penalty_term = config_Penalty + prec_Penalty + sigma_Penalty + beta_penalty + proposal_sd_penalty
         return penalty_term
-
-
-    def infer_latent_variables(self, processed_inputs):
-        # likelihoods # C x K x L
-        neuron_factor_assignment = torch.round(F.softmax(self.W_CKL.reshape(self.W_CKL.shape[0], self.W_CKL.shape[1], self.n_areas, -1)*1e5, dim=-1).reshape(self.W_CKL.shape), decimals=1)
-        neuron_factor_assignment = neuron_factor_assignment * processed_inputs['neuron_factor_access']
-        neuron_firing_rates = torch.sum(self.a_CKL * self.W_CKL, dim=-1)
-        return neuron_factor_assignment, neuron_firing_rates
 
 
     def forward(self, processed_inputs, update_membership=True, train=True):
         self.train(train)
+        self.ltri_matix()
         processed_inputs = self.prepare_inputs(processed_inputs)
         if update_membership:
             self.E_step_posterior_updates(processed_inputs)
@@ -585,10 +589,19 @@ class LikelihoodELBOModel(nn.Module):
 
     def log_likelihood(self, processed_inputs, E_step=False):
         self.train(False)
+        self.ltri_matix()
         if E_step:
             processed_inputs = self.prepare_inputs(processed_inputs)
             self.E_step_posterior_updates(processed_inputs)
         # log_P  C x R
-        log_P = -self.Sigma_log_likelihood(self.transform_peak_offsets(config_offsets=False), self.ltri_matix()).squeeze()
+        log_P = -self.Sigma_log_likelihood(self.trial_peak_offset_proposal_samples, self.prec_ltri).squeeze()
         log_likelihood = torch.sum(self.log_sum_exp_U_tensor) + torch.sum(log_P)
         return log_likelihood
+
+
+    def infer_latent_variables(self, processed_inputs):
+        # likelihoods # C x K x L
+        neuron_factor_assignment = torch.round(F.softmax(self.W_CKL.reshape(self.W_CKL.shape[0], self.W_CKL.shape[1], self.n_areas, -1)*1e5, dim=-1).reshape(self.W_CKL.shape), decimals=1)
+        neuron_factor_assignment = neuron_factor_assignment * processed_inputs['neuron_factor_access']
+        neuron_firing_rates = torch.sum(self.a_CKL * self.W_CKL, dim=-1)
+        return neuron_factor_assignment, neuron_firing_rates

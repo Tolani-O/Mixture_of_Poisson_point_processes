@@ -36,6 +36,7 @@ def get_parser():
     parser.add_argument('--mask_neuron_threshold', type=int, default=0, help='If neuron spike count is below this, mask neuron')
     parser.add_argument('--tau_config', type=float, default=0.5, help='Value for tau_config')
     parser.add_argument('--tau_sigma', type=float, default=0.5, help='Value for tau_sigma')
+    parser.add_argument('--tau_prec', type=float, default=0.5, help='Value for tau_prec')
     parser.add_argument('--tau_sd', type=float, default=0.5, help='Value for tau_sd')
     parser.add_argument('--tau_beta', type=float, default=0.5, help='Value for tau_beta')
     parser.add_argument('--num_epochs', type=int, default=-1, help='Number of training epochs. '
@@ -288,8 +289,8 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
     os.makedirs(pi_dir, exist_ok=True)
     configoffset_dir = os.path.join(output_dir, 'configoffset')
     os.makedirs(configoffset_dir, exist_ok=True)
-    ltri_dir = os.path.join(output_dir, 'ltri')
-    os.makedirs(ltri_dir, exist_ok=True)
+    # ltri_dir = os.path.join(output_dir, 'ltri')
+    # os.makedirs(ltri_dir, exist_ok=True)
     pcorr_dir = os.path.join(output_dir, 'pcorr')
     os.makedirs(pcorr_dir, exist_ok=True)
     corr_dir = os.path.join(output_dir, 'corr')
@@ -423,7 +424,7 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(warp_time_dir, f'warped_times_{epoch}.png'))
         plt.close()
 
-        proposal_means = model.transform_peak_offsets().squeeze().permute(2, 0, 1).reshape(warped_times.shape[0], -1)
+        proposal_means = model.trial_peak_offset_proposal_means.permute(2, 0, 1).reshape(2*model.n_factors, -1)
         plt.figure(figsize=(model.n_areas * 15, int(model.n_factors / model.n_areas) * 5))
         c = 0
         xlimit = proposal_means.abs().max().item()
@@ -445,8 +446,8 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(proposal_means_dir, f'proposal_means_{epoch}.png'))
         plt.close()
 
-        ltri_matrix = model.ltri_matix('cpu').numpy()
-        precision = ltri_matrix @ ltri_matrix.T
+        model.ltri_matix()
+        precision = (model.prec_ltri @ model.prec_ltri.t()).numpy()
         srt = np.concatenate([indcs.flatten(), indcs.flatten() + model.n_factors])
         precision = precision[srt].T[srt]
         partial_correlation = -precision / np.sqrt(np.outer(np.diag(precision), np.diag(precision)))
@@ -463,7 +464,8 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(pcorr_dir, f'pcorr_{epoch}.png'))
         plt.close()
 
-        covariance = np.linalg.inv(precision)
+        covariance = (model.sigma_ltri @ model.sigma_ltri.t()).numpy()
+        covariance = covariance[srt].T[srt]
         correlation = covariance / np.sqrt(np.outer(np.diag(covariance), np.diag(covariance)))
         plt.figure(figsize=(10, 10))
         factors_per_area = model.n_factors // model.n_areas
@@ -500,7 +502,7 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
             # scaled_data L x C x T
             scaled_data = data.sum(dim=2) / (R * model.W_CKL.sum(dim=1).t().unsqueeze(-1).numpy())
         # config_times L x C x 2
-        config_times = avg_peak_times.unsqueeze(0) + model.transform_peak_offsets(config_offsets=True).numpy()
+        config_times = avg_peak_times.unsqueeze(0) + model.config_peak_offsets.numpy()
         config_times = config_times.reshape(model.n_configs, 2, -1).permute(2, 0, 1).numpy()
         plt.figure(figsize=(model.n_areas * 10, int(model.n_factors / model.n_areas) * 5))
         c = 0
@@ -532,12 +534,12 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(configoffset_dir, f'configoffset_{epoch}.png'))
         plt.close()
 
-        ltri = model.ltri_matix('cpu').flatten().numpy()
-        plt.figure(figsize=(10, 10))
-        plt.plot(ltri, label='Ltri')
-        plt.title('Ltri')
-        plt.savefig(os.path.join(ltri_dir, f'ltri_{epoch}.png'))
-        plt.close()
+        # ltri = model.prec_ltri.flatten().numpy()
+        # plt.figure(figsize=(10, 10))
+        # plt.plot(ltri, label='Ltri')
+        # plt.title('Ltri')
+        # plt.savefig(os.path.join(ltri_dir, f'ltri_{epoch}.png'))
+        # plt.close()
 
         trial_SDs = model.trial_peak_offset_proposal_sds.flatten().numpy()
         plt.figure(figsize=(10, 10))

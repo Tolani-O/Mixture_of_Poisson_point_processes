@@ -25,9 +25,10 @@ args.lr = 0.0001
 args.num_epochs = 200000
 args.mask_neuron_threshold = 10
 args.tau_beta = 500
-args.tau_config = 0
-args.tau_sigma = 1
-args.tau_sd = 1000
+args.tau_config = 500
+args.tau_sigma = 10
+args.tau_prec = 1
+args.tau_sd = 10000
 # args.L = 5
 args.n_trial_samples = 7  # Number of samples to generate for each trial
 sd_init = 0.5
@@ -42,7 +43,7 @@ args.notes = f'maskLimit{args.mask_neuron_threshold}'
 
 regions = None
 conditions = None
-regions = ['VISp', 'VISl', 'VISal']
+# regions = ['VISp', 'VISl', 'VISal']
 # conditions = [246, 251]
 
 if args.eval_interval > args.log_interval:
@@ -106,7 +107,7 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
                                                        threshold=args.scheduler_threshold)
 args.folder_name = (
     f'Real_ID{args.data_seed}_Init{args.init}_K{args.K}_A{args.A}_C{args.n_configs}_L{args.L}'
-    f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauSD{args.tau_sd}'
+    f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauPrec{args.tau_prec}_tauSD{args.tau_sd}'
     f'_posterior{args.n_trial_samples}_iters{args.num_epochs}_lr{args.lr}_{args.notes}')
 output_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, 'Run_0')
 os.makedirs(output_dir, exist_ok=True)
@@ -173,7 +174,7 @@ if __name__ == "__main__":
         model.cuda(move_to_cuda=args.cuda)
         optimizer.zero_grad()
         likelihood_term = model.forward(processed_inputs_train)
-        penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
+        penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_prec, args.tau_sd)
         loss = -(likelihood_term + penalty_term)
         loss.backward()
         optimizer.step()
@@ -187,9 +188,9 @@ if __name__ == "__main__":
         if epoch == start_epoch or epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             with torch.no_grad():
                 [grad_norms[name].append(model_named_parameters[name].grad.norm().item()) for name in grad_norms.keys()]
-                penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_sd)
                 likelihood_term = model.forward(processed_inputs_train, train=False)
                 true_likelihood_term = model.log_likelihood(processed_inputs_train)
+                penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_prec, args.tau_sd)
                 model_factor_assignment_train, model_neuron_gains_train = model.infer_latent_variables(processed_inputs_train)
                 losses_train.append((likelihood_term + penalty_term).item())
                 log_likelihoods_train.append((1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * likelihood_term.item())

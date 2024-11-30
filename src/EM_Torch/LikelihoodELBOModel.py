@@ -44,7 +44,7 @@ def create_second_diff_matrix(P):
 class LikelihoodELBOModel(nn.Module):
     def __init__(self, time, n_factors, n_areas, n_configs, n_trials, n_trial_samples,
                  peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
-                 temperature=None, weights=None):
+                 temperature=None, weights=None, adjust_landmarks=False):
         super(LikelihoodELBOModel, self).__init__()
 
         self.device = 'cpu'
@@ -80,6 +80,7 @@ class LikelihoodELBOModel(nn.Module):
         self.n_trial_samples = n_trial_samples
         self.n_configs = n_configs
         self.n_trials = n_trials
+        self.adjust_landmarks = adjust_landmarks
         Delta2 = create_second_diff_matrix(T)
         self.Delta2TDelta2 = torch.tensor(Delta2.T @ Delta2)  # T x T # tikhonov regularization
 
@@ -222,6 +223,20 @@ class LikelihoodELBOModel(nn.Module):
         self.init_ground_truth(beta=beta, alpha=alpha, theta=theta, sd_init=sd_init, W_CKL=W_CKL, init=init)
         Y_sum_rt_plus_alpha = Y.sum(dim=(1,2)).t().unsqueeze(-1) + alpha.unsqueeze(0).unsqueeze(1)  # C x K x L
         self.update_params(Y_sum_rt_plus_alpha, factor_access, R)
+
+
+    def update(self):
+        if self.adjust_landmarks:
+            with torch.no_grad():
+                steps = self.left_landmarks_indx[self.n_factors:] - self.right_landmarks_indx[:self.n_factors]
+                factors = torch.cat([torch.exp(self.unnormalized_log_factors())] * 2, dim=0)
+                avg_peak_times_indx = torch.tensor([self.left_landmarks_indx[i] + torch.argmax(factors[i, self.left_landmarks_indx[i]:self.right_landmarks_indx[i]])for i in range(2 * self.n_factors)])
+                peal1_right_landmark_indx = torch.tensor([avg_peak_times_indx[l] + self.beta[l, avg_peak_times_indx[l]:avg_peak_times_indx[l+self.n_factors]].argmin().item() for l in range(self.n_factors)])
+                peak2_left_landmark_indx = peal1_right_landmark_indx + steps
+                self.right_landmarks_indx[:self.n_factors] = peal1_right_landmark_indx
+                self.left_landmarks_indx[self.n_factors:] = peak2_left_landmark_indx
+                self.landmark_indx_speads = self.right_landmarks_indx - self.left_landmarks_indx + 1
+                self.half_warping_window = 0.3 * (self.time[self.right_landmarks_indx] - self.time[self.left_landmarks_indx]) / 4
 
 
     # move to cuda flag tells the function whether gpus are available
@@ -566,7 +581,7 @@ class LikelihoodELBOModel(nn.Module):
     def compute_penalty_terms(self, tau_beta, tau_config, tau_sigma, tau_prec, tau_sd):
         # Penalty Terms
         self.ltri_matix()
-        config_Penalty = - tau_config * (1/torch.prod(torch.tensor(self.config_peak_offsets.shape))) * torch.sum(self.config_peak_offsets**2)
+        config_Penalty = - tau_config * (1/torch.prod(torch.tensor(self.config_peak_offsets.shape))) * torch.sum(self.config_peak_offsets.abs().exp())
         proposal_sd_penalty = - tau_sd * (1/torch.prod(torch.tensor(self.trial_peak_offset_proposal_sds.shape))) * torch.sum(self.trial_peak_offset_proposal_sds * self.trial_peak_offset_proposal_sds)
         sigma = self.sigma_ltri @ self.sigma_ltri.t()
         precision = self.prec_ltri @ self.prec_ltri.t()

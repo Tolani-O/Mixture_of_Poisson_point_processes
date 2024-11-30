@@ -511,6 +511,7 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
                            color='green', linestyle='--', alpha=0.5)
             plt.xlabel('Intensity')
             plt.ylabel('Trial time course (ms)')
+            plt.ylim(bottom=lower_limit, top=upper_limit)
             plt.title(f'Factor {(l % factors_per_area) + 1}, '
                       f'Area {unique_regions[l // factors_per_area]}, '
                       f'Membership: {pi[l]:.2f}, '

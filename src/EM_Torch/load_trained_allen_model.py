@@ -75,13 +75,14 @@ num_factors = factor_access_train.shape[-1]
 args.A = int(num_factors/args.L)
 model = LikelihoodELBOModel(timeCourse, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
                             peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
-                            temperature=args.temperature, weights=args.weights)
+                            temperature=args.temperature, weights=args.weights, adjust_landmarks=True)
 output_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, f'Run_{args.load_run + 1}')
 os.makedirs(output_dir, exist_ok=True)
 # Load the model
 load_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, f'Run_{args.load_run}')
 model.init_zero()
 model, optimizer_state, scheduler_state, args.load_epoch = load_model_checkpoint(model, load_dir, args.load_epoch)
+model.update()
 if args.num_epochs < 0:
     model.cuda(move_to_cuda=args.cuda)
     se_dict = compute_uncertainty(model, processed_inputs_train, output_dir, args.load_epoch)
@@ -104,12 +105,16 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
                                                        patience=patience, threshold_mode='abs',
                                                        threshold=args.scheduler_threshold)
 scheduler.load_state_dict(scheduler_state)
+peak1_left_landmarks = model.time[model.left_landmarks_indx[:model.n_factors]]
+peak1_right_landmarks = model.time[model.right_landmarks_indx[:model.n_factors]]
+peak2_left_landmarks = model.time[model.left_landmarks_indx[model.n_factors:]]
+peak2_right_landmarks = model.time[model.right_landmarks_indx[model.n_factors:]]
 output_str = (f"Using CUDA: {args.cuda}\n"
               f"Num available GPUs: {torch.cuda.device_count()}\n"
-              f"peak1_left_landmarks:\n{model.time[model.left_landmarks_indx[:model.n_factors]].reshape(model.n_areas, -1).numpy()}\n"
-              f"peak1_right_landmarks:\n{model.time[model.right_landmarks_indx[:model.n_factors]].reshape(model.n_areas, -1).numpy()}\n"
-              f"peak2_left_landmarks:\n{model.time[model.left_landmarks_indx[model.n_factors:]].reshape(model.n_areas, -1).numpy()}\n"
-              f"peak2_right_landmarks:\n{model.time[model.right_landmarks_indx[model.n_factors:]].reshape(model.n_areas, -1).numpy()}\n\n")
+              f"peak1_left_landmarks:\n{peak1_left_landmarks.reshape(model.n_areas, -1).numpy()}\n"
+              f"peak1_right_landmarks:\n{peak1_right_landmarks.reshape(model.n_areas, -1).numpy()}\n"
+              f"peak2_left_landmarks:\n{peak1_right_landmarks.reshape(model.n_areas, -1).numpy()}\n"
+              f"peak2_right_landmarks:\n{peak2_right_landmarks.reshape(model.n_areas, -1).numpy()}\n\n")
 round_decimals = len(str(dt).split('.')[1])
 params = {
     'peak1_left_landmarks': peak1_left_landmarks.round(decimals=round_decimals).tolist(),

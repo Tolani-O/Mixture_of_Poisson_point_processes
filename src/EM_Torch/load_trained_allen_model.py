@@ -113,7 +113,7 @@ output_str = (f"Using CUDA: {args.cuda}\n"
               f"Num available GPUs: {torch.cuda.device_count()}\n"
               f"peak1_left_landmarks:\n{peak1_left_landmarks.reshape(model.n_areas, -1).numpy()}\n"
               f"peak1_right_landmarks:\n{peak1_right_landmarks.reshape(model.n_areas, -1).numpy()}\n"
-              f"peak2_left_landmarks:\n{peak1_right_landmarks.reshape(model.n_areas, -1).numpy()}\n"
+              f"peak2_left_landmarks:\n{peak2_left_landmarks.reshape(model.n_areas, -1).numpy()}\n"
               f"peak2_right_landmarks:\n{peak2_right_landmarks.reshape(model.n_areas, -1).numpy()}\n\n")
 round_decimals = len(str(dt).split('.')[1])
 params = {

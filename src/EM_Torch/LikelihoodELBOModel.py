@@ -286,6 +286,7 @@ class LikelihoodELBOModel(nn.Module):
         self.left_landmarks_indx = self.left_landmarks_indx.cuda(device)
         self.right_landmarks_indx = self.right_landmarks_indx.cuda(device)
         self.landmark_indx_speads = self.landmark_indx_speads.cuda(device)
+        self.half_warping_window = self.half_warping_window.cuda(device)
         self.prec_ltri = self.prec_ltri.cuda(device)
         self.sigma_ltri = self.sigma_ltri.cuda(device)
         if self.theta is not None:
@@ -311,6 +312,7 @@ class LikelihoodELBOModel(nn.Module):
         self.left_landmarks_indx = self.left_landmarks_indx.cpu()
         self.right_landmarks_indx = self.right_landmarks_indx.cpu()
         self.landmark_indx_speads = self.landmark_indx_speads.cpu()
+        self.half_warping_window = self.half_warping_window.cpu()
         self.prec_ltri = self.prec_ltri.cpu()
         self.sigma_ltri = self.sigma_ltri.cpu()
         if self.theta is not None:
@@ -417,8 +419,8 @@ class LikelihoodELBOModel(nn.Module):
         s_new = avg_peak_times + self.trial_peak_offset_proposal_samples + self.config_peak_offsets.unsqueeze(0).unsqueeze(1)
         left_landmarks = left_landmarks.unsqueeze(0).unsqueeze(1).unsqueeze(2)
         right_landmarks = right_landmarks.unsqueeze(0).unsqueeze(1).unsqueeze(2)
-        s_new = torch.max(torch.stack([s_new, left_landmarks.expand_as(s_new) + self.dt], dim=0), dim=0).values
-        s_new = torch.min(torch.stack([s_new, right_landmarks.expand_as(s_new) - self.dt], dim=0), dim=0).values
+        squash_mask = ((s_new <= left_landmarks) | (s_new >= right_landmarks)).to(device=self.device)
+        s_new[squash_mask] = F.tanh(s_new[squash_mask]) * self.half_warping_window.unsqueeze(0).unsqueeze(1).unsqueeze(2).expand_as(s_new)[squash_mask]
         return avg_peak_times, left_landmarks, right_landmarks, s_new
 
 

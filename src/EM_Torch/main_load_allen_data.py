@@ -25,8 +25,8 @@ args.lr = 0.0001
 args.num_epochs = 200000
 args.mask_neuron_threshold = 10
 args.tau_beta = 500
-args.tau_config = 500
-# args.tau_sigma = 10
+args.tau_config = 50000
+args.tau_sigma = 10000
 args.tau_prec = 1
 args.tau_sd = 10000
 # args.L = 5
@@ -37,7 +37,7 @@ peak1_right_landmarks_start = 0.1
 # args.landmark_step = 14
 peak1_left_landmarks = torch.cat([torch.tensor([0.006] * args.L)] * args.A)
 peak1_right_landmarks = torch.cat([peak1_right_landmarks_start + torch.arange(0, args.landmark_step*dt*args.L, args.landmark_step*dt)] * args.A)
-peak2_left_landmarks = torch.cat([peak1_right_landmarks + 4*dt] * args.A)
+peak2_left_landmarks = peak1_right_landmarks + 4*dt
 peak2_right_landmarks = torch.cat([torch.tensor([0.34] * args.L)] * args.A)
 args.notes = f'maskLimit{args.mask_neuron_threshold}'
 
@@ -100,7 +100,7 @@ elif args.init.lower() == 'dtw':
 elif args.init.lower() == 'mom':
     model.init_from_data(Y=Y_train, factor_access=factor_access_train, sd_init=sd_init, init=the_rest)
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-patience = args.scheduler_patience//args.eval_interval
+patience = args.scheduler_patience // args.eval_interval
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
                                                        factor=args.scheduler_factor,
                                                        patience=patience, threshold_mode='abs',
@@ -111,12 +111,16 @@ args.folder_name = (
     f'_posterior{args.n_trial_samples}_iters{args.num_epochs}_lr{args.lr}_{args.notes}')
 output_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, 'Run_0')
 os.makedirs(output_dir, exist_ok=True)
+peak1_left_landmarks = model.time[model.left_landmarks_indx[:model.n_factors]]
+peak1_right_landmarks = model.time[model.right_landmarks_indx[:model.n_factors]]
+peak2_left_landmarks = model.time[model.left_landmarks_indx[model.n_factors:]]
+peak2_right_landmarks = model.time[model.right_landmarks_indx[model.n_factors:]]
 output_str = (f"Using CUDA: {args.cuda}\n"
               f"Num available GPUs: {torch.cuda.device_count()}\n"
-              f"peak1_left_landmarks:\n{model.time[model.left_landmarks_indx[:model.n_factors]].reshape(model.n_areas, -1).numpy()}\n"
-              f"peak1_right_landmarks:\n{model.time[model.right_landmarks_indx[:model.n_factors]].reshape(model.n_areas, -1).numpy()}\n"
-              f"peak2_left_landmarks:\n{model.time[model.left_landmarks_indx[model.n_factors:]].reshape(model.n_areas, -1).numpy()}\n"
-              f"peak2_right_landmarks:\n{model.time[model.right_landmarks_indx[model.n_factors:]].reshape(model.n_areas, -1).numpy()}\n\n")
+              f"peak1_left_landmarks:\n{peak1_left_landmarks.reshape(model.n_areas, -1).numpy()}\n"
+              f"peak1_right_landmarks:\n{peak1_right_landmarks.reshape(model.n_areas, -1).numpy()}\n"
+              f"peak2_left_landmarks:\n{peak2_left_landmarks.reshape(model.n_areas, -1).numpy()}\n"
+              f"peak2_right_landmarks:\n{peak2_right_landmarks.reshape(model.n_areas, -1).numpy()}\n\n")
 round_decimals = len(str(dt).split('.')[1])
 params = {
     'peak1_left_landmarks': peak1_left_landmarks.round(decimals=round_decimals).tolist(),

@@ -619,14 +619,14 @@ class LikelihoodELBOModel(nn.Module):
     def compute_penalty_terms(self, tau_beta, tau_config, tau_sigma, tau_prec, tau_sd):
         # Penalty Terms
         self.ltri_matix()
-        config_Penalty = - tau_config * (1/torch.prod(torch.tensor(self.config_peak_offsets.shape))) * torch.sum(self.config_peak_offsets.abs().exp())
-        proposal_sd_penalty = - tau_sd * (1/torch.prod(torch.tensor(self.trial_peak_offset_proposal_sds.shape))) * torch.sum(self.trial_peak_offset_proposal_sds * self.trial_peak_offset_proposal_sds)
+        config_Penalty = - tau_config * (1/torch.prod(torch.tensor(self.config_peak_offsets.shape))) * self.config_peak_offsets.abs().sum()  # L1 penalty
+        proposal_sd_penalty = - tau_sd * (1/torch.prod(torch.tensor(self.trial_peak_offset_proposal_sds.shape))) * (self.trial_peak_offset_proposal_sds**2).sum()  # L2 penalty
         sigma = self.sigma_ltri @ self.sigma_ltri.t()
         precision = self.prec_ltri @ self.prec_ltri.t()
-        prec_Penalty = -tau_prec * (1/(torch.prod(torch.tensor(precision.shape))-precision.shape[0])) * (torch.sum(torch.abs(precision)) - torch.sum(torch.abs(torch.diag(precision))))
-        sigma_Penalty = -tau_sigma * (1/sigma.shape[0]) * torch.sum(torch.diag(sigma)**2)
+        prec_Penalty = -tau_prec * (1/(torch.prod(torch.tensor(precision.shape))-precision.shape[0])) * precision.abs().sum() - precision.diag().abs().sum()  # L1 penalty
+        sigma_Penalty = -tau_sigma * (1/sigma.shape[0]) * (sigma.diag()**2).sum()  # L2 penalty
         factors = torch.softmax(self.unnormalized_log_factors(), dim=-1)
-        beta_penalty = -tau_beta * (1/torch.prod(torch.tensor(factors.shape))) * torch.sum((factors @ self.Delta2TDelta2) * factors)
+        beta_penalty = -tau_beta * (1/torch.prod(torch.tensor(factors.shape))) * ((factors @ self.Delta2TDelta2) * factors).sum()
         penalty_term = config_Penalty + prec_Penalty + sigma_Penalty + beta_penalty + proposal_sd_penalty
         return penalty_term
 

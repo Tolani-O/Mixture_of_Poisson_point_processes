@@ -64,13 +64,9 @@ class LikelihoodELBOModel(nn.Module):
         self.dt = torch.round(time[1] - time[0], decimals=3)
         T = time.shape[0]
         peak1_left_landmarks_indx = torch.searchsorted(self.time, peak1_left_landmarks, side='left')
-        peak1_left_landmarks_indx = torch.cat([peak1_left_landmarks_indx] * n_areas)
         peak1_right_landmarks_indx = torch.searchsorted(self.time, peak1_right_landmarks, side='left')
-        peak1_right_landmarks_indx = torch.cat([peak1_right_landmarks_indx] * n_areas)
         peak2_left_landmarks_indx = torch.searchsorted(self.time, peak2_left_landmarks, side='left')
-        peak2_left_landmarks_indx = torch.cat([peak2_left_landmarks_indx] * n_areas)
         peak2_right_landmarks_indx = torch.searchsorted(self.time, peak2_right_landmarks, side='left')
-        peak2_right_landmarks_indx = torch.cat([peak2_right_landmarks_indx] * n_areas)
         self.left_landmarks_indx = torch.cat([peak1_left_landmarks_indx, peak2_left_landmarks_indx])
         self.right_landmarks_indx = torch.cat([peak1_right_landmarks_indx, peak2_right_landmarks_indx])
         self.landmark_indx_speads = self.right_landmarks_indx - self.left_landmarks_indx + 1 # adding one because the last element is not included when indexing
@@ -81,8 +77,8 @@ class LikelihoodELBOModel(nn.Module):
         self.n_configs = n_configs
         self.n_trials = n_trials
         self.adjust_landmarks = adjust_landmarks
-        Delta2 = create_second_diff_matrix(T)
-        self.Delta2TDelta2 = torch.tensor(Delta2.T @ Delta2)  # T x T # tikhonov regularization
+        self.Delta2 = torch.tensor(create_second_diff_matrix(T))
+        self.Delta2TDelta2 = self.Delta2.T @ self.Delta2  # T x T # tikhonov regularization
 
         # Storage for use in the forward pass
         self.trial_peak_offset_proposal_samples = None  # N x R x C x 2AL
@@ -224,14 +220,52 @@ class LikelihoodELBOModel(nn.Module):
         Y_sum_rt_plus_alpha = Y.sum(dim=(1,2)).t().unsqueeze(-1) + alpha.unsqueeze(0).unsqueeze(1)  # C x K x L
         self.update_params(Y_sum_rt_plus_alpha, factor_access, R)
 
+    def find_factor_peaks(self, top_k=2, half_window=4, sigma=2):
+        factors = self.unnormalized_log_factors().exp()
+        hess = -(self.Delta2 @ factors.t()).t()
+        radius = int(3 * sigma)
+        x = torch.arange(-radius, radius + 1, dtype=torch.float64)
+        kernel = torch.exp(-0.5 * (x / sigma) ** 2).to(device=self.device)
+        kernel /= kernel.sum()
+        kernel = kernel.view(1, 1, -1)  # Reshape for convolution
+        # Apply convolution
+        padding = (kernel.size(-1) // 2,)
+        second_derivative = F.conv1d(hess.unsqueeze(1), kernel, padding=padding, groups=1).squeeze(1)
+        # Identify peaks
+        peaks = (second_derivative[:, 1:-1] > second_derivative[:, :-2]) & (second_derivative[:, 1:-1] > second_derivative[:, 2:])
+        peak_indices = [torch.nonzero(row).squeeze() + 1 for row in peaks]
+        # Collect top K peaks for each row
+        top_peak_indices = []
+        top_peak_values = []
+        top_peak_times = []
+        for i, indices in enumerate(peak_indices):
+            if indices.numel() > 0:  # Ensure there are peaks
+                # Get values of the peaks
+                peak_values = second_derivative[i, indices]
+                # Sort by values and select top K
+                sorted_indices = torch.argsort(peak_values, descending=True)[:top_k]
+                top_indices = indices[sorted_indices].sort().values
+                final_indices = []
+                for j in top_indices:
+                    search_span = np.arange(j-half_window, j+half_window)
+                    final_indices.append(search_span[torch.argmax(factors[i, search_span])])
+                top_peak_indices.append(torch.tensor(final_indices))
+                top_peak_values.append(factors[i, final_indices])
+                top_peak_times.append(self.time[final_indices])
+            else:
+                # No peaks found
+                top_peak_indices.append(torch.tensor([]))
+                top_peak_values.append(torch.tensor([]))
+                top_peak_times.append(torch.tensor([]))
+        return torch.stack(top_peak_indices), torch.stack(top_peak_values), torch.stack(top_peak_times)
+
 
     def update(self):
         if self.adjust_landmarks:
             with torch.no_grad():
+                top_peak_indices, top_peak_values, top_peak_times = self.find_factor_peaks()
                 steps = self.left_landmarks_indx[self.n_factors:] - self.right_landmarks_indx[:self.n_factors]
-                factors = torch.cat([torch.exp(self.unnormalized_log_factors())] * 2, dim=0)
-                avg_peak_times_indx = torch.tensor([self.left_landmarks_indx[i] + torch.argmax(factors[i, self.left_landmarks_indx[i]:self.right_landmarks_indx[i]])for i in range(2 * self.n_factors)])
-                peal1_right_landmark_indx = torch.tensor([avg_peak_times_indx[l] + self.beta[l, avg_peak_times_indx[l]:avg_peak_times_indx[l+self.n_factors]].argmin().item() for l in range(self.n_factors)])
+                peal1_right_landmark_indx = torch.tensor([top_peak_indices[l, 0] + self.beta[l, top_peak_indices[l, 0]:top_peak_indices[l, 1]].argmin().item() for l in range(self.n_factors)])
                 peak2_left_landmark_indx = peal1_right_landmark_indx + steps
                 self.right_landmarks_indx[:self.n_factors] = peal1_right_landmark_indx
                 self.left_landmarks_indx[self.n_factors:] = peak2_left_landmark_indx
@@ -248,6 +282,7 @@ class LikelihoodELBOModel(nn.Module):
         self.temperature = self.temperature.cuda(device)
         self.weights = self.weights.cuda(device)
         self.Delta2TDelta2 = self.Delta2TDelta2.cuda(device)
+        self.Delta2 = self.Delta2.cuda(device)
         self.left_landmarks_indx = self.left_landmarks_indx.cuda(device)
         self.right_landmarks_indx = self.right_landmarks_indx.cuda(device)
         self.landmark_indx_speads = self.landmark_indx_speads.cuda(device)
@@ -272,6 +307,7 @@ class LikelihoodELBOModel(nn.Module):
         self.temperature = self.temperature.cpu()
         self.weights = self.weights.cpu()
         self.Delta2TDelta2 = self.Delta2TDelta2.cpu()
+        self.Delta2 = self.Delta2.cpu()
         self.left_landmarks_indx = self.left_landmarks_indx.cpu()
         self.right_landmarks_indx = self.right_landmarks_indx.cpu()
         self.landmark_indx_speads = self.landmark_indx_speads.cpu()

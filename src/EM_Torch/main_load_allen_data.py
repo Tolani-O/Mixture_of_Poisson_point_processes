@@ -35,10 +35,10 @@ sd_init = 0.5
 dt = 0.002
 peak1_right_landmarks_start = 0.1
 # args.landmark_step = 14
-peak1_left_landmarks = torch.tensor([0.006] * args.L)
-peak1_right_landmarks = peak1_right_landmarks_start + torch.arange(0, args.landmark_step*dt*args.L, args.landmark_step*dt)
-peak2_left_landmarks = peak1_right_landmarks + 4*dt
-peak2_right_landmarks = torch.tensor([0.34] * args.L)
+peak1_left_landmarks = torch.cat([torch.tensor([0.006] * args.L)] * args.A)
+peak1_right_landmarks = torch.cat([peak1_right_landmarks_start + torch.arange(0, args.landmark_step*dt*args.L, args.landmark_step*dt)] * args.A)
+peak2_left_landmarks = torch.cat([peak1_right_landmarks + 4*dt] * args.A)
+peak2_right_landmarks = torch.cat([torch.tensor([0.34] * args.L)] * args.A)
 args.notes = f'maskLimit{args.mask_neuron_threshold}'
 
 regions = None

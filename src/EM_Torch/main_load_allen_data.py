@@ -35,15 +35,11 @@ sd_init = 0.5
 dt = 0.002
 peak1_right_landmarks_start = 0.1
 # args.landmark_step = 14
-peak1_left_landmarks = torch.cat([torch.tensor([0.006] * args.L)] * args.A)
-peak1_right_landmarks = torch.cat([peak1_right_landmarks_start + torch.arange(0, args.landmark_step*dt*args.L, args.landmark_step*dt)] * args.A)
-peak2_left_landmarks = peak1_right_landmarks + 4*dt
-peak2_right_landmarks = torch.cat([torch.tensor([0.34] * args.L)] * args.A)
 args.notes = f'maskLimit{args.mask_neuron_threshold}'
 
 regions = None
 conditions = None
-# regions = ['VISp', 'VISl', 'VISal']
+regions = ['VISp', 'VISl', 'VISal']
 # conditions = [246, 251]
 
 if args.eval_interval > args.log_interval:
@@ -83,6 +79,10 @@ print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_acces
 args.K, T, args.n_trials, args.n_configs = Y_train.shape
 num_factors = factor_access_train.shape[-1]
 args.A = int(num_factors/args.L)
+peak1_left_landmarks = torch.cat([torch.tensor([0.006] * args.L)] * args.A)
+peak1_right_landmarks = torch.cat([peak1_right_landmarks_start + torch.arange(0, args.landmark_step*dt*args.L, args.landmark_step*dt)] * args.A)
+peak2_left_landmarks = peak1_right_landmarks + 4*dt
+peak2_right_landmarks = torch.cat([torch.tensor([0.34] * args.L)] * args.A)
 model = LikelihoodELBOModel(timeCourse, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
                             peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
                             temperature=args.temperature, weights=args.weights)

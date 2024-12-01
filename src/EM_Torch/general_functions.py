@@ -491,7 +491,8 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.figure(figsize=(model.n_areas * 10, int(model.n_factors / model.n_areas) * 5))
         c = 0
         for l in L:
-            upper_limit = (4/5) * scaled_data[l].max()
+            if plot_data:
+                upper_limit = (4/5) * scaled_data[l].max()
             plt.subplot(factors_per_area, model.n_areas, c + 1)
             plt.vlines(x=model.time[torch.tensor([
                 model.left_landmarks_indx[l], model.right_landmarks_indx[l],

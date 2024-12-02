@@ -41,6 +41,7 @@ peak1_right_landmarks = torch.tensor(parser_dict['peak1_right_landmarks'])
 peak2_left_landmarks = torch.tensor(parser_dict['peak2_left_landmarks'])
 peak2_right_landmarks = torch.tensor(parser_dict['peak2_right_landmarks'])
 dt = parser_dict['dt']
+adjust_landmarks = False
 
 if args.eval_interval > args.log_interval:
     args.log_interval = args.eval_interval
@@ -75,7 +76,7 @@ num_factors = factor_access_train.shape[-1]
 args.A = int(num_factors/args.L)
 model = LikelihoodELBOModel(timeCourse, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
                             peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
-                            temperature=args.temperature, weights=args.weights, adjust_landmarks=True)
+                            temperature=args.temperature, weights=args.weights, adjust_landmarks=adjust_landmarks)
 output_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, f'Run_{args.load_run + 1}')
 os.makedirs(output_dir, exist_ok=True)
 # Load the model

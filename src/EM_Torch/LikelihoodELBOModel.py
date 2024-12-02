@@ -107,7 +107,8 @@ class LikelihoodELBOModel(nn.Module):
         n_dims = 2 * self.n_factors
         self.config_peak_offsets = nn.Parameter(torch.randn(self.n_configs, n_dims))
         self.init_sigma_ltri(rand=True)
-        self.trial_peak_offset_proposal_means = nn.Parameter(self.init_trial_offsets())
+        normal_samples = torch.randn((self.n_trials, self.n_configs, 2 * self.n_factors))
+        self.trial_peak_offset_proposal_means = nn.Parameter(torch.einsum('lj,rcj->rcl', self.sigma_ltri, normal_samples))
         self.trial_peak_offset_proposal_sds = nn.Parameter(torch.rand(self.n_trials, self.n_configs, n_dims) + 1)
         self.pi = F.softmax(torch.randn(self.n_areas, self.n_factors // self.n_areas), dim=1).flatten()
         self.theta = torch.rand(self.n_factors)
@@ -120,7 +121,7 @@ class LikelihoodELBOModel(nn.Module):
         n_dims = 2 * self.n_factors
         self.config_peak_offsets = nn.Parameter(torch.zeros(self.n_configs, n_dims))
         self.init_sigma_ltri()
-        self.trial_peak_offset_proposal_means = nn.Parameter(self.init_trial_offsets())
+        self.trial_peak_offset_proposal_means = nn.Parameter(torch.zeros(self.n_trials, self.n_configs, n_dims))
         self.trial_peak_offset_proposal_sds = nn.Parameter(torch.ones(self.n_trials, self.n_configs, n_dims))
         self.pi = F.softmax(torch.zeros(self.n_areas, self.n_factors // self.n_areas), dim=1).flatten()
         self.theta = torch.ones(self.n_factors)
@@ -141,11 +142,7 @@ class LikelihoodELBOModel(nn.Module):
         self.trial_peak_offset_covar_ltri_diag = nn.Parameter(sigma_ltri.diag())
         indices = torch.tril_indices(row=n_dims, col=n_dims, offset=-1)
         self.trial_peak_offset_covar_ltri_offdiag = nn.Parameter(sigma_ltri[indices[0], indices[1]])
-
-    def init_trial_offsets(self):
         self.ltri_matix()
-        normal_samples = torch.randn((self.n_trials, self.n_configs, 2 * self.n_factors))
-        return torch.einsum('lj,rcj->rcl', self.sigma_ltri, normal_samples)
 
 
     def standard_init(self):
@@ -179,7 +176,6 @@ class LikelihoodELBOModel(nn.Module):
             self.config_peak_offsets = nn.Parameter(config_peak_offsets)
         if trial_peak_offset_covar_ltri is not None:
             self.init_sigma_ltri(trial_peak_offset_covar_ltri)
-            self.trial_peak_offset_proposal_means = nn.Parameter(self.init_trial_offsets())
         if trial_peak_offset_proposal_means is not None:
             self.trial_peak_offset_proposal_means = nn.Parameter(trial_peak_offset_proposal_means)
 
@@ -417,6 +413,7 @@ class LikelihoodELBOModel(nn.Module):
         # trial_peak_offset_proposal_samples # N x R x C x 2AL
         # config_offsets  # 1 x 1 x C x 2AL
         s_new = avg_peak_times + self.trial_peak_offset_proposal_samples + self.config_peak_offsets.unsqueeze(0).unsqueeze(1)
+        # s_new = F.tanh(s_new) * self.half_warping_window.unsqueeze(0).unsqueeze(1).unsqueeze(2)
         left_landmarks = left_landmarks.unsqueeze(0).unsqueeze(1).unsqueeze(2)
         right_landmarks = right_landmarks.unsqueeze(0).unsqueeze(1).unsqueeze(2)
         squash_mask = ((s_new <= left_landmarks) | (s_new >= right_landmarks)).to(device=self.device)
@@ -619,11 +616,11 @@ class LikelihoodELBOModel(nn.Module):
     def compute_penalty_terms(self, tau_beta, tau_config, tau_sigma, tau_prec, tau_sd):
         # Penalty Terms
         self.ltri_matix()
-        config_Penalty = - tau_config * (1/torch.prod(torch.tensor(self.config_peak_offsets.shape))) * self.config_peak_offsets.abs().sum()  # L1 penalty
+        config_Penalty = - tau_config * (1/torch.prod(torch.tensor(self.config_peak_offsets.shape))) * (self.config_peak_offsets**2).sum()  # L2 penalty
         proposal_sd_penalty = - tau_sd * (1/torch.prod(torch.tensor(self.trial_peak_offset_proposal_sds.shape))) * (self.trial_peak_offset_proposal_sds**2).sum()  # L2 penalty
         sigma = self.sigma_ltri @ self.sigma_ltri.t()
         precision = self.prec_ltri @ self.prec_ltri.t()
-        prec_Penalty = -tau_prec * (1/(torch.prod(torch.tensor(precision.shape))-precision.shape[0])) * precision.abs().sum() - precision.diag().abs().sum()  # L1 penalty
+        prec_Penalty = -tau_prec * (1/(torch.prod(torch.tensor(precision.shape))-precision.shape[0])) * precision.abs().sum() - precision.diag().abs().sum()  # L1 (sparsity) penalty
         sigma_Penalty = -tau_sigma * (1/sigma.shape[0]) * (sigma.diag()**2).sum()  # L2 penalty
         factors = torch.softmax(self.unnormalized_log_factors(), dim=-1)
         beta_penalty = -tau_beta * (1/torch.prod(torch.tensor(factors.shape))) * ((factors @ self.Delta2TDelta2) * factors).sum()

@@ -31,7 +31,6 @@ args.n_trial_samples = 10  # Number of samples to generate for each trial
 # args.L = 3  # L
 # args.n_trial_samples = 1
 
-args.init = 'dtw'
 # args.init = 'mom'
 # args.init = 'dtw'
 # args.init = 'rand'
@@ -75,13 +74,13 @@ _, _, factor_assignment_onehot_train, neuron_gains_train, trial_offsets_train = 
 processed_inputs_train = preprocess_input_data(*to_cuda(load_tensors((Y_train, factor_access_train, data.dt)),
                                                         move_to_cuda=args.cuda), mask_threshold=args.mask_neuron_threshold)
 
-#DELETE
-remove_indcs = torch.concat(torch.where(factor_assignment_onehot_train == 1)).reshape(3, -1)
-remove_indcs = remove_indcs[:, torch.isin(remove_indcs[2], torch.tensor([0,1,3,4,5,8], device=remove_indcs.device.type))]
-processed_inputs_train['neuron_factor_access'][remove_indcs[0], remove_indcs[1]] = 0
-factor_assignment_onehot_train[remove_indcs[0], remove_indcs[1]] = 0
-neuron_gains_train[remove_indcs[0], remove_indcs[1]] = 0
-#DELETE
+# #DELETE
+# remove_indcs = torch.concat(torch.where(factor_assignment_onehot_train == 1)).reshape(3, -1)
+# remove_indcs = remove_indcs[:, torch.isin(remove_indcs[2], torch.tensor([0,1,3,4,5,8], device=remove_indcs.device.type))]
+# processed_inputs_train['neuron_factor_access'][remove_indcs[0], remove_indcs[1]] = 0
+# factor_assignment_onehot_train[remove_indcs[0], remove_indcs[1]] = 0
+# neuron_gains_train[remove_indcs[0], remove_indcs[1]] = 0
+# #DELETE
 
 Y_train, factor_access_train, timeCourse = processed_inputs_train['Y'].cpu(), processed_inputs_train['neuron_factor_access'].cpu(), processed_inputs_train['time'].cpu()
 print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')

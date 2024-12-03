@@ -302,6 +302,8 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
     os.makedirs(corr_dir, exist_ok=True)
     trialOffsets_dir = os.path.join(output_dir, 'trialOffsets')
     os.makedirs(trialOffsets_dir, exist_ok=True)
+    trialOffsetsByConfig_dir = os.path.join(output_dir, 'trialOffsetsByConfig')
+    os.makedirs(trialOffsetsByConfig_dir, exist_ok=True)
     trial_sd_dir = os.path.join(output_dir, 'trial_SDs')
     os.makedirs(trial_sd_dir, exist_ok=True)
     with torch.no_grad():
@@ -562,6 +564,26 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
                 c += 1
         plt.tight_layout()
         plt.savefig(os.path.join(peakOffsets_dir, f'peakOffsets_{epoch}.png'))
+        plt.close()
+
+        proposal_means = model.trial_peak_offset_proposal_means.permute(2, 1, 0)
+        config_offsets = model.config_peak_offsets.t().unsqueeze(-1).expand_as(proposal_means)
+        plt.figure(figsize=(model.n_areas * 15, int(model.n_factors / model.n_areas) * 5))
+        c = 0
+        for l in L:
+            for p in range(2):
+                i = l + p * model.n_factors
+                plt.subplot(factors_per_area, 2 * model.n_areas, c + 1)
+                for cnf in range(model.n_configs):
+                    plt.scatter(proposal_means[i, cnf], config_offsets[i, cnf], s=10)
+                plt.xlabel('Trial offsets')
+                plt.ylabel('Config offsets')
+                plt.title(f'Factor {(l % factors_per_area) + 1}, '
+                          f'Area {unique_regions[l // factors_per_area]}, '
+                          f'Peak {p + 1} offsets', fontsize=20)
+                c += 1
+        plt.tight_layout()
+        plt.savefig(os.path.join(trialOffsetsByConfig_dir, f'trialOffsetsByConfig_{epoch}.png'))
         plt.close()
 
         alpha = F.softplus(model.alpha).numpy()

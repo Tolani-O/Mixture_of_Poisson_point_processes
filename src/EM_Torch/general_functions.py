@@ -41,6 +41,7 @@ def get_parser():
     parser.add_argument('--tau_beta', type=float, default=0.5, help='Value for tau_beta')
     parser.add_argument('--num_epochs', type=int, default=-1, help='Number of training epochs. '
                                                                    'Default is -1 meaning it will run the hessian computation')
+    parser.add_argument('--constraint', type=str, default='tanh', help='How to constrain the peak times. Options are: softplus, RELU, ELU, tanh')
     parser.add_argument('--scheduler_patience', type=int, default=1e5, help='Number of epochs before scheduler step')
     parser.add_argument('--scheduler_factor', type=int, default=0.9, help='Scheduler reduction factor')
     parser.add_argument('--scheduler_threshold', type=int, default=1e-10, help='Threshold to accept step improvement')

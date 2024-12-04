@@ -15,7 +15,7 @@ import threading
 outputs_folder = 'outputs'
 
 args = get_parser().parse_args()
-parser_key = ['ID', 'A', 'L', 'tauBeta', 'tauConfig', 'tauSigma', 'tauPrec', 'tauSD', 'posterior', 'iters', 'lr', 'maskLimit']
+parser_key = ['ID', 'A', 'L', 'tauBeta', 'tauConfig', 'tauSigma', 'tauPrec', 'tauSD', 'posterior', 'iters', 'lr', 'constraint', 'maskLimit']
 # args.folder_name = ''
 # args.load_run = 0
 # args.num_epochs = 0
@@ -35,6 +35,7 @@ args.tau_config = float(parser_dict['tauConfig'])
 args.tau_sigma = float(parser_dict['tauSigma'])
 args.tau_prec = float(parser_dict['tauPrec'])
 args.tau_sd = float(parser_dict['tauSD'])
+args.constraint = str(parser_dict['constraint'])
 args.n_trial_samples = int(parser_dict['posterior'])  # Number of samples to generate for each trial
 peak1_left_landmarks = torch.tensor(parser_dict['peak1_left_landmarks'])
 peak1_right_landmarks = torch.tensor(parser_dict['peak1_right_landmarks'])
@@ -162,7 +163,9 @@ if __name__ == "__main__":
             'peak2_left_landmarks': peak2_left_landmarks,
             'peak2_right_landmarks': peak2_right_landmarks,
             'temperature': args.temperature,
-            'weights': args.weights
+            'weights': args.weights,
+            'adjust_landmarks': adjust_landmarks,
+            'constraint': args.constraint
         }
     }
     total_time = 0

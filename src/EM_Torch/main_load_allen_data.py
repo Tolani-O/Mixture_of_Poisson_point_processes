@@ -30,6 +30,7 @@ args.tau_sigma = 1
 args.tau_prec = 1
 args.tau_sd = 10000
 # args.L = 5
+# args.constraint = 'tanh'
 args.n_trial_samples = 7  # Number of samples to generate for each trial
 sd_init = 0.5
 dt = 0.002
@@ -85,7 +86,7 @@ peak2_left_landmarks = peak1_right_landmarks + 4*dt
 peak2_right_landmarks = torch.cat([torch.tensor([0.34] * args.L)] * args.A)
 model = LikelihoodELBOModel(timeCourse, num_factors, args.A, args.n_configs, args.n_trials, args.n_trial_samples,
                             peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
-                            temperature=args.temperature, weights=args.weights)
+                            temperature=args.temperature, weights=args.weights, constraint=args.constraint)
 # Initialize the model
 if args.init.lower() == 'rand':
     model.init_random()
@@ -106,9 +107,9 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
                                                        patience=patience, threshold_mode='abs',
                                                        threshold=args.scheduler_threshold)
 args.folder_name = (
-    f'Real_ID{args.data_seed}_Init{args.init}_K{args.K}_A{args.A}_C{args.n_configs}_L{args.L}'
-    f'_R{args.n_trials}_tauBeta{args.tau_beta}_tauConfig{args.tau_config}_tauSigma{args.tau_sigma}_tauPrec{args.tau_prec}_tauSD{args.tau_sd}'
-    f'_posterior{args.n_trial_samples}_iters{args.num_epochs}_lr{args.lr}_{args.notes}')
+    f'Real_ID{args.data_seed}_Init{args.init}_K{args.K}_A{args.A}_C{args.n_configs}_L{args.L}_R{args.n_trials}_iters{args.num_epochs:.0e}_lr{args.lr:.0e}'
+    f'_tauBeta{args.tau_beta:.0e}_tauConfig{args.tau_config:.0e}_tauSigma{args.tau_sigma}_tauPrec{args.tau_prec}_tauSD{args.tau_sd:.0e}_posterior{args.n_trial_samples}'
+    f'_constraint{args.constraint}_{args.notes}')
 output_dir = os.path.join(os.getcwd(), outputs_folder, args.folder_name, 'Run_0')
 os.makedirs(output_dir, exist_ok=True)
 peak1_left_landmarks = model.time[model.left_landmarks_indx[:model.n_factors]]
@@ -167,7 +168,9 @@ if __name__ == "__main__":
             'peak2_left_landmarks': peak2_left_landmarks,
             'peak2_right_landmarks': peak2_right_landmarks,
             'temperature': args.temperature,
-            'weights': args.weights
+            'weights': args.weights,
+            'adjust_landmarks': False,
+            'constraint': args.constraint
         }
     }
     total_time = 0

@@ -39,12 +39,45 @@ def create_second_diff_matrix(P):
     D0 = np.concatenate((s0, np.zeros(P-len(s0))))
     D = P**2 * np.vstack((D0, D, np.flip(D0)))
     return D
+def flipped_softplus(x, a, b):
+    return F.softplus(x - b, beta=-a) + b
+def softplus(x, a, b):
+    return F.softplus(x + b, beta=a) - b
+def softplus_composed(x, a, b):
+    edge = 1e10*torch.ones(1)
+    scale = (softplus(flipped_softplus(edge, a, b), a, b) + flipped_softplus(softplus(edge, a, b), a, b)) / 2
+    squashed = ((softplus(flipped_softplus(x, a, b), a, b) + flipped_softplus(softplus(x, a, b), a, b)) / 2) / scale.item()
+    return squashed
+def RELU(x, b):
+    return F.relu(x + b) - b
+def flipped_RELU(x, b):
+    return -F.relu(-(x - b)) + b
+def RELU_composed(x, a, b):
+    return RELU(flipped_RELU(x, b), b) / b
+def ELU(x, a, b):
+    return F.elu(x + b, alpha=a) - b
+def flipped_ELU(x, a, b):
+    return -F.elu(-(x - b), alpha=a) + b
+def ELU_composed(x, a, b):
+    edge = 1e10 * torch.ones(1)
+    scale = ELU(flipped_ELU(edge, a, b), a, b)
+    return ELU(flipped_ELU(x, a, b), a, b) / scale.item()
+def tanh(x, a, b):
+    return F.tanh((1/b) * x)
+def identity(x, a, b):
+    return x
+# def zigzag(x, a, b):
+#     warping_window = 2 * half_warping_window
+#     abs_snew = torch.abs(s_new - left_landmarks)
+#     diva = (abs_snew / warping_window).int()
+#     div2a = (abs_snew / (2 * warping_window)).int()
+#     s_new = (-1) ** diva * (abs_snew - 2 * warping_window * (diva - div2a)) + left_landmarks
 
 
 class LikelihoodELBOModel(nn.Module):
     def __init__(self, time, n_factors, n_areas, n_configs, n_trials, n_trial_samples,
                  peak1_left_landmarks, peak1_right_landmarks, peak2_left_landmarks, peak2_right_landmarks,
-                 temperature=None, weights=None, adjust_landmarks=False):
+                 temperature=None, weights=None, adjust_landmarks=False, constraint='RELU'):
         super(LikelihoodELBOModel, self).__init__()
 
         self.device = 'cpu'
@@ -70,15 +103,22 @@ class LikelihoodELBOModel(nn.Module):
         self.left_landmarks_indx = torch.cat([peak1_left_landmarks_indx, peak2_left_landmarks_indx])
         self.right_landmarks_indx = torch.cat([peak1_right_landmarks_indx, peak2_right_landmarks_indx])
         self.landmark_indx_speads = self.right_landmarks_indx - self.left_landmarks_indx + 1 # adding one because the last element is not included when indexing
-        self.half_warping_window = (self.time[self.right_landmarks_indx] - self.time[self.left_landmarks_indx]) / 2
+        self.half_warping_window = (self.time[self.right_landmarks_indx - 1] - self.time[self.left_landmarks_indx + 1]) / 2
         self.n_factors = n_factors
         self.n_areas = n_areas
         self.n_trial_samples = n_trial_samples
         self.n_configs = n_configs
         self.n_trials = n_trials
         self.adjust_landmarks = adjust_landmarks
+        self.constraint = constraint
         self.Delta2 = torch.tensor(create_second_diff_matrix(T))
         self.Delta2TDelta2 = self.Delta2.T @ self.Delta2  # T x T # tikhonov regularization
+        self.constraint_defining_functions = {
+            'softplus': softplus_composed,
+            'RELU': RELU_composed,
+            'ELU': ELU_composed,
+            'tanh': tanh
+        }
 
         # Storage for use in the forward pass
         self.trial_peak_offset_proposal_samples = None  # N x R x C x 2AL
@@ -269,7 +309,7 @@ class LikelihoodELBOModel(nn.Module):
                 self.right_landmarks_indx[:self.n_factors] = peal1_right_landmark_indx
                 self.left_landmarks_indx[self.n_factors:] = peak2_left_landmark_indx
                 self.landmark_indx_speads = self.right_landmarks_indx - self.left_landmarks_indx + 1
-                self.half_warping_window = (self.time[self.right_landmarks_indx] - self.time[self.left_landmarks_indx]) / 2
+                self.half_warping_window = (self.time[self.right_landmarks_indx - 1] - self.time[self.left_landmarks_indx + 1]) / 2
 
 
     # move to cuda flag tells the function whether gpus are available
@@ -417,14 +457,13 @@ class LikelihoodELBOModel(nn.Module):
         # config_offsets  # 1 x 1 x C x 2AL
         left_landmarks = left_landmarks.unsqueeze(0).unsqueeze(1).unsqueeze(2)
         right_landmarks = right_landmarks.unsqueeze(0).unsqueeze(1).unsqueeze(2)
+        # Unconstrained
         s_new = avg_peak_times + self.trial_peak_offset_proposal_samples + self.config_peak_offsets.unsqueeze(0).unsqueeze(1)
-        # peak_midpoint = (left_landmarks + right_landmarks) / 2
-        # s_new = F.tanh(s_new - peak_midpoint) * self.half_warping_window.unsqueeze(0).unsqueeze(1).unsqueeze(2) + peak_midpoint
-        warping_window = 2 * self.half_warping_window.unsqueeze(0).unsqueeze(1).unsqueeze(2)
-        abs_snew = torch.abs(s_new - left_landmarks)
-        diva = (abs_snew / warping_window).int()
-        div2a = (abs_snew / (2 * warping_window)).int()
-        s_new = (-1) ** diva * (abs_snew - 2 * warping_window * (diva - div2a)) + left_landmarks
+        peak_midpoint = (left_landmarks + right_landmarks) / 2
+        s_new_centered = s_new - peak_midpoint
+        half_warping_window = self.half_warping_window.unsqueeze(0).unsqueeze(1).unsqueeze(2)
+        constraint = self.constraint_defining_functions[self.constraint]
+        s_new = constraint(s_new_centered, 1, 10) * half_warping_window + peak_midpoint
         return avg_peak_times, left_landmarks, right_landmarks, s_new
 
 

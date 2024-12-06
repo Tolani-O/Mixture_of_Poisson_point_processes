@@ -15,7 +15,7 @@ from scipy.ndimage import gaussian_filter1d
 from src.EM_Torch.LikelihoodELBOModel import LikelihoodELBOModel
 import pickle
 sns.set()
-plt.rcParams.update({'figure.max_open_warning': 0})
+plt.rcParams.update({'figure.max_open_warning': 0, 'axes.labelsize': 18, 'axes.titlesize': 18, 'xtick.labelsize': 14, 'ytick.labelsize': 14, 'legend.fontsize': 14})
 
 def get_parser():
     parser = argparse.ArgumentParser(description='Sequence Modeling - Polyphonic Music')
@@ -361,12 +361,13 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
             latent_factors_se = softmax_grad * beta_se
             factor_ucl = latent_factors + latent_factors_se
             factor_lcl = latent_factors - latent_factors_se
+            factor_lcl = np.where(factor_lcl > 0, factor_lcl, 0)
         factors_per_area = int(model.n_factors / model.n_areas)
         L = np.arange(model.n_factors).reshape(model.n_areas, -1)
         ordr = np.concatenate([np.arange(factors_per_area)] * model.n_areas).reshape(model.n_areas, -1)
         if reorder_factors:
-            ordr = W_L.reshape(model.n_areas, -1).argsort()
-        indcs = np.concatenate([L[i, ordr[i][::-1]] for i in range(model.n_areas)]).reshape(model.n_areas, -1)
+            ordr = W_L.reshape(model.n_areas, -1).argsort()[::-1]
+        indcs = np.concatenate([L[i, ordr[i]] for i in range(model.n_areas)]).reshape(model.n_areas, -1)
         L = indcs.T.flatten()
         plt.figure(figsize=(model.n_areas*10, int(model.n_factors/model.n_areas)*5))
         c = 0

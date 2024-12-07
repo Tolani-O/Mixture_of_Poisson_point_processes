@@ -91,7 +91,7 @@ if args.num_epochs < 0:
     model.cpu()
     plot_data_dispersion(Y_train, factor_access_train, args.A, folder_path, folder_name, unique_regions, model.W_CKL)
     plot_outputs(model, unique_regions, output_dir, 'Train', args.load_epoch, se_dict, Y_train, factor_access_train)
-    interpret_results(model, unique_regions, [2, 1, 3], output_dir, args.load_epoch)
+    # interpret_results(model, unique_regions, [2, 1, 3], output_dir, args.load_epoch)
     print('Finished')
     sys.exit()
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -175,7 +175,7 @@ if __name__ == "__main__":
     for epoch in range(start_epoch, start_epoch + args.num_epochs):
         model.cuda(move_to_cuda=args.cuda)
         optimizer.zero_grad()
-        likelihood_term = model.forward(processed_inputs_train)
+        likelihood_term, _ = model.forward(processed_inputs_train, marginal=False)
         penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_prec, args.tau_sd)
         loss = -(likelihood_term + penalty_term)
         loss.backward()
@@ -190,8 +190,7 @@ if __name__ == "__main__":
         if epoch == start_epoch or epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             with torch.no_grad():
                 [grad_norms[name].append(model_named_parameters[name].grad.norm().item()) for name in grad_norms.keys()]
-                likelihood_term = model.forward(processed_inputs_train, train=False)
-                true_likelihood_term = model.log_likelihood(processed_inputs_train)
+                likelihood_term, true_likelihood_term = model.forward(processed_inputs_train)
                 penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_prec, args.tau_sd)
                 model_factor_assignment_train, model_neuron_gains_train = model.infer_latent_variables(processed_inputs_train)
                 losses_train.append((likelihood_term + penalty_term).item())
@@ -235,6 +234,7 @@ if __name__ == "__main__":
             plot_thread = threading.Thread(target=plot_epoch_results, args=(input_dict, False))
             plot_thread.start()
 
+            print(output_str)
             true_likelihoods_train = []
             log_likelihoods_batch = []
             losses_batch = []
@@ -244,8 +244,7 @@ if __name__ == "__main__":
             epoch_train = []
             batch_grad_norms = {name: [] for name, param in model.named_parameters() if param.requires_grad}
             grad_norms = {name: [] for name, param in model.named_parameters() if param.requires_grad}
-            print(output_str)
-            start_time = time.time()
             if scheduler._last_lr[0] < 1e-5:
                 print('Learning rate is too low. Stopping training.')
                 break
+            start_time = time.time()

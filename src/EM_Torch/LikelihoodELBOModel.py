@@ -546,7 +546,7 @@ class LikelihoodELBOModel(nn.Module):
         alpha = processed_inputs['alpha']
         posterior_warped_factors = processed_inputs['posterior_warped_factors']
         neuron_factor_access = processed_inputs['neuron_factor_access']
-        # output before summing: C x K x R x L x N
+        # output before summing: C x K x R x L x 1
         # factors # L x T
         # posterior_warped_factors # C x R x L x 1 x T
         # neuron_factor_access  # C x K x L
@@ -674,25 +674,25 @@ class LikelihoodELBOModel(nn.Module):
         return penalty_term
 
 
-    def forward(self, processed_inputs, update_membership=True, train=True):
+    def forward(self, processed_inputs, ELBO=True, marginal=True, E_step=True, train=True):
         self.train(train)
         self.ltri_matix()
+        if (not ELBO) and (not marginal):
+            raise ValueError('At least one of ELBO or marginal must be True')
+        elbo_obj, marginal_obj = None, None
         processed_inputs = self.prepare_inputs(processed_inputs)
-        if update_membership:
-            self.E_step_posterior_updates(processed_inputs)
-        return self.ELBO_term(processed_inputs)
-
-
-    def log_likelihood(self, processed_inputs, E_step=False):
-        self.train(False)
-        self.ltri_matix()
         if E_step:
-            processed_inputs = self.prepare_inputs(processed_inputs)
             self.E_step_posterior_updates(processed_inputs)
-        # log_P  C x R
-        log_P = -self.Sigma_log_likelihood(self.trial_peak_offset_proposal_samples, self.prec_ltri).squeeze()
-        log_likelihood = torch.sum(self.log_sum_exp_U_tensor) + torch.sum(log_P)
-        return log_likelihood
+        if ELBO:
+            # compute ELBO
+            elbo_obj = self.ELBO_term(processed_inputs)
+        if marginal:
+            if not E_step:
+                self.E_step_posterior_updates(processed_inputs)
+            # compute log likelihood
+            log_P = -self.Sigma_log_likelihood(self.trial_peak_offset_proposal_samples, self.prec_ltri).squeeze()
+            marginal_obj = torch.sum(self.log_sum_exp_U_tensor) + torch.sum(log_P)
+        return elbo_obj, marginal_obj
 
 
     def infer_latent_variables(self, processed_inputs):

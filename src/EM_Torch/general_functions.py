@@ -287,8 +287,6 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
     os.makedirs(log_beta_dir, exist_ok=True)
     alpha_dir = os.path.join(output_dir, 'alpha')
     os.makedirs(alpha_dir, exist_ok=True)
-    theta_dir = os.path.join(output_dir, 'theta')
-    os.makedirs(theta_dir, exist_ok=True)
     pi_dir = os.path.join(output_dir, 'pi')
     os.makedirs(pi_dir, exist_ok=True)
     configOffsets_dir = os.path.join(output_dir, 'configoffset')
@@ -589,17 +587,27 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.close()
 
         alpha = F.softplus(model.alpha).numpy()
-        plt.figure(figsize=(10, 10))
-        plt.plot(alpha, label='Alpha')
-        plt.title('Alpha')
-        plt.savefig(os.path.join(alpha_dir, f'alpha_{epoch}.png'))
-        plt.close()
-
         theta = model.theta.numpy()
-        plt.figure(figsize=(10, 10))
-        plt.plot(theta, label='Theta')
-        plt.title('Theta')
-        plt.savefig(os.path.join(theta_dir, f'theta_{epoch}.png'))
+        gamma_mu = alpha / theta
+        gamma_var = alpha / (theta ** 2)
+        alpha_theta = np.stack([alpha, theta])
+        mean_sd = np.stack([gamma_mu, np.sqrt((model.n_trials + theta) * gamma_var)])
+        plt.figure(figsize=(model.n_areas * 10, int(model.n_factors / model.n_areas) * 3))
+        c = 0
+        for l in L:
+            plt.subplot(factors_per_area, 2 * model.n_areas, c + 1)
+            plt.bar(['Alpha', 'Theta'], alpha_theta[:, l], alpha=0.7)
+            for i, v in enumerate(alpha_theta[:, l]):
+                plt.text(i, v + 0.01, f'{v:.2f}', ha='center', va='bottom')
+            plt.title(f'Factor {(l % factors_per_area) + 1}, '
+                      f'Area {unique_regions[l // factors_per_area]}', fontsize=15)
+            plt.subplot(factors_per_area, 2 * model.n_areas, c + 2)
+            plt.bar(['Mean', 'SD'], mean_sd[:, l], alpha=0.7)
+            for i, v in enumerate(mean_sd[:, l]):
+                plt.text(i, v + 0.01, f'{v:.2f}', ha='center', va='bottom')
+            c += 2
+        plt.tight_layout()
+        plt.savefig(os.path.join(alpha_dir, f'alpha_{epoch}.png'))
         plt.close()
 
         plt.figure(figsize=(10, 10))

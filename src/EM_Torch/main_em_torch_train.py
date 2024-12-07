@@ -108,8 +108,7 @@ with torch.no_grad():
     model.init_ground_truth(trial_peak_offset_proposal_means=trial_offsets_train.clone().squeeze(),
                             W_CKL=factor_assignment_onehot_train.clone(),
                             init='')
-    true_ELBO_train = model.forward(processed_inputs_train, update_membership=False, train=False)
-    likelihood_ground_truth_train = model.log_likelihood(processed_inputs_train, E_step=True)
+    true_ELBO_train, likelihood_ground_truth_train = model.forward(processed_inputs_train, E_step=False, train=False)
 true_ELBO_train = (1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * true_ELBO_train.item()
 likelihood_ground_truth_train = (1 / (args.K * args.n_trials * args.n_configs * model.time.shape[0])) * likelihood_ground_truth_train.item()
 true_offset_penalty_train = (1 / (args.n_trials * args.n_configs)) * model.Sigma_log_likelihood(trial_offsets_train, model.prec_ltri).sum().item()
@@ -228,7 +227,7 @@ if __name__ == "__main__":
     for epoch in range(start_epoch, start_epoch + args.num_epochs):
         model.cuda(move_to_cuda=args.cuda)
         optimizer.zero_grad()
-        likelihood_term = model.forward(processed_inputs_train)
+        likelihood_term, _ = model.forward(processed_inputs_train, marginal=False)
         penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_prec, args.tau_sd)
         loss = -(likelihood_term + penalty_term)
         loss.backward()
@@ -243,8 +242,7 @@ if __name__ == "__main__":
         if epoch == start_epoch or epoch % args.eval_interval == 0 or epoch == start_epoch + args.num_epochs - 1:
             with torch.no_grad():
                 [grad_norms[name].append(model_named_parameters[name].grad.norm().item()) for name in grad_norms.keys()]
-                likelihood_term = model.forward(processed_inputs_train, train=False)
-                true_likelihood_term = model.log_likelihood(processed_inputs_train)
+                likelihood_term, true_likelihood_term = model.forward(processed_inputs_train)
                 penalty_term = model.compute_penalty_terms(args.tau_beta, args.tau_config, args.tau_sigma, args.tau_prec, args.tau_sd)
                 model_factor_assignment_train, model_neuron_gains_train = model.infer_latent_variables(processed_inputs_train)
 
@@ -350,6 +348,7 @@ if __name__ == "__main__":
             plot_thread = threading.Thread(target=plot_epoch_results, args=(input_dict, True))
             plot_thread.start()
 
+            print(output_str)
             true_likelihoods_train = []
             log_likelihoods_batch = []
             losses_batch = []
@@ -369,8 +368,7 @@ if __name__ == "__main__":
             gains_train = []
             batch_grad_norms = {name: [] for name, param in model.named_parameters() if param.requires_grad}
             grad_norms = {name: [] for name, param in model.named_parameters() if param.requires_grad}
-            print(output_str)
-            start_time = time.time()
             if scheduler._last_lr[0] < 1e-5:
                 print('Learning rate is too low. Stopping training.')
                 break
+            start_time = time.time()

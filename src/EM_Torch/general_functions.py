@@ -275,6 +275,7 @@ def parse_folder_name(folder_name, parser_key, outputs_folder, load_run):
 
 def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None, Y=None, factor_access=None, warp_data=True, reorder_factors=False):
     model.train(False)
+    model.ltri_matix()
     stderr = se_dict is not None
     plot_data = (Y is not None) and (model.W_CKL is not None)
     output_dir = os.path.join(output_dir, folder)
@@ -295,9 +296,19 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
     os.makedirs(configPeaks_dir, exist_ok=True)
     peakOffsets_dir = os.path.join(output_dir, 'peakOffsets')
     os.makedirs(peakOffsets_dir, exist_ok=True)
-    pcorr_dir = os.path.join(output_dir, 'pcorr')
+    pcorr_dir = os.path.join(output_dir, 'trialPcorr')
     os.makedirs(pcorr_dir, exist_ok=True)
-    corr_dir = os.path.join(output_dir, 'corr')
+    configCorr_dir = os.path.join(output_dir, 'configCorr')
+    os.makedirs(configCorr_dir, exist_ok=True)
+    trialCorrScatter_dir = os.path.join(output_dir, 'trialCorrScatter')
+    os.makedirs(trialCorrScatter_dir, exist_ok=True)
+    corrHistogram_dir = os.path.join(output_dir, 'trialCorrHistogram')
+    os.makedirs(corrHistogram_dir, exist_ok=True)
+    configCorrHistogram_dir = os.path.join(output_dir, 'configCorrHistogram')
+    os.makedirs(configCorrHistogram_dir, exist_ok=True)
+    configCorrScatter_dir = os.path.join(output_dir, 'configCorrScatter')
+    os.makedirs(configCorrScatter_dir, exist_ok=True)
+    corr_dir = os.path.join(output_dir, 'trialCorr')
     os.makedirs(corr_dir, exist_ok=True)
     trialOffsets_dir = os.path.join(output_dir, 'trialOffsets')
     os.makedirs(trialOffsets_dir, exist_ok=True)
@@ -397,38 +408,6 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(beta_dir, f'LatentFactors_{epoch}.png'))
         plt.close()
 
-        model.ltri_matix()
-        precision = (model.prec_ltri @ model.prec_ltri.t()).numpy()
-        srt = np.concatenate([indcs.flatten(), indcs.flatten() + model.n_factors])
-        precision = precision[srt].T[srt]
-        partial_correlation = -precision / np.sqrt(np.outer(np.diag(precision), np.diag(precision)))
-        diag_indcs = np.arange(partial_correlation.shape[0])
-        partial_correlation[diag_indcs, diag_indcs] = np.abs(np.diag(partial_correlation))
-        plt.figure(figsize=(10, 10))
-        factors_per_area = model.n_factors // model.n_areas
-        ax = sns.heatmap(partial_correlation, annot=False, cmap="seismic", center=0, vmin=-1, vmax=1,
-                         xticklabels=factors_per_area, yticklabels=factors_per_area)
-        for i in range(factors_per_area, partial_correlation.shape[0], factors_per_area):
-            ax.axvline(i, color='black', linestyle='-', linewidth=0.5)
-            ax.axhline(i, color='black', linestyle='-', linewidth=0.5)
-        plt.title('Peak time partial correlation matrix')
-        plt.savefig(os.path.join(pcorr_dir, f'pcorr_{epoch}.png'))
-        plt.close()
-
-        covariance = (model.sigma_ltri @ model.sigma_ltri.t()).numpy()
-        covariance = covariance[srt].T[srt]
-        correlation = covariance / np.sqrt(np.outer(np.diag(covariance), np.diag(covariance)))
-        plt.figure(figsize=(10, 10))
-        factors_per_area = model.n_factors // model.n_areas
-        ax = sns.heatmap(correlation, annot=False, cmap="seismic", center=0, vmin=-1, vmax=1,
-                         xticklabels=factors_per_area, yticklabels=factors_per_area)
-        for i in range(factors_per_area, correlation.shape[0], factors_per_area):
-            ax.axvline(i, color='black', linestyle='-', linewidth=0.5)
-            ax.axhline(i, color='black', linestyle='-', linewidth=0.5)
-        plt.title('Peak time correlation matrix')
-        plt.savefig(os.path.join(corr_dir, f'corr_{epoch}.png'))
-        plt.close()
-
         avg_peak_times, left_landmarks, right_landmarks, s_new = model.compute_offsets_and_landmarks()
         warped_times = model.compute_warped_times(avg_peak_times, left_landmarks, right_landmarks, s_new)
         warped_times = warped_times.squeeze().reshape(*warped_times.shape[:2], -1)
@@ -462,10 +441,15 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(warp_time_dir, f'warped_times_{epoch}.png'))
         plt.close()
 
-        proposal_means = model.trial_peak_offset_proposal_means.permute(2, 0, 1).reshape(2*model.n_factors, -1)
+        proposal_means = model.trial_peak_offset_times().permute(2, 0, 1).reshape(2*model.n_factors, -1).numpy()
+        # covariance = np.cov(proposal_means)
+        # inv_covariance = np.linalg.inv(covariance)
+        # Lower_chol = np.linalg.cholesky(inv_covariance)
+        # centers = proposal_means.mean(axis=1, keepdims=True)
+        # proposal_means = model.sigma_ltri @ Lower_chol.T @ (proposal_means - centers) + centers
         plt.figure(figsize=(model.n_areas * 15, int(model.n_factors / model.n_areas) * 5))
         c = 0
-        xlimit = proposal_means.abs().max().item()
+        xlimit = np.abs(proposal_means).max()
         for l in L:
             for p in range(2):
                 i = l + p * model.n_factors
@@ -483,6 +467,88 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.tight_layout()
         plt.savefig(os.path.join(trialOffsets_dir, f'trialOffsets_{epoch}.png'))
         plt.close()
+
+        srt = np.concatenate([indcs.flatten(), indcs.flatten() + model.n_factors])
+        covariance = (model.sigma_ltri @ model.sigma_ltri.t()).numpy()
+        correlation = covariance / np.sqrt(np.outer(np.diag(covariance), np.diag(covariance)))
+        # correlation = np.corrcoef(proposal_means)
+        correlation = correlation[srt].T[srt]
+        plt.figure(figsize=(10, 10))
+        factors_per_area = model.n_factors // model.n_areas
+        ax = sns.heatmap(correlation, annot=False, cmap="seismic", center=0, vmin=-1, vmax=1,
+                         xticklabels=factors_per_area, yticklabels=factors_per_area)
+        for i in range(factors_per_area, correlation.shape[0], factors_per_area):
+            ax.axvline(i, color='black', linestyle='-', linewidth=0.5)
+            ax.axhline(i, color='black', linestyle='-', linewidth=0.5)
+        plt.title('Peak time correlation matrix')
+        plt.tight_layout()
+        plt.savefig(os.path.join(corr_dir, f'corr_{epoch}.png'))
+        plt.close()
+
+        diag_indcs = np.arange(2 * model.n_factors)
+        precision = (model.prec_ltri @ model.prec_ltri.t()).numpy()
+        # precision = np.linalg.inv(np.cov(proposal_means))
+        partial_correlation = -precision / np.sqrt(np.outer(np.diag(precision), np.diag(precision)))
+        partial_correlation[diag_indcs, diag_indcs] = np.abs(np.diag(partial_correlation))
+        partial_correlation = partial_correlation[srt].T[srt]
+        plt.figure(figsize=(10, 10))
+        factors_per_area = model.n_factors // model.n_areas
+        ax = sns.heatmap(partial_correlation, annot=False, cmap="seismic", center=0, vmin=-1, vmax=1,
+                         xticklabels=factors_per_area, yticklabels=factors_per_area)
+        for i in range(factors_per_area, partial_correlation.shape[0], factors_per_area):
+            ax.axvline(i, color='black', linestyle='-', linewidth=0.5)
+            ax.axhline(i, color='black', linestyle='-', linewidth=0.5)
+        plt.title('Peak time partial correlation matrix')
+        plt.tight_layout()
+        plt.savefig(os.path.join(pcorr_dir, f'pcorr_{epoch}.png'))
+        plt.close()
+
+        correlation_triu_indices = np.triu_indices(correlation.shape[0], k=1)
+        correlation_triu_values = correlation[correlation_triu_indices]
+        peak1_mask = (correlation_triu_indices[0] < model.n_factors) & (correlation_triu_indices[1] < model.n_factors)
+        peak2_mask = (correlation_triu_indices[0] >= model.n_factors) & (correlation_triu_indices[1] >= model.n_factors)
+        peak12_mask = (correlation_triu_indices[0] < model.n_factors) & (correlation_triu_indices[1] >= model.n_factors)
+        peak_mask = [peak1_mask, peak2_mask, peak12_mask]
+        plt.figure(figsize=(20, 10))
+        for i in range(3):
+            plt.subplot(1, 3, i + 1)
+            counts, bin_edges = np.histogram(correlation_triu_values[peak_mask[i]], bins=30)
+            plt.bar(bin_edges[:-1], counts, width=np.diff(bin_edges), edgecolor='black', align='edge', alpha=0.7)
+            plt.xlabel('Trial peak offset correlations')
+            plt.ylabel('Frequency')
+            plt.xlim(left=-1, right=1)
+            if i == 2:
+                plt.title('Cross peak correlations', fontsize=20)
+            else:
+                plt.title(f'Peak {i + 1} correlations', fontsize=20)
+        plt.tight_layout()
+        plt.savefig(os.path.join(corrHistogram_dir, f'corrHistogram_{epoch}.png'))
+        plt.close()
+
+        num = 7
+        upper_tri_indices = np.triu_indices(correlation.shape[0], k=1)
+        upper_tri_values = correlation[upper_tri_indices]
+        sorted_indices_peak1 = np.argsort(upper_tri_values[peak1_mask])
+        sorted_indices_peak2 = np.argsort(upper_tri_values[peak2_mask])
+        sorted_indices_peak12 = np.argsort(upper_tri_values[peak12_mask])
+        lowest_indices_peak1 = sorted_indices_peak1[:num]  # Indices of the 5 lowest correlations
+        lowest_indices_peak2 = sorted_indices_peak2[:num]  # Indices of the 5 lowest correlations
+        lowest_indices_peak12 = sorted_indices_peak12[:num]
+        highest_indices_peak1 = sorted_indices_peak1[-num:]  # Indices of the 5 highest correlations
+        highest_indices_peak2 = sorted_indices_peak2[-num:]
+        highest_indices_peak12 = sorted_indices_peak12[-num:]
+        lowest_pairs_peak1 = [(upper_tri_indices[0][peak1_mask][i], upper_tri_indices[1][peak1_mask][i]) for i in lowest_indices_peak1]
+        lowest_pairs_peak2 = [(upper_tri_indices[0][peak2_mask][i], upper_tri_indices[1][peak2_mask][i]) for i in lowest_indices_peak2]
+        lowest_pairs_peak12 = [(upper_tri_indices[0][peak12_mask][i], upper_tri_indices[1][peak12_mask][i]) for i in lowest_indices_peak12]
+        highest_pairs_peak1 = [(upper_tri_indices[0][peak1_mask][i], upper_tri_indices[1][peak1_mask][i]) for i in highest_indices_peak1]
+        highest_pairs_peak2 = [(upper_tri_indices[0][peak2_mask][i], upper_tri_indices[1][peak2_mask][i]) for i in highest_indices_peak2]
+        highest_pairs_peak12 = [(upper_tri_indices[0][peak12_mask][i], upper_tri_indices[1][peak12_mask][i]) for i in highest_indices_peak12]
+        plot_selected_pairs(proposal_means, correlation, unique_regions, factors_per_area, lowest_pairs_peak1, num, os.path.join(trialCorrScatter_dir, f'trial_corrs_scatter_{epoch}_{num} Lowest peak1 Correlations.png'), f'{num} Lowest peak1 Correlations')
+        plot_selected_pairs(proposal_means, correlation, unique_regions, factors_per_area, lowest_pairs_peak2, num, os.path.join(trialCorrScatter_dir, f'trial_corrs_scatter_{epoch}_{num} Lowest peak2 Correlations.png'), f'{num} Lowest peak2 Correlations')
+        plot_selected_pairs(proposal_means, correlation, unique_regions, factors_per_area, lowest_pairs_peak12, num, os.path.join(trialCorrScatter_dir, f'trial_corrs_scatter_{epoch}_{num} Lowest cross Correlations.png'), f'{num} Lowest cross Correlations')
+        plot_selected_pairs(proposal_means, correlation, unique_regions, factors_per_area, highest_pairs_peak1, num, os.path.join(trialCorrScatter_dir, f'trial_corrs_scatter_{epoch}_{num} Highest peak1 Correlations.png'), f'{num} Highest peak1 Correlations')
+        plot_selected_pairs(proposal_means, correlation, unique_regions, factors_per_area, highest_pairs_peak2, num, os.path.join(trialCorrScatter_dir, f'trial_corrs_scatter_{epoch}_{num} Highest peak2 Correlations.png'), f'{num} Highest peak2 Correlations')
+        plot_selected_pairs(proposal_means, correlation, unique_regions, factors_per_area, highest_pairs_peak12, num, os.path.join(trialCorrScatter_dir, f'trial_corrs_scatter_{epoch}_{num} Highest cross Correlations.png'), f'{num} Highest cross Correlations')
 
         if plot_data:
             # scaled_data L x C x T
@@ -545,7 +611,66 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(configOffsets_dir, f'configOffsets_{epoch}.png'))
         plt.close()
 
-        peak_offsets = (model.trial_peak_offset_proposal_means + model.config_peak_offsets.unsqueeze(0)).permute(2, 0, 1).reshape(2 * model.n_factors, -1).numpy()
+        signal_corr = np.corrcoef(config_offsets)
+        plt.figure(figsize=(10, 10))
+        ax = sns.heatmap(signal_corr, annot=False, cmap="seismic", center=0, vmin=-1, vmax=1,
+                         xticklabels=factors_per_area, yticklabels=factors_per_area)
+        for i in range(factors_per_area, correlation.shape[0], factors_per_area):
+            ax.axvline(i, color='black', linestyle='-', linewidth=0.5)
+            ax.axhline(i, color='black', linestyle='-', linewidth=0.5)
+        plt.title('Stimulus correlation matrix')
+        plt.tight_layout()
+        plt.savefig(os.path.join(configCorr_dir, f'config_corrs_{epoch}.png'))
+        plt.close()
+
+        correlation_triu_indices = np.triu_indices(signal_corr.shape[0], k=1)
+        correlation_triu_values = signal_corr[correlation_triu_indices]
+        peak1_mask = (correlation_triu_indices[0] < model.n_factors) & (correlation_triu_indices[1] < model.n_factors)
+        peak2_mask = (correlation_triu_indices[0] >= model.n_factors) & (correlation_triu_indices[1] >= model.n_factors)
+        peak12_mask = (correlation_triu_indices[0] < model.n_factors) & (correlation_triu_indices[1] >= model.n_factors)
+        peak_mask = [peak1_mask, peak2_mask, peak12_mask]
+        plt.figure(figsize=(20, 10))
+        for i in range(3):
+            plt.subplot(1, 3, i + 1)
+            counts, bin_edges = np.histogram(correlation_triu_values[peak_mask[i]], bins=30)
+            plt.bar(bin_edges[:-1], counts, width=np.diff(bin_edges), edgecolor='black', align='edge', alpha=0.7)
+            plt.xlabel('Config peak offset correlations')
+            plt.ylabel('Frequency')
+            plt.xlim(left=-1, right=1)
+            if i == 2:
+                plt.title('Cross peak correlations', fontsize=20)
+            else:
+                plt.title(f'Peak {i + 1} correlations', fontsize=20)
+        plt.tight_layout()
+        plt.savefig(os.path.join(configCorrHistogram_dir, f'configCorrHistogram_{epoch}.png'))
+        plt.close()
+
+        num = 7
+        upper_tri_indices = np.triu_indices(signal_corr.shape[0], k=1)
+        upper_tri_values = signal_corr[upper_tri_indices]
+        sorted_indices_peak1 = np.argsort(upper_tri_values[peak1_mask])
+        sorted_indices_peak2 = np.argsort(upper_tri_values[peak2_mask])
+        sorted_indices_peak12 = np.argsort(upper_tri_values[peak12_mask])
+        lowest_indices_peak1 = sorted_indices_peak1[:num]  # Indices of the 5 lowest correlations
+        lowest_indices_peak2 = sorted_indices_peak2[:num]  # Indices of the 5 lowest correlations
+        lowest_indices_peak12 = sorted_indices_peak12[:num]
+        highest_indices_peak1 = sorted_indices_peak1[-num:]  # Indices of the 5 highest correlations
+        highest_indices_peak2 = sorted_indices_peak2[-num:]
+        highest_indices_peak12 = sorted_indices_peak12[-num:]
+        lowest_pairs_peak1 = [(upper_tri_indices[0][peak1_mask][i], upper_tri_indices[1][peak1_mask][i]) for i in lowest_indices_peak1]
+        lowest_pairs_peak2 = [(upper_tri_indices[0][peak2_mask][i], upper_tri_indices[1][peak2_mask][i]) for i in lowest_indices_peak2]
+        lowest_pairs_peak12 = [(upper_tri_indices[0][peak12_mask][i], upper_tri_indices[1][peak12_mask][i]) for i in lowest_indices_peak12]
+        highest_pairs_peak1 = [(upper_tri_indices[0][peak1_mask][i], upper_tri_indices[1][peak1_mask][i]) for i in highest_indices_peak1]
+        highest_pairs_peak2 = [(upper_tri_indices[0][peak2_mask][i], upper_tri_indices[1][peak2_mask][i]) for i in highest_indices_peak2]
+        highest_pairs_peak12 = [(upper_tri_indices[0][peak12_mask][i], upper_tri_indices[1][peak12_mask][i]) for i in highest_indices_peak12]
+        plot_selected_pairs(config_offsets, signal_corr, unique_regions, factors_per_area, lowest_pairs_peak1, num, os.path.join(configCorrScatter_dir, f'config_corrs_scatter_{epoch}_{num} Lowest peak1 Correlations.png'), f'{num} Lowest peak1 Correlations')
+        plot_selected_pairs(config_offsets, signal_corr, unique_regions, factors_per_area, lowest_pairs_peak2, num, os.path.join(configCorrScatter_dir, f'config_corrs_scatter_{epoch}_{num} Lowest peak2 Correlations.png'), f'{num} Lowest peak2 Correlations')
+        plot_selected_pairs(config_offsets, signal_corr, unique_regions, factors_per_area, lowest_pairs_peak12, num, os.path.join(configCorrScatter_dir, f'config_corrs_scatter_{epoch}_{num} Lowest cross Correlations.png'), f'{num} Lowest cross Correlations')
+        plot_selected_pairs(config_offsets, signal_corr, unique_regions, factors_per_area, highest_pairs_peak1, num, os.path.join(configCorrScatter_dir, f'config_corrs_scatter_{epoch}_{num} Highest peak1 Correlations.png'), f'{num} Highest peak1 Correlations')
+        plot_selected_pairs(config_offsets, signal_corr, unique_regions, factors_per_area, highest_pairs_peak2, num, os.path.join(configCorrScatter_dir, f'config_corrs_scatter_{epoch}_{num} Highest peak2 Correlations.png'), f'{num} Highest peak2 Correlations')
+        plot_selected_pairs(config_offsets, signal_corr, unique_regions, factors_per_area, highest_pairs_peak12, num, os.path.join(configCorrScatter_dir, f'config_corrs_scatter_{epoch}_{num} Highest cross Correlations.png'), f'{num} Highest cross Correlations')
+
+        peak_offsets = (model.trial_peak_offset_times() + model.config_peak_offsets.unsqueeze(0)).permute(2, 0, 1).reshape(2 * model.n_factors, -1).numpy()
         plt.figure(figsize=(model.n_areas * 15, int(model.n_factors / model.n_areas) * 5))
         c = 0
         xlimit = np.abs(peak_offsets).max()
@@ -566,7 +691,7 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(peakOffsets_dir, f'peakOffsets_{epoch}.png'))
         plt.close()
 
-        proposal_means = model.trial_peak_offset_proposal_means.permute(2, 1, 0)
+        proposal_means = model.trial_peak_offset_times().permute(2, 1, 0)
         config_offsets = model.config_peak_offsets.t().unsqueeze(-1).expand_as(proposal_means)
         plt.figure(figsize=(model.n_areas * 15, int(model.n_factors / model.n_areas) * 5))
         c = 0
@@ -623,6 +748,32 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(trial_sd_dir, f'trial_variances_{epoch}.png'))
         plt.close()
         plt.close('all')
+
+
+def plot_selected_pairs(data, correlation_mtrx, unique_regions, factors_per_area, pairs, num, filename, title):
+    num_pairs = len(pairs)
+    fig, axes = plt.subplots(1, num_pairs, figsize=(7 * num, 10))
+    for idx, (row, col) in enumerate(pairs):
+        ax = axes[idx]
+        sns.scatterplot(x=data[row], y=data[col], ax=ax)
+        corr = correlation_mtrx[row, col]
+        n_factors = len(unique_regions) * factors_per_area
+        row_region = unique_regions[((row % n_factors) // factors_per_area)]
+        col_region = unique_regions[((col % n_factors) // factors_per_area)]
+        row_peak = row // n_factors
+        col_peak = col // n_factors
+        row_factor = ((row % n_factors) % factors_per_area) + 1
+        col_factor = ((col % n_factors) % factors_per_area) + 1
+        peak = f'Cross Peak'
+        if row_peak == col_peak:
+            peak = f'Peak {row_peak + 1}'
+        ax.set_title(f'Corr: {corr:.2f}\nPair: ({row}, {col})', fontsize=20)
+        ax.set_xlabel(f'Region {row_region} Factor {row_factor} {peak}')
+        ax.set_ylabel(f'Region {col_region} Factor {col_factor} {peak}')
+    plt.suptitle(title, fontsize=23)
+    plt.tight_layout()
+    plt.savefig(filename)
+    plt.close()
 
 
 def initialize_clusters(Y, factor_access, n_clusters, n_areas, output_dir, n_jobs=15, bandwidth=4):

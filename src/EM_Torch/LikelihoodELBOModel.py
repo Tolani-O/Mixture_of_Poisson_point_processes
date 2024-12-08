@@ -385,6 +385,15 @@ class LikelihoodELBOModel(nn.Module):
         self.prec_ltri = torch.linalg.cholesky(torch.linalg.inv(ltri_matrix @ ltri_matrix.t()))
 
 
+    def trial_peak_offset_times(self):
+        centers = self.trial_peak_offset_proposal_means.reshape(self.n_trials * self.n_configs, -1).mean(dim=0).unsqueeze(0).unsqueeze(1).expand(self.n_trials, self.n_configs, -1)
+        covariance = torch.cov(self.trial_peak_offset_proposal_means.reshape(self.n_trials * self.n_configs, -1).t())
+        inv_covariance = torch.linalg.inv(covariance)
+        Lower_chol_T = torch.linalg.cholesky(inv_covariance).t()
+        trial_offsets = torch.einsum('lk,kj,rcj->rcl', self.sigma_ltri, Lower_chol_T, (self.trial_peak_offset_proposal_means - centers)) + centers
+        return trial_offsets
+
+
     def unnormalized_log_factors(self):
         # return self.beta - self.beta[:, 0].unsqueeze(1).expand_as(self.beta)
         return torch.cat([torch.zeros(self.n_factors, 1, device=self.device), self.beta], dim=1)
@@ -427,14 +436,14 @@ class LikelihoodELBOModel(nn.Module):
     def generate_trial_peak_offset_samples(self):
         if self.is_eval:
             # trial_peak_offset_proposal_samples 1 x R x C x 2AL
-            self.trial_peak_offset_proposal_samples = self.trial_peak_offset_proposal_means.unsqueeze(0)
+            self.trial_peak_offset_proposal_samples = self.trial_peak_offset_times().unsqueeze(0)
         else:
             gaussian_sample = torch.concat([torch.randn(self.n_trial_samples, self.n_trials, self.n_configs, 2 * self.n_factors,
                                                         device=self.device),
                                             torch.zeros(1, self.n_trials, self.n_configs, 2 * self.n_factors,
                                                         device=self.device)], dim=0)
             # trial_peak_offset_proposal_samples 1+N x R x C x 2AL
-            self.trial_peak_offset_proposal_samples = (self.trial_peak_offset_proposal_means.unsqueeze(0) +
+            self.trial_peak_offset_proposal_samples = (self.trial_peak_offset_times().unsqueeze(0) +
                                                        gaussian_sample * self.trial_peak_offset_proposal_sds.unsqueeze(0))
 
 
@@ -650,7 +659,7 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def sd_log_likelihood(self, trial_peak_offsets):
-        trial_peak_offsets = (trial_peak_offsets - self.trial_peak_offset_proposal_means.unsqueeze(0))**2
+        trial_peak_offsets = (trial_peak_offsets - self.trial_peak_offset_times().unsqueeze(0))**2
         n_dims = self.trial_peak_offset_proposal_sds.shape[-1]
         det_Sigma = torch.prod(self.trial_peak_offset_proposal_sds**2, dim=-1)
         inv_Sigma = self.trial_peak_offset_proposal_sds**(-2)

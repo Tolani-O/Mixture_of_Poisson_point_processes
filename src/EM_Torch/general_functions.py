@@ -442,6 +442,11 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.close()
 
         proposal_means = model.trial_peak_offset_times().permute(2, 0, 1).reshape(2*model.n_factors, -1).numpy()
+        peak_midpoint = ((left_landmarks + right_landmarks) / 2).squeeze()
+        half_warping_window = model.half_warping_window
+        constraint = model.constraint_defining_functions[model.constraint]
+        proposal_means = trial_peak_offsets.permute(2, 0, 1).reshape(2*model.n_factors, -1)
+        proposal_means = constraint(proposal_means, 1, 10) * half_warping_window.unsqueeze(-1)
         # covariance = np.cov(proposal_means)
         # inv_covariance = np.linalg.inv(covariance)
         # Lower_chol = np.linalg.cholesky(inv_covariance)
@@ -554,7 +559,9 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
             # scaled_data L x C x T
             scaled_data = data.sum(dim=2) / (R * model.W_CKL.sum(dim=1).t().unsqueeze(-1).numpy())
         # config_times L x C x 2
-        config_times = avg_peak_times.unsqueeze(0) + model.config_peak_offsets.numpy()
+        config_times = avg_peak_times.unsqueeze(0) + model.config_peak_offsets
+        config_times = config_times - peak_midpoint.unsqueeze(0)
+        config_times = constraint(config_times, 1, 10) * half_warping_window.unsqueeze(0) + peak_midpoint
         config_times = config_times.reshape(model.n_configs, 2, -1).permute(2, 0, 1)
         plt.figure(figsize=(model.n_areas * 10, int(model.n_factors / model.n_areas) * 5))
         c = 0
@@ -590,7 +597,8 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(configPeaks_dir, f'configPeakTimes_{epoch}.png'))
         plt.close()
 
-        config_offsets = model.config_peak_offsets.t().numpy()
+        config_offsets = model.config_peak_offsets.t()
+        config_offsets = constraint(config_offsets, 1, 10) * half_warping_window.unsqueeze(-1)
         plt.figure(figsize=(model.n_areas * 15, int(model.n_factors / model.n_areas) * 5))
         c = 0
         xlimit = np.abs(config_offsets).max()
@@ -670,7 +678,8 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plot_selected_pairs(config_offsets, signal_corr, unique_regions, factors_per_area, highest_pairs_peak2, num, os.path.join(configCorrScatter_dir, f'config_corrs_scatter_{epoch}_{num} Highest peak2 Correlations.png'), f'{num} Highest peak2 Correlations')
         plot_selected_pairs(config_offsets, signal_corr, unique_regions, factors_per_area, highest_pairs_peak12, num, os.path.join(configCorrScatter_dir, f'config_corrs_scatter_{epoch}_{num} Highest cross Correlations.png'), f'{num} Highest cross Correlations')
 
-        peak_offsets = (model.trial_peak_offset_times() + model.config_peak_offsets.unsqueeze(0)).permute(2, 0, 1).reshape(2 * model.n_factors, -1).numpy()
+        peak_offsets = (trial_peak_offsets + model.config_peak_offsets.unsqueeze(0)).permute(2, 0, 1).reshape(2 * model.n_factors, -1)
+        peak_offsets = constraint(peak_offsets, 1, 10) * half_warping_window.unsqueeze(-1)
         plt.figure(figsize=(model.n_areas * 15, int(model.n_factors / model.n_areas) * 5))
         c = 0
         xlimit = np.abs(peak_offsets).max()
@@ -691,7 +700,7 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(peakOffsets_dir, f'peakOffsets_{epoch}.png'))
         plt.close()
 
-        proposal_means = model.trial_peak_offset_times().permute(2, 1, 0)
+        proposal_means = trial_peak_offsets.permute(2, 1, 0)
         config_offsets = model.config_peak_offsets.t().unsqueeze(-1).expand_as(proposal_means)
         plt.figure(figsize=(model.n_areas * 15, int(model.n_factors / model.n_areas) * 5))
         c = 0
@@ -1042,7 +1051,7 @@ def compute_uncertainty(model, processed_inputs, output_dir, epoch):
             se_dict = pickle.load(f)
         return se_dict
 
-    likelihood_term = model.log_likelihood(processed_inputs, E_step=True)
+    _, likelihood_term = model.forward(processed_inputs, ELBO=False, marginal=True, E_step=False, train=True)
     param_names = ['alpha', 'beta', 'config_peak_offsets', 'trial_peak_offset_covar_ltri_diag',
                    'trial_peak_offset_covar_ltri_offdiag', 'trial_peak_offset_proposal_means']
     model_named_parameters = dict(model.named_parameters())

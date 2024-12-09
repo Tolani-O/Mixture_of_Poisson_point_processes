@@ -441,7 +441,7 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(warp_time_dir, f'warped_times_{epoch}.png'))
         plt.close()
 
-        proposal_means = model.trial_peak_offset_times().permute(2, 0, 1).reshape(2*model.n_factors, -1).numpy()
+        trial_peak_offsets = model.trial_peak_offset_times(cov_ltri=model.sigma_ltri)
         peak_midpoint = ((left_landmarks + right_landmarks) / 2).squeeze()
         half_warping_window = model.half_warping_window
         constraint = model.constraint_defining_functions[model.constraint]

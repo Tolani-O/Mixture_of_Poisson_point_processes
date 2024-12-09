@@ -130,6 +130,7 @@ class LikelihoodELBOModel(nn.Module):
         self.log_sum_exp_U_tensor = None  # C x K x L
         self.prec_ltri = None
         self.sigma_ltri = None
+        self.iid_noise = None
 
         # Parameters
         self.beta = None  # AL x T
@@ -385,15 +386,6 @@ class LikelihoodELBOModel(nn.Module):
         self.prec_ltri = torch.linalg.cholesky(torch.linalg.inv(ltri_matrix @ ltri_matrix.t()))
 
 
-    def trial_peak_offset_times(self):
-        centers = self.trial_peak_offset_proposal_means.reshape(self.n_trials * self.n_configs, -1).mean(dim=0).unsqueeze(0).unsqueeze(1).expand(self.n_trials, self.n_configs, -1)
-        covariance = torch.cov(self.trial_peak_offset_proposal_means.reshape(self.n_trials * self.n_configs, -1).t())
-        inv_covariance = torch.linalg.inv(covariance)
-        Lower_chol_T = torch.linalg.cholesky(inv_covariance).t()
-        trial_offsets = torch.einsum('lk,kj,rcj->rcl', self.sigma_ltri, Lower_chol_T, (self.trial_peak_offset_proposal_means - centers)) + centers
-        return trial_offsets
-
-
     def unnormalized_log_factors(self):
         # return self.beta - self.beta[:, 0].unsqueeze(1).expand_as(self.beta)
         return torch.cat([torch.zeros(self.n_factors, 1, device=self.device), self.beta], dim=1)
@@ -433,18 +425,30 @@ class LikelihoodELBOModel(nn.Module):
         self.W_CKL = W_CKAL.reshape(*W_CKL.shape[:2], -1)
 
 
+    def trial_peak_offset_times(self, cov_ltri=None):
+        if cov_ltri is None:
+            trial_offsets = self.trial_peak_offset_proposal_means
+        else:
+            centers = self.trial_peak_offset_proposal_means.reshape(self.n_trials * self.n_configs, -1).mean(dim=0).unsqueeze(0).unsqueeze(1).expand(self.n_trials, self.n_configs, -1)
+            covariance = torch.cov(self.trial_peak_offset_proposal_means.reshape(self.n_trials * self.n_configs, -1).t())
+            inv_covariance = torch.linalg.inv(covariance)
+            Lower_chol_T = torch.linalg.cholesky(inv_covariance).t()
+            trial_offsets = torch.einsum('lk,kj,rcj->rcl', cov_ltri, Lower_chol_T, (self.trial_peak_offset_proposal_means - centers)) + centers
+        return trial_offsets
+
+
     def generate_trial_peak_offset_samples(self):
+        mean = self.trial_peak_offset_times(self.sigma_ltri).unsqueeze(0)
         if self.is_eval:
             # trial_peak_offset_proposal_samples 1 x R x C x 2AL
-            self.trial_peak_offset_proposal_samples = self.trial_peak_offset_times().unsqueeze(0)
+            self.trial_peak_offset_proposal_samples = mean
         else:
-            gaussian_sample = torch.concat([torch.randn(self.n_trial_samples, self.n_trials, self.n_configs, 2 * self.n_factors,
+            self.iid_noise = torch.concat([torch.randn(self.n_trial_samples, self.n_trials, self.n_configs, 2 * self.n_factors,
                                                         device=self.device),
                                             torch.zeros(1, self.n_trials, self.n_configs, 2 * self.n_factors,
                                                         device=self.device)], dim=0)
             # trial_peak_offset_proposal_samples 1+N x R x C x 2AL
-            self.trial_peak_offset_proposal_samples = (self.trial_peak_offset_times().unsqueeze(0) +
-                                                       gaussian_sample * self.trial_peak_offset_proposal_sds.unsqueeze(0))
+            self.trial_peak_offset_proposal_samples = (mean + self.iid_noise * self.trial_peak_offset_proposal_sds.unsqueeze(0))
 
 
     def warp_all_latent_factors_for_all_trials(self):
@@ -530,6 +534,7 @@ class LikelihoodELBOModel(nn.Module):
         warped_factors = all_warped_factors[:, :, :, :end, :]
         posterior_warped_factors = all_warped_factors[:, :, :, -1:, :]
         self.trial_peak_offset_proposal_samples = self.trial_peak_offset_proposal_samples[:end]
+        self.iid_noise = self.iid_noise[:end]
         alpha = F.softplus(self.alpha)
         Y_sum_rt = processed_inputs['Y_sum_rt']
         Y_sum_rt_plus_alpha = Y_sum_rt.unsqueeze(2) + alpha.unsqueeze(0).unsqueeze(1)  # C x K x L
@@ -641,9 +646,10 @@ class LikelihoodELBOModel(nn.Module):
         log_gamma_alpha = torch.lgamma(alpha).unsqueeze(0).unsqueeze(1).unsqueeze(2).unsqueeze(4)  # 1 x 1 x 1 x L x 1
         # trial_offsets # N x R x C x 2AL
         # neg_log_P # C x 1 x R x 1 x N
-        neg_log_P = self.Sigma_log_likelihood(self.trial_peak_offset_proposal_samples, self.prec_ltri).unsqueeze(1).unsqueeze(3)
+        trial_peak_offsets = self.trial_peak_offset_times(self.sigma_ltri.detach()).unsqueeze(0) + self.iid_noise * self.trial_peak_offset_proposal_sds.unsqueeze(0)
+        neg_log_P = self.Sigma_log_likelihood(trial_peak_offsets, self.prec_ltri).unsqueeze(1).unsqueeze(3)
         # neg_log_Q # C x 1 x R x 1 x N
-        neg_log_Q = self.sd_log_likelihood(self.trial_peak_offset_proposal_samples).unsqueeze(1).unsqueeze(3)
+        neg_log_Q = self.sd_log_likelihood(trial_peak_offsets).unsqueeze(1).unsqueeze(3)
         elbo = (Y_times_warped_beta - Y_sum_t_times_logsumexp_warped_beta + (1 / R) * (alpha_times_log_theta_plus_b_CKL -
                     log_gamma_alpha) - (1 / K) * (neg_log_P - neg_log_Q))
         elbo = torch.sum(W_tensor * elbo)
@@ -659,13 +665,15 @@ class LikelihoodELBOModel(nn.Module):
 
 
     def sd_log_likelihood(self, trial_peak_offsets):
-        trial_peak_offsets = (trial_peak_offsets - self.trial_peak_offset_times().unsqueeze(0))**2
-        n_dims = self.trial_peak_offset_proposal_sds.shape[-1]
-        det_Sigma = torch.prod(self.trial_peak_offset_proposal_sds**2, dim=-1)
-        inv_Sigma = self.trial_peak_offset_proposal_sds**(-2)
-        prod_term = torch.sum(trial_peak_offsets * inv_Sigma.unsqueeze(0), dim=-1).permute(2, 1, 0) # sum over l
-        entropy_term = 0.5 * (n_dims * torch.log(torch.tensor(2 * torch.pi)) + torch.log(det_Sigma.t().unsqueeze(-1)) + prod_term)
-        return entropy_term  # C x R x N
+        mean = self.trial_peak_offset_times(self.sigma_ltri).unsqueeze(0).detach()
+        sd = self.trial_peak_offset_proposal_sds.unsqueeze(0).detach()
+        trial_peak_offsets_centered = (trial_peak_offsets - mean)**2
+        n_dims = sd.shape[-1]
+        det_Sigma = torch.prod(sd**2, dim=-1)
+        inv_Sigma = sd**(-2)
+        prod_term = torch.sum(trial_peak_offsets_centered * inv_Sigma, dim=-1) # sum over l
+        entropy_term = 0.5 * (n_dims * torch.log(torch.tensor(2 * torch.pi)) + torch.log(det_Sigma) + prod_term)
+        return entropy_term.permute(2, 1, 0)  # C x R x N
 
 
     def compute_penalty_terms(self, tau_beta, tau_config, tau_sigma, tau_prec, tau_sd):

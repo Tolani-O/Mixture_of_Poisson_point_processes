@@ -82,8 +82,12 @@ def preprocess_input_data(Y, neuron_factor_access, dt, mask_threshold=0):
     empty_trials = torch.where(Y_sum_rt <= mask_threshold)
     neuron_factor_access[empty_trials[0], empty_trials[1]] = 0
     time = torch.arange(Y.shape[1], device=Y.device) * dt
+    C, K = Y_sum_rt.shape
+    Y_permute = Y.permute(3, 0, 2, 1).reshape(C, K, -1)  # C x K x (R*T)
+    Y_sparse = [Y_permute[i].to_sparse() for i in range(C)]
     processed_inputs['time'] = time
     processed_inputs['Y'] = Y
+    processed_inputs['Y_sparse'] = Y_sparse
     processed_inputs['Y_sum_t'] = Y_sum_t
     processed_inputs['Y_sum_rt'] = Y_sum_rt
     processed_inputs['neuron_factor_access'] = neuron_factor_access

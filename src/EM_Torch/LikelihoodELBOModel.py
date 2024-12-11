@@ -555,6 +555,7 @@ class LikelihoodELBOModel(nn.Module):
         # processed_inputs['warped_factors'] = warped_factors
         # processed_inputs['posterior_warped_factors'] = posterior_warped_factors
         Y = processed_inputs['Y']
+        Y_sparse = processed_inputs['Y_sparse']
         Y_sum_rt = processed_inputs['Y_sum_rt']
         Y_sum_rt_plus_alpha = processed_inputs['Y_sum_rt_plus_alpha']
         alpha = processed_inputs['alpha']
@@ -564,6 +565,7 @@ class LikelihoodELBOModel(nn.Module):
         # factors # L x T
         # posterior_warped_factors # C x R x L x 1 x T
         # neuron_factor_access  # C x K x L
+        # Y_sparse # C x K x (R*T)
         # Y # K x T x R x C
         K, T, R, C = Y.shape
 
@@ -572,10 +574,13 @@ class LikelihoodELBOModel(nn.Module):
 
         ## E step posterior computation
         # U tensor terms
-        # log_posterior_warped_factors_minus_logsumexp_posterior_warped_factors # C x R x L x 1 x T
-        log_posterior_warped_factors_minus_logsum_t_posterior_warped_factors = torch.log(posterior_warped_factors) - torch.log(torch.sum(posterior_warped_factors, dim=-1)).unsqueeze(-1)
-        # Y_times_posterior_warped_beta  # C x K x L
-        Y_times_posterior_warped = torch.einsum('ktrc,crlt->ckl', Y, log_posterior_warped_factors_minus_logsum_t_posterior_warped_factors.squeeze())
+        # log_posterior_warped_factors_minus_logsumexp_posterior_warped_factors # C x R x L x T
+        log_posterior_warped_factors_minus_logsum_t_posterior_warped_factors = (torch.log(posterior_warped_factors) - torch.log(torch.sum(posterior_warped_factors, dim=-1)).unsqueeze(-1)).squeeze()
+        # log_posterior_warped_factors_minus_logsumexp_posterior_warped_factors # C x L x (R*T)
+        log_posterior_warped_factors_minus_logsum_t_posterior_warped_factors = log_posterior_warped_factors_minus_logsum_t_posterior_warped_factors.permute(0, 2, 1, 3).reshape(C, self.n_factors, -1)
+        # Y_times_posterior_warped # C x K x L
+        Y_times_posterior_warped = torch.stack([torch.sparse.mm(Y_sparse[i], log_posterior_warped_factors_minus_logsum_t_posterior_warped_factors[i].t()) for i in range(C)])
+        # Y_times_posterior_warped = torch.einsum('ktrc,crlt->ckl', Y, log_posterior_warped_factors_minus_logsum_t_posterior_warped_factors)
         # log_y_factorial_sum_rt # C x K x 1
         log_y_factorial_sum_rt = torch.sum(torch.lgamma(Y + 1), dim=(1,2)).t().unsqueeze(2)
         grid_y, grid_x = torch.meshgrid(torch.arange(C), torch.arange(K), indexing='ij')

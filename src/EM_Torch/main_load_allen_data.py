@@ -16,6 +16,7 @@ outputs_folder = 'outputs'
 
 args = get_parser().parse_args()
 args.data_seed = np.random.randint(0, 2 ** 32 - 1)
+all_regions = ['VISp', 'VISl', 'VISal', 'VISam', 'VISpm', 'VISrl', 'LGd']
 
 # args.init = 'mom'
 the_rest = 'zeros'
@@ -29,6 +30,7 @@ args.tau_config = 500
 args.tau_sigma = 1
 args.tau_prec = 1
 args.tau_sd = 10000
+# args.A = 3
 # args.L = 5
 # args.constraint = 'tanh'
 args.n_trial_samples = 7  # Number of samples to generate for each trial
@@ -37,11 +39,8 @@ dt = 0.002
 peak1_right_landmarks_start = 0.1
 # args.landmark_step = 14
 args.notes = f'maskLimit{args.mask_neuron_threshold}'
-
-regions = None
+regions = all_regions[:args.A]
 conditions = None
-# regions = ['VISp', 'VISl', 'VISal']
-# conditions = [246, 251]
 
 if args.eval_interval > args.log_interval:
     args.log_interval = args.eval_interval

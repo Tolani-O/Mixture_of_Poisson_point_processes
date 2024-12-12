@@ -41,7 +41,7 @@ def get_parser():
     parser.add_argument('--tau_beta', type=float, default=0.5, help='Value for tau_beta')
     parser.add_argument('--num_epochs', type=int, default=-1, help='Number of training epochs. '
                                                                    'Default is -1 meaning it will run the hessian computation')
-    parser.add_argument('--constraint', type=str, default='tanh', help='How to constrain the peak times. Options are: softplus, RELU, ELU, tanh')
+    parser.add_argument('--constraint', type=str, default='RELU', help='How to constrain the peak times. Options are: softplus, RELU, ELU, tanh')
     parser.add_argument('--scheduler_patience', type=int, default=1e5, help='Number of epochs before scheduler step')
     parser.add_argument('--scheduler_factor', type=int, default=0.9, help='Scheduler reduction factor')
     parser.add_argument('--scheduler_threshold', type=int, default=1e-10, help='Threshold to accept step improvement')
@@ -446,16 +446,9 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.close()
 
         trial_peak_offsets = model.trial_peak_offset_times(cov_ltri=model.sigma_ltri)
-        peak_midpoint = ((left_landmarks + right_landmarks) / 2).squeeze()
-        half_warping_window = model.half_warping_window
-        constraint = model.constraint_defining_functions[model.constraint]
-        proposal_means = trial_peak_offsets.permute(2, 0, 1).reshape(2*model.n_factors, -1)
-        proposal_means = constraint(proposal_means, 1, 10) * half_warping_window.unsqueeze(-1)
-        # covariance = np.cov(proposal_means)
-        # inv_covariance = np.linalg.inv(covariance)
-        # Lower_chol = np.linalg.cholesky(inv_covariance)
-        # centers = proposal_means.mean(axis=1, keepdims=True)
-        # proposal_means = model.sigma_ltri @ Lower_chol.T @ (proposal_means - centers) + centers
+        right_constraint = model.time[model.right_landmarks_indx - 1].unsqueeze(0).unsqueeze(1).unsqueeze(2) - avg_peak_times
+        proposal_means = model.squash_offsets(trial_peak_offsets.unsqueeze(0), right_constraint).squeeze()
+        proposal_means = proposal_means.permute(2, 0, 1).reshape(2*model.n_factors, -1)
         plt.figure(figsize=(model.n_areas * 15, int(model.n_factors / model.n_areas) * 5))
         c = 0
         xlimit = np.abs(proposal_means).max()
@@ -563,9 +556,8 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
             # scaled_data L x C x T
             scaled_data = data.sum(dim=2) / (R * model.W_CKL.sum(dim=1).t().unsqueeze(-1).numpy())
         # config_times L x C x 2
-        config_times = avg_peak_times.unsqueeze(0) + model.config_peak_offsets
-        config_times = config_times - peak_midpoint.unsqueeze(0)
-        config_times = constraint(config_times, 1, 10) * half_warping_window.unsqueeze(0) + peak_midpoint
+        config_offsets = model.squash_offsets(model.config_peak_offsets.unsqueeze(0).unsqueeze(1), right_constraint).squeeze()
+        config_times = avg_peak_times.unsqueeze(0) + config_offsets
         config_times = config_times.reshape(model.n_configs, 2, -1).permute(2, 0, 1)
         plt.figure(figsize=(model.n_areas * 10, int(model.n_factors / model.n_areas) * 5))
         c = 0
@@ -601,8 +593,7 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(configPeaks_dir, f'configPeakTimes_{epoch}.png'))
         plt.close()
 
-        config_offsets = model.config_peak_offsets.t()
-        config_offsets = constraint(config_offsets, 1, 10) * half_warping_window.unsqueeze(-1)
+        config_offsets = config_offsets.t()
         plt.figure(figsize=(model.n_areas * 15, int(model.n_factors / model.n_areas) * 5))
         c = 0
         xlimit = np.abs(config_offsets).max()
@@ -623,7 +614,7 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.savefig(os.path.join(configOffsets_dir, f'configOffsets_{epoch}.png'))
         plt.close()
 
-        signal_corr = np.corrcoef(config_offsets)
+        signal_corr = np.nan_to_num(np.corrcoef(config_offsets))
         plt.figure(figsize=(10, 10))
         ax = sns.heatmap(signal_corr, annot=False, cmap="seismic", center=0, vmin=-1, vmax=1,
                          xticklabels=factors_per_area, yticklabels=factors_per_area)
@@ -682,8 +673,8 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plot_selected_pairs(config_offsets, signal_corr, unique_regions, factors_per_area, highest_pairs_peak2, num, os.path.join(configCorrScatter_dir, f'config_corrs_scatter_{epoch}_{num} Highest peak2 Correlations.png'), f'{num} Highest peak2 Correlations')
         plot_selected_pairs(config_offsets, signal_corr, unique_regions, factors_per_area, highest_pairs_peak12, num, os.path.join(configCorrScatter_dir, f'config_corrs_scatter_{epoch}_{num} Highest cross Correlations.png'), f'{num} Highest cross Correlations')
 
-        peak_offsets = (trial_peak_offsets + model.config_peak_offsets.unsqueeze(0)).permute(2, 0, 1).reshape(2 * model.n_factors, -1)
-        peak_offsets = constraint(peak_offsets, 1, 10) * half_warping_window.unsqueeze(-1)
+        peak_offsets = trial_peak_offsets + config_offsets.t().unsqueeze(0)
+        peak_offsets = peak_offsets.permute(2, 0, 1).reshape(2 * model.n_factors, -1)
         plt.figure(figsize=(model.n_areas * 15, int(model.n_factors / model.n_areas) * 5))
         c = 0
         xlimit = np.abs(peak_offsets).max()
@@ -705,7 +696,7 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
         plt.close()
 
         proposal_means = trial_peak_offsets.permute(2, 1, 0)
-        config_offsets = model.config_peak_offsets.t().unsqueeze(-1).expand_as(proposal_means)
+        config_offsets = config_offsets.unsqueeze(-1).expand_as(proposal_means)
         plt.figure(figsize=(model.n_areas * 15, int(model.n_factors / model.n_areas) * 5))
         c = 0
         for l in L:

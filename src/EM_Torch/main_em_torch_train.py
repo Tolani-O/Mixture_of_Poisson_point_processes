@@ -19,9 +19,9 @@ args.data_seed = np.random.randint(0, 2 ** 32 - 1)
 
 args.n_trials = 15  # R
 args.n_configs = 10  # C
-args.K = 100  # K
+args.K = 10  # K
 args.A = 3  # A
-args.L = 5  # L
+args.L = 3  # L
 args.n_trial_samples = 10  # Number of samples to generate for each trial
 
 # args.n_trials = 5
@@ -84,10 +84,10 @@ processed_inputs_train = preprocess_input_data(*to_cuda(load_tensors((Y_train, f
 
 Y_train, factor_access_train, timeCourse = processed_inputs_train['Y'].cpu(), processed_inputs_train['neuron_factor_access'].cpu(), processed_inputs_train['time'].cpu()
 print(f'Y_train shape: {Y_train.shape}, factor_access_train shape: {factor_access_train.shape}')
-peak1_left_landmarks = timeCourse[[data.left_landmark1] * args.L]
-peak1_right_landmarks = timeCourse[[data.right_landmark1] * args.L]
-peak2_left_landmarks = timeCourse[[data.left_landmark2] * args.L]
-peak2_right_landmarks = timeCourse[[data.right_landmark2] * args.L]
+peak1_left_landmarks = timeCourse[[data.left_landmark1] * args.A * args.L]
+peak1_right_landmarks = timeCourse[[data.right_landmark1] * args.A * args.L]
+peak2_left_landmarks = timeCourse[[data.left_landmark2] * args.A * args.L]
+peak2_right_landmarks = timeCourse[[data.right_landmark2] * args.A * args.L]
 unique_regions = [f'region{i}' for i in range(args.A)]
 
 # initialize the model with ground truth params

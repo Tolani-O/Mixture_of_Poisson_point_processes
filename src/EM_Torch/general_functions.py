@@ -400,8 +400,8 @@ def plot_outputs(model, unique_regions, output_dir, folder, epoch, se_dict=None,
                 plt.plot(model.time, factor_ucl[l, :], linestyle='--', color='black', alpha=0.07)
                 plt.plot(model.time, factor_lcl[l, :], linestyle='--', color='black', alpha=0.07)
                 plt.legend()
-            plt.xlabel('Intensity')
-            plt.ylabel('Trial time course (ms)')
+            plt.ylabel('Intensity')
+            plt.xlabel('Trial time course (ms)')
             plt.title(f'Factor {(l%factors_per_area)+1}, '
                       f'Area {unique_regions[l//factors_per_area]}, '
                       f'Membership: {pi[l]:.2f}, '

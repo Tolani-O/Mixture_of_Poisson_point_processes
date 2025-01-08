@@ -2,8 +2,11 @@ import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 from allensdk.brain_observatory.ecephys.ecephys_project_cache import EcephysProjectCache
 import pickle
+from scipy.ndimage import gaussian_filter1d
+sns.set()
 
 
 class EcephysAnalyzer:
@@ -198,9 +201,9 @@ class EcephysAnalyzer:
             data = data.sel(unit_id=unit_ids_for_region)
         return data
 
-    def initialize(self):
+    def initialize(self, session_to_analyze=None):
         self.collate_sessions()
-        self.get_best_session()
+        self.get_best_session(session_to_analyze)
         return self
 
     def plot_presentations_times(self, save_dir):
@@ -262,36 +265,60 @@ class EcephysAnalyzer:
         plt.savefig(os.path.join(save_dir, 'spike_times_by_regions.png'))
         plt.close()
 
-    def plot_spike_counts(self, save_dir, unit_ids=None, presentation_ids=None, regions=None, conditions=None):
 
-        save_dir = os.path.join(self.output_dir, save_dir)
+    def plot_spike_counts(self, save_dir, unit_ids=None, presentation_ids=None, regions=None, conditions=None, by=['unit'], smoothing_sigma=None):
+
+        save_dir = os.path.join(self.output_dir, save_dir, f'{"_".join(by)}_smooth_{smoothing_sigma}')
         os.makedirs(save_dir, exist_ok=True)
 
+        column_dict = {'unit': 'unit_id',
+                       'region': 'ecephys_structure_acronym',
+                       'condition': 'stimulus_condition_id',
+                       'trial': 'stimulus_presentation_id'}
+
+        selected_column = [column_dict[col] for col in by]
+        selected_column.append('time_relative_to_stimulus_onset')
         data = self.filter_spike_counts(unit_ids, presentation_ids, regions, conditions)
+        data = (data.to_dataframe(name='spike_counts')
+                .join(self.presentations[['stimulus_condition_id']], on='stimulus_presentation_id')
+                .join(self.unit_ids_and_areas.set_index('unit_id')[['ecephys_structure_acronym']], on='unit_id')
+                .reset_index()
+                .groupby(selected_column)[['spike_counts']]
+                .sum()
+                .reset_index('time_relative_to_stimulus_onset'))
+        grouped = data.loc[data.groupby(selected_column[:-1]).sum().sort_values(by='spike_counts', ascending=False).index.values].groupby(selected_column[:-1])
 
-        # sum over the stimulus_presentation_id dimension anc convert to dataframe
-        data = (data.sum(dim='stimulus_presentation_id').to_dataframe(name='spike_counts')
-                .pivot_table(index='time_relative_to_stimulus_onset', columns='unit_id', values='spike_counts'))
-        data = data.loc[:, data.sum().sort_values(ascending=False).index.values]
-
-        # Iterate over sets of {per_plot} columns (units) and save to output folder
-        c = data.shape[1]
+        # Prepare subplots in groups of 9
         per_plot = 9
-        for i in range(0, c, per_plot):
-            # Select the next set of 10 columns
-            a_subset = data.iloc[:, i:i+per_plot]
-            # Create a figure with 10 subplots
-            fig, axs = plt.subplots(nrows=per_plot, sharex=True, figsize=(7, 12))
-            # Plot each column of a_subset on a separate subplot
-            for j, col in enumerate(a_subset.columns):
-                axs[j].plot(a_subset.index, a_subset[col])
-                axs[j].set_ylabel(self.unit_ids_and_areas[self.unit_ids_and_areas["unit_id"]==col]["unit_id_int"].values[0])
+        group_keys = list(grouped.groups.keys())  # List of group keys
+        # Parameters for smoothing
+        for i in range(0, len(group_keys), per_plot):
+            # Select the next set of groups
+            group_subset = group_keys[i:i + per_plot]
+
+            # Create subplots
+            fig, axs = plt.subplots(nrows=len(group_subset), sharex=True, figsize=(7, 12))
+            if len(group_subset) == 1:
+                axs = [axs]  # Ensure `axs` is always iterable
+
+            for j, key in enumerate(group_subset):
+                # Get group data
+                group_data = grouped.get_group(key)
+                # Smooth spike_counts using a Gaussian kernel
+                if smoothing_sigma is not None:
+                    smoothed_spike_counts = gaussian_filter1d(group_data['spike_counts'].values, sigma=smoothing_sigma)
+                else:
+                    smoothed_spike_counts = group_data['spike_counts'].values
+                # Plot the data
+                axs[j].plot(group_data['time_relative_to_stimulus_onset'], smoothed_spike_counts)
+                axs[j].set_ylabel(f'{key[0]},\n{key[1]}')
                 axs[j].yaxis.set_label_position("right")
-            # Add labels to the plot
-            fig.suptitle(f'Columns {i + 1}-{i + per_plot} of {c}')
+
+            # Add labels and save the plot
+            fig.suptitle(f'{"_".join(by)}\n{i + 1}-{i + len(group_subset)}')
             plt.xlabel('Time relative to stimulus onset')
-            # Save the plot to output_dir
-            fig.savefig(os.path.join(save_dir, f'units_{i + 1}-{i + per_plot}.png'))
+            plt.tight_layout()
+            fig.savefig(os.path.join(save_dir, f'{"_".join(by)}_{i + 1}-{i + len(group_subset)}.png'))
             plt.close(fig)
 
 

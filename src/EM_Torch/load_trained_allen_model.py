@@ -17,7 +17,7 @@ outputs_folder = 'outputs'
 args = get_parser().parse_args()
 parser_key = ['ID', 'A', 'L', 'tauBeta', 'tauConfig', 'tauSigma', 'tauPrec', 'tauSD', 'posterior', 'iters', 'lr', 'constraint', 'maskLimit']
 # args.folder_name = ''
-# args.load_run = 0
+args.load_run = 1
 # args.num_epochs = 0
 parser_dict = parse_folder_name(args.folder_name, parser_key, outputs_folder, args.load_run)
 
@@ -43,6 +43,7 @@ peak2_left_landmarks = torch.tensor(parser_dict['peak2_left_landmarks'])
 peak2_right_landmarks = torch.tensor(parser_dict['peak2_right_landmarks'])
 dt = parser_dict['dt']
 adjust_landmarks = False
+mouse_id = 798911424
 
 if args.eval_interval > args.log_interval:
     args.log_interval = args.eval_interval
@@ -63,7 +64,7 @@ else:
 # Training data
 region_ct = args.A
 folder_path = os.path.join(os.getcwd(), outputs_folder, 'metadata')
-folder_name = f'sample_data_{region_ct}-regions_{args.L}-factors_{dt}_dt'
+folder_name = f'ID-{mouse_id}_{args.A}-areas_{args.L}-factors_{dt}_dt'
 Y_train, bin_time, factor_access_train, unique_regions = load_sample(folder_path, folder_name)
 if Y_train is None:
     raise ValueError("No training data found")
@@ -87,7 +88,7 @@ model, optimizer_state, scheduler_state, args.load_epoch = load_model_checkpoint
 model.update()
 if args.num_epochs < 0:
     model.cuda(move_to_cuda=args.cuda)
-    se_dict = compute_uncertainty(model, processed_inputs_train, output_dir, args.load_epoch)
+    se_dict = None # compute_uncertainty(model, processed_inputs_train, output_dir, args.load_epoch)
     model.cpu()
     plot_data_dispersion(Y_train, factor_access_train, args.A, folder_path, folder_name, unique_regions, model.W_CKL)
     plot_outputs(model, unique_regions, output_dir, 'Train', args.load_epoch, se_dict, Y_train, factor_access_train)

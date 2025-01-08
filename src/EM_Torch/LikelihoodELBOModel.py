@@ -435,6 +435,7 @@ class LikelihoodELBOModel(nn.Module):
         mean = self.trial_peak_offset_times(self.sigma_ltri).unsqueeze(0)
         if self.is_eval:
             # trial_peak_offset_proposal_samples 1 x R x C x 2AL
+            self.iid_noise = torch.zeros(1, self.n_trials, self.n_configs, 2 * self.n_factors, device=self.device)
             self.trial_peak_offset_proposal_samples = mean
         else:
             self.iid_noise = torch.concat([torch.randn(self.n_trial_samples, self.n_trials, self.n_configs, 2 * self.n_factors,

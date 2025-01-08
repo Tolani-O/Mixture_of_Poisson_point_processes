@@ -41,6 +41,8 @@ peak1_right_landmarks_start = 0.1
 args.notes = f'maskLimit{args.mask_neuron_threshold}'
 regions = all_regions[:args.A]
 conditions = None
+mouse_id = 798911424
+smoothing_sigma = 4
 
 if args.eval_interval > args.log_interval:
     args.log_interval = args.eval_interval
@@ -61,14 +63,14 @@ else:
 # Training data
 region_ct = len(regions) if regions is not None else 7
 folder_path = os.path.join(os.getcwd(), outputs_folder, 'metadata')
-folder_name = f'sample_data_{region_ct}-regions_{args.L}-factors_{dt}_dt'
+folder_name = f'ID-{mouse_id}_{args.A}-areas_{args.L}-factors_{dt}_dt'
 Y_train, bin_time, factor_access_train, unique_regions = load_sample(folder_path, folder_name)
 if Y_train is None:
     data = EcephysAnalyzer(structure_list=regions, spike_train_start_offset=0, spike_train_end=0.35, dt=dt)
-    data.initialize()
+    data.initialize(mouse_id)
     data.plot_presentations_times(folder_name)
-    data.plot_spike_times(folder_name)
-    data.plot_spike_counts(folder_name)
+    # data.plot_spike_times(folder_name)
+    data.plot_spike_counts(folder_name, by=['region', 'condition'], smoothing_sigma=smoothing_sigma)
     Y_train, bin_time, factor_access_train, unique_regions = data.sample_data(conditions=conditions, num_factors=args.L)
     save_sample(Y_train, bin_time, factor_access_train, unique_regions, folder_path, folder_name)
 processed_inputs_train = preprocess_input_data(*to_cuda(load_tensors((Y_train, factor_access_train, dt)),
